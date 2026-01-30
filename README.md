@@ -4,15 +4,23 @@ A self-contained Python application for searching through large technical docume
 
 **Zero dependencies** - Uses only Python 3.9+ standard library.
 
-## ✨ What's New in v1.3.0
+## ✨ What's New in v1.5.0
 
-- 🌐 **Beautiful Web UI** - Launch a local search interface with `serve` command
-- 🎨 **Colorful CLI** - ANSI-colored output with highlighted search terms
-- ⚡ **Performance Metrics** - See "Found X results in Y ms" for every search
-- 🌙 **Pure HTML/CSS** - No JavaScript, fully server-side rendered
+- 💡 **"Did you mean..."** - Spell check suggestions for typos using Levenshtein distance
+- ⌨️ **Autocomplete** - Type-ahead suggestions with `autocomplete` command
+- 🏷️ **Faceted Search** - Filter results by document type or section
+- 🔗 **Synonym Expansion** - Matches related terms (function→method, list→array, etc.)
+- 🌿 **Porter Stemming** - Better recall by matching word variants (running→run)
+
+### Previous Updates (v1.4.0)
+- 🌿 **Porter Stemming** - Match word variants automatically
+- 🌐 **Beautiful Web UI** - Launch with `serve` command
+- 🎨 **Colorful CLI** - ANSI-colored output with highlighted terms
+- ⚡ **Performance Metrics** - "Found X results in Y ms" for every search
 
 ## Features
 
+### Core
 - 🕷️ **Web Crawler** - BFS crawler with politeness delays and robots.txt compliance
 - ⚡ **Parallel Crawling** - Optional multi-threaded crawling with `--workers N`
 - 🔐 **HTTP Basic Auth** - Support for password-protected documentation
@@ -23,6 +31,15 @@ A self-contained Python application for searching through large technical docume
 - 📍 **Smart Snippets** - Shows most relevant section with highest term density
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
+
+### Enhanced Search (v1.5.0)
+- 💡 **Spell Correction** - "Did you mean..." suggestions for misspelled queries
+- ⌨️ **Autocomplete** - Fast prefix-based term suggestions
+- 🏷️ **Faceted Search** - Filter by document type (tutorial, reference, API, etc.)
+- 🔗 **Query Expansion** - Automatic synonym matching for better recall
+- 🌿 **Porter Stemming** - Word variant matching (searches→search, running→run)
+
+### Interface
 - 🖥️ **CLI Interface** - Beautiful command-line interface with interactive mode
 - 🌐 **Web UI** - Beautiful search interface (pure HTML/CSS, no JavaScript)
 
@@ -130,9 +147,10 @@ Then visit http://127.0.0.1:8080 in your browser:
 |---------|-------------|
 | `crawl <url>` | Crawl a documentation site |
 | `index <site>` | Build search index from crawled pages |
-| `search <site> <query>` | Search the index |
+| `search <site> <query>` | Search the index (with spell check & synonyms) |
+| `autocomplete <site> <prefix>` | **🆕** Get type-ahead suggestions |
 | `interactive <site>` | Interactive search mode |
-| `serve <site>` | **🆕** Start web UI server |
+| `serve <site>` | Start web UI server |
 | `stats <site>` | Show site statistics |
 | `list` | List all crawled sites |
 
@@ -171,6 +189,19 @@ Then visit http://127.0.0.1:8080 in your browser:
 | `--json`, `-j` | Output as JSON (includes timing) | false |
 | `--no-color` | Disable colored output | false |
 | `--quiet`, `-q` | Suppress loading messages | false |
+| `--basic` | Disable enhanced features | false |
+| `--no-synonyms` | Disable synonym expansion | false |
+| `--no-facets` | Disable faceted search | false |
+| `--show-facets` | Show facet counts in output | false |
+| `--filter-type TYPE` | Filter by document type | - |
+| `--filter-section SECTION` | Filter by section | - |
+
+### `autocomplete` 🆕
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--limit`, `-l` | Maximum suggestions | 10 |
+| `--json`, `-j` | Output as JSON | false |
 
 ### `serve` 🆕
 
