@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 from . import __version__
 from .crawler import Crawler
 from .indexer import BM25Index
-from .searcher import SearchEngine, format_results, parse_query
+from .searcher import SearchEngine, EnhancedSearchEngine, format_results, parse_query
 from .utils import (
     site_hash, format_size, format_duration,
     Colors, colorize, style_success, style_error, style_info, style_title, style_url
@@ -119,8 +119,12 @@ def cmd_index(args):
     print(f"Building index from: {pages_dir}")
     
     # Build index
-    index = BM25Index(k1=args.k1, b=args.b)
+    stem = not getattr(args, 'no_stemming', False)
+    index = BM25Index(k1=args.k1, b=args.b, stem=stem)
     num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet)
+    
+    if not args.quiet:
+        print(f"Stemming: {'enabled' if stem else 'disabled'}")
     
     if num_docs == 0:
         print("Error: No documents to index.")
@@ -136,7 +140,7 @@ def cmd_index(args):
 
 
 def cmd_search(args):
-    """Search the index."""
+    """Search the index with enhanced features."""
     site_dir = get_site_dir(args.site_dir)
     
     # Find index file
@@ -151,15 +155,49 @@ def cmd_search(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
-    # Load index
+    # Load index (use enhanced engine for new features)
     if not args.quiet:
         print(style_info(f"Loading index from: {index_path}"))
     
-    engine = SearchEngine.load(index_path)
+    # Check for enhanced features flags
+    use_enhanced = not getattr(args, 'basic', False)
+    
+    if use_enhanced:
+        engine = EnhancedSearchEngine.load(
+            index_path,
+            enable_spellcheck=True,
+            enable_autocomplete=True,
+            enable_facets=not getattr(args, 'no_facets', False),
+            enable_synonyms=not getattr(args, 'no_synonyms', False)
+        )
+    else:
+        engine = SearchEngine.load(index_path)
     
     # Time the search
     start_time = time.perf_counter()
-    results = engine.search(args.query, top_k=args.limit)
+    
+    if use_enhanced:
+        # Get facet filter if specified
+        facet_filters = {}
+        if hasattr(args, 'filter_type') and args.filter_type:
+            facet_filters['type'] = args.filter_type
+        if hasattr(args, 'filter_section') and args.filter_section:
+            facet_filters['section'] = args.filter_section
+        
+        response = engine.search(
+            args.query, 
+            top_k=args.limit,
+            facet_filters=facet_filters if facet_filters else None,
+            expand_synonyms=not getattr(args, 'no_synonyms', False)
+        )
+        results = response['results']
+        suggestion = response.get('suggestion')
+        facets = response.get('facets', {})
+    else:
+        results = engine.search(args.query, top_k=args.limit)
+        suggestion = None
+        facets = {}
+    
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     
     # Get query terms for highlighting
@@ -176,9 +214,19 @@ def cmd_search(args):
             'count': len(results),
             'results': results
         }
+        if suggestion:
+            output['suggestion'] = suggestion
+        if facets:
+            output['facets'] = facets
         print(json.dumps(output, indent=2))
     else:
         print()
+        
+        # Show "Did you mean..." suggestion
+        if suggestion and not args.quiet:
+            print(style_info(f'💡 Did you mean: "{suggestion}"?'))
+            print()
+        
         print(format_results(
             results, 
             show_scores=args.scores,
@@ -186,12 +234,21 @@ def cmd_search(args):
             elapsed_ms=elapsed_ms,
             colorize_output=not args.no_color
         ))
+        
+        # Show facet counts if available
+        if facets and not args.quiet and getattr(args, 'show_facets', False):
+            print(style_info("📊 Facets:"))
+            for ftype, values in facets.items():
+                print(f"  {ftype}:")
+                for value, count in sorted(values.items(), key=lambda x: -x[1])[:5]:
+                    print(f"    {value}: {count}")
+            print()
     
     return 0
 
 
-def cmd_interactive(args):
-    """Interactive search mode with beautiful colored output."""
+def cmd_autocomplete(args):
+    """Get autocomplete suggestions for a prefix."""
     site_dir = get_site_dir(args.site_dir)
     
     # Find index file
@@ -206,9 +263,40 @@ def cmd_interactive(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
-    # Load index
+    engine = EnhancedSearchEngine.load(index_path)
+    suggestions = engine.get_autocomplete_suggestions(args.prefix, max_suggestions=args.limit)
+    
+    if args.json:
+        print(json.dumps({'prefix': args.prefix, 'suggestions': suggestions}))
+    else:
+        if suggestions:
+            for s in suggestions:
+                print(s)
+        else:
+            print(style_info("No suggestions found."))
+    
+    return 0
+
+
+def cmd_interactive(args):
+    """Interactive search mode with beautiful colored output and enhanced features."""
+    site_dir = get_site_dir(args.site_dir)
+    
+    # Find index file
+    index_path = None
+    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+        if candidate.exists():
+            index_path = candidate
+            break
+    
+    if not index_path:
+        print(style_error(f"Error: No index found in {site_dir}"))
+        print("Run 'doc_search index <site_dir>' first.")
+        return 1
+    
+    # Load enhanced engine
     print(style_info(f"Loading index from: {index_path}"))
-    engine = SearchEngine.load(index_path)
+    engine = EnhancedSearchEngine.load(index_path)
     
     stats = engine.get_stats()
     
@@ -221,6 +309,13 @@ def cmd_interactive(args):
     print(f"  📚 {style_info(str(stats['total_documents']))} documents indexed")
     print(f"  🔤 {style_info(str(stats['unique_terms']))} unique terms")
     print(f"  📏 {style_info(str(stats['avg_document_length']))} avg terms per document")
+    
+    # Show enabled features
+    features = stats.get('features', {})
+    enabled = [k for k, v in features.items() if v]
+    if enabled:
+        print(f"  ✨ Features: {', '.join(enabled)}")
+    
     print()
     print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
     print(style_info("  Tip: Use \"quotes\" for phrase search"))
@@ -242,8 +337,11 @@ def cmd_interactive(args):
         
         # Time the search
         start_time = time.perf_counter()
-        results = engine.search(query, top_k=args.limit)
+        response = engine.search(query, top_k=args.limit)
         elapsed_ms = (time.perf_counter() - start_time) * 1000
+        
+        results = response['results']
+        suggestion = response.get('suggestion')
         
         # Get query terms for highlighting
         terms, phrases = parse_query(query)
@@ -252,6 +350,12 @@ def cmd_interactive(args):
             query_terms.update(phrase)
         
         print()
+        
+        # Show "Did you mean..." suggestion
+        if suggestion:
+            print(style_info(f'💡 Did you mean: "{suggestion}"?'))
+            print()
+        
         print(format_results(
             results, 
             show_scores=args.scores,
@@ -475,6 +579,8 @@ Examples:
                              help='BM25 b parameter (default: 0.75)')
     index_parser.add_argument('--no-compress', action='store_true',
                              help='Don\'t compress the index file')
+    index_parser.add_argument('--no-stemming', action='store_true',
+                             help='Disable Porter stemming')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
@@ -493,7 +599,30 @@ Examples:
                               help='Suppress loading messages')
     search_parser.add_argument('--no-color', action='store_true',
                               help='Disable colored output')
+    # Enhanced features
+    search_parser.add_argument('--basic', action='store_true',
+                              help='Use basic search (disable enhanced features)')
+    search_parser.add_argument('--no-synonyms', action='store_true',
+                              help='Disable synonym expansion')
+    search_parser.add_argument('--no-facets', action='store_true',
+                              help='Disable faceted search')
+    search_parser.add_argument('--show-facets', action='store_true',
+                              help='Show facet counts in output')
+    search_parser.add_argument('--filter-type', metavar='TYPE',
+                              help='Filter by document type (tutorial, library, reference, etc.)')
+    search_parser.add_argument('--filter-section', metavar='SECTION',
+                              help='Filter by section name')
     search_parser.set_defaults(func=cmd_search)
+    
+    # Autocomplete command
+    auto_parser = subparsers.add_parser('autocomplete', help='Get autocomplete suggestions')
+    auto_parser.add_argument('site_dir', help='Site data directory or original URL')
+    auto_parser.add_argument('prefix', help='Prefix to get suggestions for')
+    auto_parser.add_argument('--limit', '-l', type=int, default=10,
+                            help='Maximum suggestions (default: 10)')
+    auto_parser.add_argument('--json', '-j', action='store_true',
+                            help='Output as JSON')
+    auto_parser.set_defaults(func=cmd_autocomplete)
     
     # Interactive command
     interactive_parser = subparsers.add_parser('interactive', help='Interactive search mode')

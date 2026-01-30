@@ -19,11 +19,13 @@ class BM25Index:
     BM25 Parameters:
         k1: Term frequency saturation parameter (default: 1.5)
         b: Length normalization parameter (default: 0.75)
+        stem: Whether to apply Porter stemming (default: True)
     """
     
-    def __init__(self, k1: float = 1.5, b: float = 0.75):
+    def __init__(self, k1: float = 1.5, b: float = 0.75, stem: bool = True):
         self.k1 = k1
         self.b = b
+        self.stem = stem
         
         # Document storage
         self.documents: Dict[int, Dict[str, Any]] = {}  # doc_id -> {url, title, ...}
@@ -62,14 +64,14 @@ class BM25Index:
         self.url_to_id[url] = doc_id
         
         # Tokenize content (title gets more weight by being included multiple times)
-        title_tokens = tokenize(title) * 3  # Title words count 3x
+        title_tokens = tokenize(title, stem=self.stem) * 3  # Title words count 3x
         heading_tokens = []
         if headings:
             for level, heading_text in headings:
                 weight = max(1, 4 - level)  # h1=3x, h2=2x, h3+=1x
-                heading_tokens.extend(tokenize(heading_text) * weight)
+                heading_tokens.extend(tokenize(heading_text, stem=self.stem) * weight)
         
-        text_tokens = tokenize(text)
+        text_tokens = tokenize(text, stem=self.stem)
         all_tokens = title_tokens + heading_tokens + text_tokens
         
         # Calculate term frequencies
@@ -178,7 +180,7 @@ class BM25Index:
         Returns:
             List of result dicts with 'url', 'title', 'description', 'score'
         """
-        query_terms = tokenize(query)
+        query_terms = tokenize(query, stem=self.stem)
         
         if not query_terms:
             return []
@@ -234,6 +236,7 @@ class BM25Index:
         data = {
             'k1': self.k1,
             'b': self.b,
+            'stem': self.stem,
             'documents': self.documents,
             'url_to_id': self.url_to_id,
             'index': {term: postings for term, postings in self.index.items()},
@@ -280,7 +283,7 @@ class BM25Index:
                 data = json.load(f)
         
         # Create instance
-        index = cls(k1=data['k1'], b=data['b'])
+        index = cls(k1=data['k1'], b=data['b'], stem=data.get('stem', True))
         
         # Restore state
         index.documents = {int(k): v for k, v in data['documents'].items()}
@@ -300,5 +303,6 @@ class BM25Index:
             'unique_terms': len(self.index),
             'avg_document_length': round(self.avg_doc_length, 1),
             'k1': self.k1,
-            'b': self.b
+            'b': self.b,
+            'stemming': self.stem
         }
