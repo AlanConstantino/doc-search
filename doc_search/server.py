@@ -401,13 +401,6 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
             padding: 0.75rem 1rem;
             font-size: 0.75rem;
             color: var(--text-muted);
-            display: none;
-        }
-        
-        @media (min-width: 768px) {
-            .keyboard-hints {
-                display: block;
-            }
         }
         
         .keyboard-hints kbd {
@@ -440,30 +433,6 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
         
         @keyframes spin {
             to { transform: rotate(360deg); }
-        }
-        
-        /* Mobile adjustments */
-        @media (max-width: 640px) {
-            .header-content {
-                flex-wrap: wrap;
-            }
-            
-            .search-input {
-                font-size: 1rem;
-                padding: 0.875rem 1rem 0.875rem 2.75rem;
-            }
-            
-            .search-shortcut {
-                display: none;
-            }
-            
-            .result {
-                padding: 1rem;
-            }
-            
-            .result-header {
-                flex-wrap: wrap;
-            }
         }
     </style>
 </head>

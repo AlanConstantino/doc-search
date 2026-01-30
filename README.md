@@ -25,7 +25,7 @@ A self-contained Python application for searching through large technical docume
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
 - 🖥️ **CLI Interface** - Beautiful command-line interface with interactive mode
-- 🌐 **Web UI** - Modern, responsive search interface with real-time results
+- 🌐 **Web UI** - Modern search interface with real-time results
 
 ## Installation
 
@@ -124,7 +124,6 @@ Then visit http://127.0.0.1:8080 in your browser:
 - **Relevance scores** shown for each result
 - **Keyboard navigation**: `j`/`k` to navigate, `Enter` to open, `/` to focus search
 - **Dark/light mode** toggle
-- **Mobile responsive** design
 
 ## Commands
 
@@ -238,7 +237,6 @@ The web interface provides a modern, Algolia-style search experience:
   - `Esc` - Clear search
 - **Theme support** - Toggle between dark and light modes
 - **Index stats** - Document count and term count displayed in footer
-- **Mobile responsive** - Works great on phones and tablets
 
 ## Performance
 
