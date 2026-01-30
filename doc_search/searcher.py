@@ -529,14 +529,15 @@ class EnhancedSearchEngine(SearchEngine):
     - "Did you mean..." spell correction suggestions
     - Autocomplete / type-ahead suggestions
     - Faceted search (filter by section/type)
-    - Query expansion with synonyms
+    - Query expansion with synonyms (disabled by default)
     """
     
     def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None,
                  enable_spellcheck: bool = True,
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
-                 enable_synonyms: bool = True):
+                 enable_synonyms: bool = False,
+                 synonym_groups: Optional[List[Set[str]]] = None):
         """
         Initialize enhanced search engine.
         
@@ -546,7 +547,8 @@ class EnhancedSearchEngine(SearchEngine):
             enable_spellcheck: Enable "Did you mean..." suggestions
             enable_autocomplete: Enable type-ahead suggestions
             enable_facets: Enable faceted search
-            enable_synonyms: Enable query expansion with synonyms
+            enable_synonyms: Enable query expansion with synonyms (default: False)
+            synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
         """
         super().__init__(index, pages_dir)
         
@@ -554,6 +556,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._autocomplete_enabled = enable_autocomplete
         self._facets_enabled = enable_facets
         self._synonyms_enabled = enable_synonyms
+        self._custom_synonym_groups = synonym_groups
         
         # Initialize components
         self._spellchecker: Optional[SpellChecker] = None
@@ -590,7 +593,15 @@ class EnhancedSearchEngine(SearchEngine):
                 )
         
         if self._synonyms_enabled:
-            self._synonyms = SynonymExpander(include_defaults=True)
+            if self._custom_synonym_groups:
+                # Use custom synonyms only
+                self._synonyms = SynonymExpander(
+                    synonym_groups=self._custom_synonym_groups,
+                    include_defaults=False
+                )
+            else:
+                # Use built-in programming synonyms
+                self._synonyms = SynonymExpander(include_defaults=True)
     
     @classmethod
     def load(cls, index_path: Path, **kwargs) -> 'EnhancedSearchEngine':

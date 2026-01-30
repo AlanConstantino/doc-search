@@ -4,19 +4,19 @@ A self-contained Python application for searching through large technical docume
 
 **Zero dependencies** - Uses only Python 3.9+ standard library.
 
-## ✨ What's New in v1.5.0
+## ✨ What's New in v1.6.0
 
+- 📄 **Pagination** - Web UI now paginates results (10 per page, pure HTML)
 - 💡 **"Did you mean..."** - Spell check suggestions for typos using Levenshtein distance
 - ⌨️ **Autocomplete** - Type-ahead suggestions with `autocomplete` command
-- 🏷️ **Faceted Search** - Filter results by document type or section
+- 🏷️ **Faceted Search** - Filter results by URL path category or section
 - 🔗 **Synonym Expansion** - Matches related terms (function→method, list→array, etc.)
 - 🌿 **Porter Stemming** - Better recall by matching word variants (running→run)
 
-### Previous Updates (v1.4.0)
-- 🌿 **Porter Stemming** - Match word variants automatically
-- 🌐 **Beautiful Web UI** - Launch with `serve` command
-- 🎨 **Colorful CLI** - ANSI-colored output with highlighted terms
-- ⚡ **Performance Metrics** - "Found X results in Y ms" for every search
+### Previous Updates
+- **v1.4.0**: Porter Stemming, Beautiful Web UI, Colorful CLI, Performance Metrics
+- **v1.3.0**: Web UI server (`serve` command)
+- **v1.2.0**: Phrase search, snippet highlighting, parallel crawling
 
 ## Features
 
@@ -32,16 +32,17 @@ A self-contained Python application for searching through large technical docume
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
 
-### Enhanced Search (v1.5.0)
+### Enhanced Search (v1.6.0)
 - 💡 **Spell Correction** - "Did you mean..." suggestions for misspelled queries
 - ⌨️ **Autocomplete** - Fast prefix-based term suggestions
-- 🏷️ **Faceted Search** - Filter by document type (tutorial, reference, API, etc.)
-- 🔗 **Query Expansion** - Automatic synonym matching for better recall
+- 🏷️ **Faceted Search** - Filter by URL path category (auto-extracted, domain-agnostic)
+- 🔗 **Query Expansion** - Optional synonym matching (disabled by default, use `--synonyms` or custom file)
 - 🌿 **Porter Stemming** - Word variant matching (searches→search, running→run)
 
 ### Interface
 - 🖥️ **CLI Interface** - Beautiful command-line interface with interactive mode
 - 🌐 **Web UI** - Beautiful search interface (pure HTML/CSS, no JavaScript)
+- 📄 **Pagination** - Results paginated in web UI (10 per page, up to 100 results)
 
 ## Installation
 
@@ -190,10 +191,11 @@ Then visit http://127.0.0.1:8080 in your browser:
 | `--no-color` | Disable colored output | false |
 | `--quiet`, `-q` | Suppress loading messages | false |
 | `--basic` | Disable enhanced features | false |
-| `--no-synonyms` | Disable synonym expansion | false |
+| `--synonyms` | Enable synonym expansion (built-in programming terms) | false |
+| `--synonyms-file FILE` | Load custom synonyms from JSON file | - |
 | `--no-facets` | Disable faceted search | false |
 | `--show-facets` | Show facet counts in output | false |
-| `--filter-type TYPE` | Filter by document type | - |
+| `--filter-category CAT` | Filter by URL path category | - |
 | `--filter-section SECTION` | Filter by section | - |
 
 ### `autocomplete` 🆕
@@ -363,9 +365,18 @@ for r in results:
 
 ## Limitations
 
-- English tokenization only
-- No stemming (to keep dependencies at zero)
-- In-memory index (fine for 15K pages, may need adjustment for larger)
+- **English tokenization only** - No CJK or other language support
+- **In-memory index** - Index loaded into RAM during search (~10-50MB for 15K pages). Fine for small-medium sites, not suitable for millions of pages
+- **No JavaScript rendering** - Crawler fetches raw HTML only. SPAs and dynamically-loaded content won't be indexed
+- **Keyword search only** - No semantic/vector search. Relies on BM25 + synonyms for relevance
+
+### Data Persistence
+
+All data is stored on disk and persists between sessions:
+- **Crawled pages**: `~/.doc_search/sites/<hash>/pages/*.json`
+- **Search index**: `~/.doc_search/sites/<hash>/index.json.gz`
+
+You don't need to re-crawl to search - the index is loaded from disk each time.
 
 ## License
 

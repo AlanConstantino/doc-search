@@ -121,9 +121,9 @@ class TestEnhancedSearchEngine(unittest.TestCase):
         facets = self.engine.get_facet_counts()
         
         self.assertIsInstance(facets, dict)
-        # Should have some facet types
+        # Should have some facet types (category from URL path)
         if facets:
-            self.assertIn('type', facets)
+            self.assertIn('category', facets)
     
     def test_facet_filter(self):
         """Should filter results by facet."""
@@ -131,10 +131,10 @@ class TestEnhancedSearchEngine(unittest.TestCase):
         all_response = self.engine.search('python')
         all_count = len(all_response['results'])
         
-        # Filter by tutorial type
+        # Filter by category (from URL path)
         filtered_response = self.engine.search(
             'python',
-            facet_filters={'type': 'tutorial'}
+            facet_filters={'category': 'tutorial'}
         )
         
         # Filtered should have fewer or equal results
@@ -251,11 +251,11 @@ class TestEnhancedSearchEngineIntegration(unittest.TestCase):
         facets = response1['facets']
         
         # 3. Apply filter if we have facets
-        if facets and 'type' in facets:
-            first_type = list(facets['type'].keys())[0]
+        if facets and 'category' in facets:
+            first_category = list(facets['category'].keys())[0]
             response2 = self.engine.search(
                 'reference',
-                facet_filters={'type': first_type}
+                facet_filters={'category': first_category}
             )
             
             # Should have results

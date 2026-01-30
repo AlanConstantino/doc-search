@@ -15,101 +15,37 @@ class FacetExtractor:
     """
     Extract facets from document content.
     
-    Identifies sections, document types, and other filterable categories.
+    Domain-agnostic: uses URL path structure directly without
+    trying to interpret or categorize document types.
     """
-    
-    # Common documentation section patterns
-    SECTION_PATTERNS = [
-        # Python docs style
-        (r'^[\w\s]+\s+—\s+(.+)$', 1),  # "module — Description"
-        # Generic heading styles
-        (r'^(?:Chapter|Section|Part)\s+\d+[:.]\s*(.+)$', 1),
-    ]
-    
-    # Common documentation types based on URL patterns
-    DOC_TYPE_PATTERNS = [
-        (r'/tutorial[s]?/', 'tutorial'),
-        (r'/guide[s]?/', 'guide'),
-        (r'/reference/', 'reference'),
-        (r'/api/', 'api'),
-        (r'/howto/', 'howto'),
-        (r'/faq/', 'faq'),
-        (r'/example[s]?/', 'examples'),
-        (r'/library/', 'library'),
-        (r'/module[s]?/', 'module'),
-        (r'/class/', 'class'),
-        (r'/function[s]?/', 'function'),
-        (r'/glossary/', 'glossary'),
-        (r'/changelog/', 'changelog'),
-        (r'/release/', 'release'),
-    ]
     
     @classmethod
     def extract_section(cls, title: str, headings: List[Tuple[int, str]]) -> str:
         """
-        Extract the main section/category from a document.
+        Extract the main section from a document title.
         
         Args:
             title: Document title
-            headings: List of (level, text) tuples
+            headings: List of (level, text) tuples (currently unused)
             
         Returns:
             Section name (normalized)
         """
-        # Try to get section from h1 or first heading
-        for level, text in headings:
-            if level == 1:
-                # Use h1 as section
-                section = cls._normalize_section(text)
-                if section:
+        if not title:
+            return 'general'
+        
+        # Try to extract the first significant part of the title
+        # Handle common patterns like "Module — Description" or "Topic: Subtitle"
+        for separator in ['—', '–', '-', ':', '|']:
+            if separator in title:
+                parts = title.split(separator)
+                section = cls._normalize_section(parts[0])
+                if section and len(section) > 1:
                     return section
         
-        # Fall back to title
-        if title:
-            # Try to extract module/class name from title
-            # e.g., "string — Common string operations" -> "string"
-            match = re.match(r'^([\w\.]+)\s*[—–-]', title)
-            if match:
-                return match.group(1).lower()
-            
-            # Take first significant word from title
-            section = cls._normalize_section(title)
-            if section:
-                return section
-        
-        return 'general'
-    
-    @classmethod
-    def extract_doc_type(cls, url: str, title: str = '') -> str:
-        """
-        Extract document type from URL and title.
-        
-        Args:
-            url: Document URL
-            title: Document title
-            
-        Returns:
-            Document type category
-        """
-        url_lower = url.lower()
-        
-        # Check URL patterns
-        for pattern, doc_type in cls.DOC_TYPE_PATTERNS:
-            if re.search(pattern, url_lower):
-                return doc_type
-        
-        # Check title for type hints
-        title_lower = title.lower()
-        if 'tutorial' in title_lower:
-            return 'tutorial'
-        if 'reference' in title_lower or 'api' in title_lower:
-            return 'reference'
-        if 'how to' in title_lower or 'howto' in title_lower:
-            return 'howto'
-        if 'example' in title_lower:
-            return 'examples'
-        
-        return 'documentation'
+        # Just use first few words of title
+        section = cls._normalize_section(title)
+        return section if section else 'general'
     
     @classmethod
     def extract_path_facets(cls, url: str) -> List[str]:
@@ -181,6 +117,10 @@ class FacetIndex:
         """
         Add a document and extract its facets.
         
+        Facets are extracted from:
+        - URL path segments (domain-agnostic)
+        - Document title
+        
         Args:
             doc_id: Document identifier
             url: Document URL
@@ -189,28 +129,30 @@ class FacetIndex:
         """
         headings = headings or []
         
-        # Extract facets
-        section = FacetExtractor.extract_section(title, headings)
-        doc_type = FacetExtractor.extract_doc_type(url, title)
+        # Extract facets from URL path (domain-agnostic)
         path_facets = FacetExtractor.extract_path_facets(url)
+        section = FacetExtractor.extract_section(title, headings)
         
-        # Store facets
+        # Store facets - use path segments as primary categorization
         facet_dict = {
             'section': section,
-            'type': doc_type,
         }
         
-        if path_facets:
+        # Use first path segment as category, second as subcategory
+        if len(path_facets) >= 1:
             facet_dict['category'] = path_facets[0]
+        if len(path_facets) >= 2:
+            facet_dict['subcategory'] = path_facets[1]
         
         self.doc_facets[doc_id] = facet_dict
         
         # Update facet index
         self.facets['section'][section].add(doc_id)
-        self.facets['type'][doc_type].add(doc_id)
         
-        if path_facets:
+        if len(path_facets) >= 1:
             self.facets['category'][path_facets[0]].add(doc_id)
+        if len(path_facets) >= 2:
+            self.facets['subcategory'][path_facets[1]].add(doc_id)
     
     def get_facet_values(self, facet_type: str) -> Dict[str, int]:
         """

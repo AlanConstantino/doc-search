@@ -371,6 +371,53 @@ a:hover {
     color: var(--text-secondary);
     font-weight: 600;
 }
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.pagination a, .pagination span {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.pagination a {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.pagination a:hover {
+    border-color: var(--accent);
+    background: var(--bg-tertiary);
+    text-decoration: none;
+}
+
+.pagination .current {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    color: white;
+}
+
+.pagination .disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.pagination .page-info {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
 """
 
 
@@ -400,7 +447,10 @@ def render_page(
     results: Optional[List[Dict[str, Any]]] = None,
     elapsed_ms: float = 0,
     stats: Optional[Dict[str, Any]] = None,
-    show_scores: bool = True
+    show_scores: bool = True,
+    page: int = 1,
+    per_page: int = 10,
+    total_results: int = 0
 ) -> str:
     """Render the full HTML page."""
     
@@ -411,15 +461,20 @@ def render_page(
     # Build results HTML
     if query and results is not None:
         if results:
+            # Calculate pagination info
+            total_pages = (total_results + per_page - 1) // per_page if total_results > 0 else 1
+            start_num = (page - 1) * per_page + 1
+            end_num = min(page * per_page, total_results)
+            
             results_html = f'''
             <div class="results-info">
-                <span class="results-count">✓ Found {len(results)} result{"s" if len(results) != 1 else ""}</span>
+                <span class="results-count">✓ Found {total_results} result{"s" if total_results != 1 else ""}</span>
                 <span class="results-time">in {elapsed_ms:.1f}ms</span>
-                <span class="results-query">for "{escape(query)}"</span>
+                <span class="results-query">showing {start_num}-{end_num} for "{escape(query)}"</span>
             </div>
             <div class="results">
             '''
-            for i, r in enumerate(results, 1):
+            for i, r in enumerate(results, start_num):
                 title = escape(r.get('title', 'Untitled') or 'Untitled')
                 url = escape(r['url'])
                 snippet = highlight_snippet(r.get('snippet', '') or r.get('description', ''))
@@ -439,6 +494,45 @@ def render_page(
                 </div>
                 '''
             results_html += '</div>'
+            
+            # Build pagination controls (pure HTML links)
+            if total_pages > 1:
+                encoded_query = urllib.parse.quote(query)
+                results_html += '<div class="pagination">'
+                
+                # Previous link
+                if page > 1:
+                    results_html += f'<a href="/?q={encoded_query}&page={page-1}">← Previous</a>'
+                else:
+                    results_html += '<span class="disabled">← Previous</span>'
+                
+                # Page numbers (show up to 7 pages centered on current)
+                start_page = max(1, page - 3)
+                end_page = min(total_pages, page + 3)
+                
+                if start_page > 1:
+                    results_html += f'<a href="/?q={encoded_query}&page=1">1</a>'
+                    if start_page > 2:
+                        results_html += '<span class="page-info">...</span>'
+                
+                for p in range(start_page, end_page + 1):
+                    if p == page:
+                        results_html += f'<span class="current">{p}</span>'
+                    else:
+                        results_html += f'<a href="/?q={encoded_query}&page={p}">{p}</a>'
+                
+                if end_page < total_pages:
+                    if end_page < total_pages - 1:
+                        results_html += '<span class="page-info">...</span>'
+                    results_html += f'<a href="/?q={encoded_query}&page={total_pages}">{total_pages}</a>'
+                
+                # Next link
+                if page < total_pages:
+                    results_html += f'<a href="/?q={encoded_query}&page={page+1}">Next →</a>'
+                else:
+                    results_html += '<span class="disabled">Next →</span>'
+                
+                results_html += '</div>'
         else:
             results_html = '''
             <div class="no-results">
@@ -548,20 +642,44 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Get search query
         query = query_params.get('q', [''])[0].strip()
         
+        # Get page number (default 1, minimum 1)
+        try:
+            page = max(1, int(query_params.get('page', ['1'])[0]))
+        except ValueError:
+            page = 1
+        
+        per_page = 10
+        max_results = 100  # Maximum results to fetch
+        
         # Get stats
         stats = self.engine.get_stats() if self.engine else {}
         
         if query:
-            # Perform search
+            # Perform search - fetch enough for pagination
             start_time = time.perf_counter()
-            results = self.engine.search(query, top_k=20)
+            all_results = self.engine.search(query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
+            
+            total_results = len(all_results)
+            
+            # Slice for current page
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            page_results = all_results[start_idx:end_idx]
+            
+            # If page is beyond results, redirect to page 1
+            if not page_results and total_results > 0:
+                page = 1
+                page_results = all_results[:per_page]
             
             html_content = render_page(
                 query=query,
-                results=results,
+                results=page_results,
                 elapsed_ms=elapsed_ms,
-                stats=stats
+                stats=stats,
+                page=page,
+                per_page=per_page,
+                total_results=total_results
             )
         else:
             # Welcome page
