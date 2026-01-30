@@ -195,8 +195,8 @@ def cmd_search(args):
     if use_enhanced:
         # Get facet filter if specified
         facet_filters = {}
-        if hasattr(args, 'filter_type') and args.filter_type:
-            facet_filters['type'] = args.filter_type
+        if hasattr(args, 'filter_category') and args.filter_category:
+            facet_filters['category'] = args.filter_category
         if hasattr(args, 'filter_section') and args.filter_section:
             facet_filters['section'] = args.filter_section
         
@@ -630,8 +630,8 @@ Examples:
                               help='Disable faceted search')
     search_parser.add_argument('--show-facets', action='store_true',
                               help='Show facet counts in output')
-    search_parser.add_argument('--filter-type', metavar='TYPE',
-                              help='Filter by document type (tutorial, library, reference, etc.)')
+    search_parser.add_argument('--filter-category', metavar='CATEGORY',
+                              help='Filter by URL path category (e.g., library, tutorial, api)')
     search_parser.add_argument('--filter-section', metavar='SECTION',
                               help='Filter by section name')
     search_parser.set_defaults(func=cmd_search)

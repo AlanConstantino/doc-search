@@ -9,7 +9,7 @@ A self-contained Python application for searching through large technical docume
 - 📄 **Pagination** - Web UI now paginates results (10 per page, pure HTML)
 - 💡 **"Did you mean..."** - Spell check suggestions for typos using Levenshtein distance
 - ⌨️ **Autocomplete** - Type-ahead suggestions with `autocomplete` command
-- 🏷️ **Faceted Search** - Filter results by document type or section
+- 🏷️ **Faceted Search** - Filter results by URL path category or section
 - 🔗 **Synonym Expansion** - Matches related terms (function→method, list→array, etc.)
 - 🌿 **Porter Stemming** - Better recall by matching word variants (running→run)
 
@@ -35,7 +35,7 @@ A self-contained Python application for searching through large technical docume
 ### Enhanced Search (v1.6.0)
 - 💡 **Spell Correction** - "Did you mean..." suggestions for misspelled queries
 - ⌨️ **Autocomplete** - Fast prefix-based term suggestions
-- 🏷️ **Faceted Search** - Filter by document type (tutorial, reference, API, etc.)
+- 🏷️ **Faceted Search** - Filter by URL path category (auto-extracted, domain-agnostic)
 - 🔗 **Query Expansion** - Optional synonym matching (disabled by default, use `--synonyms` or custom file)
 - 🌿 **Porter Stemming** - Word variant matching (searches→search, running→run)
 
@@ -195,7 +195,7 @@ Then visit http://127.0.0.1:8080 in your browser:
 | `--synonyms-file FILE` | Load custom synonyms from JSON file | - |
 | `--no-facets` | Disable faceted search | false |
 | `--show-facets` | Show facet counts in output | false |
-| `--filter-type TYPE` | Filter by document type | - |
+| `--filter-category CAT` | Filter by URL path category | - |
 | `--filter-section SECTION` | Filter by section | - |
 
 ### `autocomplete` 🆕
