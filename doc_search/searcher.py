@@ -2,48 +2,379 @@
 Search interface for querying the BM25 index.
 """
 
+import json
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .indexer import BM25Index
+from .utils import tokenize
+
+
+def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
+    """
+    Parse a query into individual terms and phrase groups.
+    
+    Supports:
+        - Regular terms: python tutorial
+        - Exact phrases: "list comprehension"
+        - Mixed: python "list comprehension" tutorial
+    
+    Args:
+        query: Search query string
+        
+    Returns:
+        Tuple of (individual_terms, phrase_groups)
+        where phrase_groups is a list of word lists
+    """
+    phrases = []
+    
+    # Extract quoted phrases
+    phrase_pattern = r'"([^"]+)"'
+    for match in re.finditer(phrase_pattern, query):
+        phrase_text = match.group(1)
+        # Tokenize phrase but preserve order
+        phrase_words = tokenize(phrase_text)
+        if phrase_words:
+            phrases.append(phrase_words)
+    
+    # Remove quoted phrases from query
+    remaining = re.sub(phrase_pattern, ' ', query)
+    
+    # Tokenize remaining terms
+    terms = tokenize(remaining)
+    
+    return terms, phrases
+
+
+def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
+    """
+    Check if a phrase appears in text (words must be adjacent).
+    
+    Args:
+        text: Text to search in
+        phrase_words: List of words that must appear in order
+        
+    Returns:
+        True if phrase is found
+    """
+    if not phrase_words:
+        return True
+    
+    # Tokenize the text
+    text_tokens = tokenize(text)
+    
+    if len(phrase_words) > len(text_tokens):
+        return False
+    
+    # Sliding window search
+    for i in range(len(text_tokens) - len(phrase_words) + 1):
+        match = True
+        for j, word in enumerate(phrase_words):
+            if text_tokens[i + j] != word:
+                match = False
+                break
+        if match:
+            return True
+    
+    return False
+
+
+def find_phrase_positions(text: str, phrase_words: List[str]) -> List[int]:
+    """
+    Find character positions where a phrase starts in text.
+    
+    Args:
+        text: Text to search in  
+        phrase_words: List of words that must appear in order
+        
+    Returns:
+        List of starting character positions
+    """
+    positions = []
+    if not phrase_words:
+        return positions
+    
+    text_lower = text.lower()
+    
+    # Build regex pattern for phrase
+    # Match words with possible punctuation/whitespace between
+    pattern_parts = []
+    for word in phrase_words:
+        pattern_parts.append(re.escape(word))
+    
+    # Words can be separated by whitespace or punctuation
+    pattern = r'\b' + r'\W+'.join(pattern_parts) + r'\b'
+    
+    for match in re.finditer(pattern, text_lower):
+        positions.append(match.start())
+    
+    return positions
+
+
+def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
+    """
+    Highlight search terms in text using markers.
+    
+    Args:
+        text: Text to highlight
+        terms: Set of terms to highlight (lowercase)
+        marker: Marker to wrap terms with (e.g., '**' or 'CAPS')
+        
+    Returns:
+        Text with highlighted terms
+    """
+    if not terms or not text:
+        return text
+    
+    # Build pattern for all terms
+    term_pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted(terms, key=len, reverse=True)) + r')\b'
+    
+    def replacer(match):
+        word = match.group(0)
+        if word.lower() in terms:
+            return f"{marker}{word}{marker}"
+        return word
+    
+    return re.sub(term_pattern, replacer, text, flags=re.IGNORECASE)
+
+
+def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]], 
+                       snippet_length: int = 150) -> str:
+    """
+    Find the most relevant snippet from text.
+    
+    Strategy:
+        1. Find section with highest query term density
+        2. Prefer sections containing phrase matches
+        3. Return ~snippet_length chars of context
+    
+    Args:
+        text: Full document text
+        terms: Set of search terms (lowercase)
+        phrases: List of phrase word lists
+        snippet_length: Target snippet length in chars
+        
+    Returns:
+        Most relevant snippet from text
+    """
+    if not text:
+        return ""
+    
+    text = text.strip()
+    
+    # If text is short enough, return it all
+    if len(text) <= snippet_length:
+        return text
+    
+    # Tokenize text with positions
+    word_pattern = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]*\b')
+    matches = list(word_pattern.finditer(text))
+    
+    if not matches:
+        return text[:snippet_length] + '...'
+    
+    # Score each position by term density in surrounding window
+    window_words = 20  # Number of words to consider
+    best_score = -1
+    best_start = 0
+    
+    all_query_terms = set(terms)
+    for phrase in phrases:
+        all_query_terms.update(phrase)
+    
+    for i in range(len(matches)):
+        # Calculate score for window starting at this word
+        window_end = min(i + window_words, len(matches))
+        window_matches = matches[i:window_end]
+        
+        score = 0
+        found_terms = set()
+        
+        for m in window_matches:
+            word_lower = m.group(0).lower()
+            if word_lower in all_query_terms:
+                score += 1
+                found_terms.add(word_lower)
+        
+        # Bonus for having multiple different terms
+        score += len(found_terms) * 2
+        
+        # Check for phrase matches in this window
+        if phrases:
+            window_start_char = matches[i].start()
+            window_end_char = window_matches[-1].end() if window_matches else window_start_char + snippet_length
+            window_text = text[window_start_char:window_end_char + 50]
+            
+            for phrase in phrases:
+                if check_phrase_match(window_text, phrase):
+                    score += 5  # Big bonus for phrase match
+        
+        if score > best_score:
+            best_score = score
+            best_start = i
+    
+    # Extract snippet around best position
+    start_match = matches[best_start]
+    start_char = max(0, start_match.start() - 20)
+    
+    # Find end position
+    end_word_idx = min(best_start + window_words, len(matches) - 1)
+    end_char = min(len(text), matches[end_word_idx].end() + 20)
+    
+    # Adjust to word boundaries
+    if start_char > 0:
+        # Find previous space
+        space_pos = text.rfind(' ', 0, start_char)
+        if space_pos > start_char - 30:
+            start_char = space_pos + 1
+    
+    if end_char < len(text):
+        # Find next space
+        space_pos = text.find(' ', end_char)
+        if space_pos != -1 and space_pos < end_char + 30:
+            end_char = space_pos
+    
+    snippet = text[start_char:end_char]
+    
+    # Add ellipsis if truncated
+    if start_char > 0:
+        snippet = '...' + snippet
+    if end_char < len(text):
+        snippet = snippet + '...'
+    
+    return snippet
 
 
 class SearchEngine:
     """
-    High-level search interface.
+    High-level search interface with phrase search and snippet highlighting.
     """
     
-    def __init__(self, index: BM25Index):
+    def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None):
         self.index = index
+        self.pages_dir = pages_dir
     
     @classmethod
     def load(cls, index_path: Path) -> 'SearchEngine':
         """Load search engine from saved index."""
+        index_path = Path(index_path)
         index = BM25Index.load(index_path)
-        return cls(index)
+        
+        # Try to find pages directory
+        pages_dir = None
+        parent = index_path.parent
+        if (parent / 'pages').is_dir():
+            pages_dir = parent / 'pages'
+        
+        return cls(index, pages_dir)
+    
+    def _load_page_text(self, url: str) -> Optional[str]:
+        """Load full page text from disk."""
+        if not self.pages_dir:
+            return None
+        
+        from .utils import url_to_filename
+        filename = url_to_filename(url) + '.json'
+        filepath = self.pages_dir / filename
+        
+        if not filepath.exists():
+            return None
+        
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            return data.get('text', '')
+        except (json.JSONDecodeError, IOError):
+            return None
     
     def search(
         self, 
         query: str, 
         top_k: int = 10,
-        min_score: float = 0.0
+        min_score: float = 0.0,
+        highlight: bool = True,
+        snippet_length: int = 150
     ) -> List[Dict[str, Any]]:
         """
-        Search the index.
+        Search the index with phrase support and highlighted snippets.
         
         Args:
-            query: Search query
+            query: Search query (supports "phrase search")
             top_k: Maximum number of results
             min_score: Minimum score threshold
+            highlight: Highlight query terms in snippets
+            snippet_length: Target snippet length
             
         Returns:
             List of result dictionaries
         """
-        results = self.index.search(query, top_k=top_k)
+        # Parse query into terms and phrases
+        terms, phrases = parse_query(query)
+        
+        if not terms and not phrases:
+            return []
+        
+        # Flatten phrases into terms for BM25 scoring
+        all_terms = list(terms)
+        for phrase in phrases:
+            all_terms.extend(phrase)
+        
+        # Get initial results from BM25
+        # Request more than needed to filter by phrase
+        initial_k = top_k * 3 if phrases else top_k
+        bm25_results = self.index.search(' '.join(all_terms), top_k=initial_k)
         
         if min_score > 0:
-            results = [r for r in results if r['score'] >= min_score]
+            bm25_results = [r for r in bm25_results if r['score'] >= min_score]
+        
+        # If we have phrases, filter results that don't contain them
+        results = []
+        terms_set = set(terms)
+        for phrase in phrases:
+            terms_set.update(phrase)
+        
+        for r in bm25_results:
+            # Load full text if we need to check phrases or generate snippets
+            page_text = None
+            if phrases or (self.pages_dir and snippet_length > 0):
+                page_text = self._load_page_text(r['url'])
+            
+            # Check phrase matches
+            if phrases and page_text:
+                # Must contain all phrases
+                all_phrases_found = True
+                for phrase in phrases:
+                    if not check_phrase_match(page_text, phrase):
+                        # Also check title
+                        if not check_phrase_match(r.get('title', ''), phrase):
+                            all_phrases_found = False
+                            break
+                
+                if not all_phrases_found:
+                    continue
+            
+            # Generate better snippet
+            snippet = r.get('description', '')
+            if page_text:
+                snippet = find_best_snippet(page_text, terms_set, phrases, snippet_length)
+            
+            # Highlight terms if requested
+            if highlight and snippet:
+                snippet = highlight_terms(snippet, terms_set)
+            
+            result = {
+                'url': r['url'],
+                'title': r.get('title', ''),
+                'snippet': snippet,
+                'description': r.get('description', ''),  # Keep original too
+                'score': r.get('score', 0)
+            }
+            
+            results.append(result)
+            
+            if len(results) >= top_k:
+                break
         
         return results
     
@@ -55,12 +386,8 @@ class SearchEngine:
     ) -> List[Dict[str, Any]]:
         """
         Search and include text context for each result.
-        
-        Note: This requires page files to still be available.
         """
-        # For now, just return regular search results
-        # Context extraction would require loading original page files
-        return self.search(query, top_k=top_k)
+        return self.search(query, top_k=top_k, snippet_length=context_length)
     
     def get_document(self, url: str) -> Optional[Dict[str, Any]]:
         """Get document metadata by URL."""
@@ -92,16 +419,17 @@ def format_results(results: List[Dict[str, Any]], show_scores: bool = False) -> 
     for i, result in enumerate(results, 1):
         title = result.get('title', 'Untitled') or 'Untitled'
         url = result['url']
-        description = result.get('description', '')
+        # Prefer snippet (with highlighting) over description
+        snippet = result.get('snippet', '') or result.get('description', '')
         score = result.get('score', 0)
         
         # Truncate title if too long
         if len(title) > 80:
             title = title[:77] + '...'
         
-        # Truncate description
-        if len(description) > 150:
-            description = description[:147] + '...'
+        # Truncate snippet
+        if len(snippet) > 200:
+            snippet = snippet[:197] + '...'
         
         if show_scores:
             lines.append(f"{i}. [{score:.4f}] {title}")
@@ -110,8 +438,9 @@ def format_results(results: List[Dict[str, Any]], show_scores: bool = False) -> 
         
         lines.append(f"   {url}")
         
-        if description:
-            lines.append(f"   {description}")
+        if snippet:
+            # Wrap long snippets
+            lines.append(f"   {snippet}")
         
         lines.append("")
     

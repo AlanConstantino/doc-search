@@ -73,7 +73,8 @@ def cmd_crawl(args):
         max_depth=args.max_depth,
         auth=auth,
         same_path=not args.no_same_path,
-        verbose=not args.quiet
+        verbose=not args.quiet,
+        workers=args.workers
     )
     
     # Start crawling
@@ -337,6 +338,8 @@ Examples:
                              help='Allow crawling outside the starting path (default: stay under starting path)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
                              help='Start fresh crawl (ignore saved state)')
+    crawl_parser.add_argument('--workers', '-w', type=int, default=1,
+                             help='Number of parallel workers (default: 1 for politeness)')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     crawl_parser.set_defaults(func=cmd_crawl)

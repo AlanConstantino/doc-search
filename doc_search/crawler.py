@@ -1,5 +1,6 @@
 """
 Web crawler with resumable state, rate limiting, and robots.txt compliance.
+Supports parallel crawling with per-domain rate limiting.
 """
 
 import json
@@ -7,12 +8,15 @@ import time
 import base64
 import ssl
 import gzip
-from collections import deque
+import threading
+from collections import deque, defaultdict
 from pathlib import Path
-from typing import Optional, Set, Dict, Any, Callable, Tuple
+from typing import Optional, Set, Dict, Any, Callable, Tuple, List
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue, Empty
 
 from .utils import (
     normalize_url, is_same_domain, url_to_filename, 
@@ -58,9 +62,64 @@ SKIP_PATH_PATTERNS = [
 ]
 
 
+class RateLimiter:
+    """
+    Thread-safe per-domain rate limiter.
+    """
+    
+    def __init__(self, default_delay: float = 1.0):
+        self.default_delay = default_delay
+        self._domain_delays: Dict[str, float] = {}
+        self._last_request: Dict[str, float] = defaultdict(float)
+        self._backoff_until: Dict[str, float] = defaultdict(float)
+        self._lock = threading.Lock()
+    
+    def set_domain_delay(self, domain: str, delay: float):
+        """Set custom delay for a specific domain."""
+        with self._lock:
+            self._domain_delays[domain] = delay
+    
+    def get_delay(self, domain: str) -> float:
+        """Get delay for a domain."""
+        with self._lock:
+            return self._domain_delays.get(domain, self.default_delay)
+    
+    def set_backoff(self, domain: str, seconds: float):
+        """Set backoff until time for a domain."""
+        with self._lock:
+            self._backoff_until[domain] = time.time() + seconds
+    
+    def wait_for_domain(self, domain: str):
+        """Wait according to rate limiting rules for a domain."""
+        with self._lock:
+            now = time.time()
+            
+            # Check backoff
+            backoff_until = self._backoff_until.get(domain, 0)
+            if now < backoff_until:
+                wait_time = backoff_until - now
+                self._lock.release()
+                time.sleep(wait_time)
+                self._lock.acquire()
+                now = time.time()
+            
+            # Normal delay between requests
+            delay = self._domain_delays.get(domain, self.default_delay)
+            last = self._last_request.get(domain, 0)
+            elapsed = now - last
+            
+            if elapsed < delay:
+                wait_time = delay - elapsed
+                self._lock.release()
+                time.sleep(wait_time)
+                self._lock.acquire()
+            
+            self._last_request[domain] = time.time()
+
+
 class CrawlState:
     """
-    Manages crawl state for resumable crawling.
+    Thread-safe crawl state management for resumable crawling.
     """
     
     def __init__(self, state_file: Path):
@@ -76,15 +135,17 @@ class CrawlState:
             'start_time': None,
             'last_checkpoint': None
         }
+        self._lock = threading.Lock()
     
     def save(self):
-        """Save state to disk."""
-        state = {
-            'visited': list(self.visited),
-            'pending': list(self.pending),
-            'failed': self.failed,
-            'stats': self.stats
-        }
+        """Save state to disk (thread-safe)."""
+        with self._lock:
+            state = {
+                'visited': list(self.visited),
+                'pending': list(self.pending),
+                'failed': self.failed,
+                'stats': self.stats
+            }
         
         # Write atomically
         tmp_file = self.state_file.with_suffix('.tmp')
@@ -101,44 +162,102 @@ class CrawlState:
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
             
-            self.visited = set(state.get('visited', []))
-            # Handle both old format (just urls) and new format (url, depth tuples)
-            pending = state.get('pending', [])
-            self.pending = deque()
-            for item in pending:
-                if isinstance(item, list) and len(item) == 2:
-                    self.pending.append(tuple(item))
-                else:
-                    self.pending.append((item, 0))  # Assume depth 0 for old format
-            self.failed = state.get('failed', {})
-            self.stats = state.get('stats', self.stats)
+            with self._lock:
+                self.visited = set(state.get('visited', []))
+                # Handle both old format (just urls) and new format (url, depth tuples)
+                pending = state.get('pending', [])
+                self.pending = deque()
+                for item in pending:
+                    if isinstance(item, list) and len(item) == 2:
+                        self.pending.append(tuple(item))
+                    else:
+                        self.pending.append((item, 0))  # Assume depth 0 for old format
+                self.failed = state.get('failed', {})
+                self.stats = state.get('stats', self.stats)
             return True
         except (json.JSONDecodeError, IOError):
             return False
     
     def clear(self):
         """Clear all state."""
-        self.visited.clear()
-        self.pending.clear()
-        self.failed.clear()
-        self.stats = {
-            'pages_crawled': 0,
-            'pages_failed': 0,
-            'pages_skipped': 0,
-            'bytes_downloaded': 0,
-            'start_time': None,
-            'last_checkpoint': None
-        }
+        with self._lock:
+            self.visited.clear()
+            self.pending.clear()
+            self.failed.clear()
+            self.stats = {
+                'pages_crawled': 0,
+                'pages_failed': 0,
+                'pages_skipped': 0,
+                'bytes_downloaded': 0,
+                'start_time': None,
+                'last_checkpoint': None
+            }
         if self.state_file.exists():
             self.state_file.unlink()
+    
+    def pop_url(self) -> Optional[Tuple[str, int]]:
+        """Pop a URL from the queue (thread-safe)."""
+        with self._lock:
+            if self.pending:
+                item = self.pending.popleft()
+                if isinstance(item, tuple):
+                    return item
+                return (item, 0)
+            return None
+    
+    def add_urls(self, urls: List[Tuple[str, int]]):
+        """Add URLs to the queue (thread-safe)."""
+        with self._lock:
+            for url, depth in urls:
+                if url not in self.visited:
+                    self.pending.append((url, depth))
+    
+    def mark_visited(self, url: str):
+        """Mark a URL as visited (thread-safe)."""
+        with self._lock:
+            self.visited.add(url)
+    
+    def is_visited(self, url: str) -> bool:
+        """Check if URL was visited (thread-safe)."""
+        with self._lock:
+            return url in self.visited
+    
+    def mark_failed(self, url: str, depth: int) -> bool:
+        """
+        Mark a URL as failed, possibly retry.
+        Returns True if should retry.
+        """
+        with self._lock:
+            retry_count = self.failed.get(url, 0)
+            if retry_count < 3:
+                self.failed[url] = retry_count + 1
+                self.pending.append((url, depth))
+                self.visited.discard(url)
+                return True
+            else:
+                self.stats['pages_failed'] += 1
+                return False
+    
+    def increment_stat(self, stat: str, value: int = 1):
+        """Increment a stat counter (thread-safe)."""
+        with self._lock:
+            self.stats[stat] = self.stats.get(stat, 0) + value
+    
+    def get_progress(self, max_pages: Optional[int] = None) -> str:
+        """Get progress string (thread-safe)."""
+        with self._lock:
+            crawled = self.stats['pages_crawled']
+            pending = len(self.pending)
+            limit = max_pages or '∞'
+            return f"[{crawled}/{limit}] (queue: {pending})"
 
 
 class Crawler:
     """
-    Web crawler with politeness controls and resumable crawling.
+    Web crawler with politeness controls, resumable crawling, and parallel fetching.
     """
     
-    USER_AGENT = "DocSearchBot/1.1 (+https://github.com/AlanConstantino/doc-search)"
+    USER_AGENT = "DocSearchBot/1.2 (+https://github.com/AlanConstantino/doc-search)"
     MAX_RETRIES = 3
     CHECKPOINT_INTERVAL = 100  # Save state every N pages
     
@@ -154,7 +273,8 @@ class Crawler:
         stay_on_domain: bool = True,
         same_path: bool = True,  # Only crawl URLs under the starting path
         url_filter: Optional[Callable[[str], bool]] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        workers: int = 1  # Number of parallel workers
     ):
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
@@ -168,6 +288,7 @@ class Crawler:
         self.same_path = same_path
         self.url_filter = url_filter
         self.verbose = verbose
+        self.workers = max(1, workers)  # At least 1 worker
         
         # Extract base path for same_path filtering
         # Preserve trailing slash for proper path matching
@@ -188,23 +309,25 @@ class Crawler:
         # Initialize robots checker
         self.robots = RobotsChecker(base_url, self.USER_AGENT)
         
+        # Initialize rate limiter
+        self.rate_limiter = RateLimiter(delay)
+        
         # SSL context that doesn't verify (for self-signed certs in docs)
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
         
-        # Rate limiting state
-        self._last_request_time = 0.0
-        self._backoff_until = 0.0
+        # Output lock for verbose messages
+        self._print_lock = threading.Lock()
+        
+        # Stop flag for graceful shutdown
+        self._stop_requested = False
     
     def _log(self, message: str):
-        """Print message if verbose mode is enabled."""
+        """Print message if verbose mode is enabled (thread-safe)."""
         if self.verbose:
-            print(message)
-    
-    def _progress(self):
-        """Return progress string."""
-        return f"[{self.state.stats['pages_crawled']}/{self.max_pages or '∞'}] (queue: {len(self.state.pending)})"
+            with self._print_lock:
+                print(message)
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""
@@ -215,29 +338,13 @@ class Crawler:
             return f"Basic {encoded}"
         return None
     
-    def _wait_for_rate_limit(self):
-        """Wait according to rate limiting rules."""
-        now = time.time()
-        
-        # Check backoff
-        if now < self._backoff_until:
-            wait_time = self._backoff_until - now
-            self._log(f"  Backing off for {wait_time:.1f}s...")
-            time.sleep(wait_time)
-        
-        # Normal delay between requests
-        elapsed = now - self._last_request_time
-        if elapsed < self.delay:
-            time.sleep(self.delay - elapsed)
-        
-        self._last_request_time = time.time()
-    
     def _fetch(self, url: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Fetch a URL and return (content, content_type).
         Returns (None, None) on failure.
         """
-        self._wait_for_rate_limit()
+        domain = get_domain(url)
+        self.rate_limiter.wait_for_domain(domain)
         
         headers = {
             'User-Agent': self.USER_AGENT,
@@ -278,7 +385,7 @@ class Crawler:
             except (UnicodeDecodeError, LookupError):
                 content = content_bytes.decode('utf-8', errors='replace')
             
-            self.state.stats['bytes_downloaded'] += len(content_bytes)
+            self.state.increment_stat('bytes_downloaded', len(content_bytes))
             
             return content, content_type
             
@@ -290,7 +397,7 @@ class Crawler:
                     wait_time = int(retry_after)
                 except ValueError:
                     wait_time = 60
-                self._backoff_until = time.time() + wait_time
+                self.rate_limiter.set_backoff(domain, wait_time)
                 self._log(f"  Rate limited, backing off for {wait_time}s")
             elif e.code >= 500:
                 self._log(f"  Server error: {e.code}")
@@ -356,7 +463,7 @@ class Crawler:
     def _should_crawl(self, url: str, depth: int = 0) -> bool:
         """Check if URL should be crawled."""
         # Already visited
-        if url in self.state.visited:
+        if self.state.is_visited(url):
             return False
         
         # Depth check
@@ -397,6 +504,59 @@ class Crawler:
         with open(filepath, 'w') as f:
             json.dump(data, f)
     
+    def _process_page(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """
+        Process a single page. Returns list of new URLs to crawl or None on failure.
+        """
+        if self._stop_requested:
+            return None
+        
+        # Mark as visited
+        self.state.mark_visited(url)
+        
+        # Fetch page
+        self._log(f"{self.state.get_progress(self.max_pages)} Crawling: {url}")
+        content, content_type = self._fetch(url)
+        
+        if content is None:
+            # Track failure for retry
+            self.state.mark_failed(url, depth)
+            return None
+        
+        # Check if HTML
+        if not is_html_content(content_type):
+            self._log(f"  Skipping non-HTML: {content_type}")
+            self.state.increment_stat('pages_skipped')
+            return []
+        
+        # Extract content
+        extracted = extract_text(content)
+        
+        # Extract and queue links (at depth + 1)
+        links = extract_links(content, url)
+        new_depth = depth + 1
+        new_urls = []
+        for link in links:
+            if self._should_crawl(link, new_depth):
+                new_urls.append((link, new_depth))
+        
+        # Save page data
+        page_data = {
+            'url': url,
+            'title': extracted['title'],
+            'description': extracted['description'],
+            'text': extracted['text'],
+            'headings': extracted['headings'],
+            'depth': depth,
+            'crawled_at': time.time()
+        }
+        self._save_page(url, page_data)
+        
+        # Update stats
+        self.state.increment_stat('pages_crawled')
+        
+        return new_urls
+    
     def crawl(self, resume: bool = True) -> Dict[str, Any]:
         """
         Start or resume crawling.
@@ -416,120 +576,58 @@ class Crawler:
         if robots_delay > self.delay:
             self._log(f"Respecting robots.txt crawl-delay: {robots_delay}s")
             self.delay = robots_delay
+            self.rate_limiter = RateLimiter(self.delay)
         
         # Load or initialize state
         if resume and self.state.load():
             self._log(f"Resuming crawl: {len(self.state.visited)} pages visited, {len(self.state.pending)} pending")
         else:
             self.state.clear()
-            self.state.pending.append((self.base_url, 0))  # (url, depth)
-            self.state.stats['start_time'] = time.time()
+            self.state.add_urls([(self.base_url, 0)])
+            with self.state._lock:
+                self.state.stats['start_time'] = time.time()
         
         # Log crawl parameters
         if self.same_path:
             self._log(f"Path restriction: {self.base_path}/*")
         if self.max_depth is not None:
             self._log(f"Max depth: {self.max_depth}")
+        if self.workers > 1:
+            self._log(f"Workers: {self.workers}")
         self._log("")
         
         pages_since_checkpoint = 0
+        self._stop_requested = False
         
         try:
-            while self.state.pending:
-                # Check max pages limit
-                if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
-                    self._log(f"\nReached max pages limit: {self.max_pages}")
-                    break
-                
-                # Get next URL and depth
-                item = self.state.pending.popleft()
-                if isinstance(item, tuple):
-                    url, depth = item
-                else:
-                    url, depth = item, 0
-                
-                # Skip if already visited or shouldn't crawl
-                if url in self.state.visited:
-                    continue
-                
-                if not self._should_crawl(url, depth):
-                    self.state.stats['pages_skipped'] += 1
-                    continue
-                
-                # Mark as visited
-                self.state.visited.add(url)
-                
-                # Fetch page
-                self._log(f"{self._progress()} Crawling: {url}")
-                content, content_type = self._fetch(url)
-                
-                if content is None:
-                    # Track failure for retry
-                    retry_count = self.state.failed.get(url, 0)
-                    if retry_count < self.MAX_RETRIES:
-                        self.state.failed[url] = retry_count + 1
-                        self.state.pending.append((url, depth))
-                        self.state.visited.discard(url)
-                    else:
-                        self.state.stats['pages_failed'] += 1
-                    continue
-                
-                # Check if HTML
-                if not is_html_content(content_type):
-                    self._log(f"  Skipping non-HTML: {content_type}")
-                    self.state.stats['pages_skipped'] += 1
-                    continue
-                
-                # Extract content
-                extracted = extract_text(content)
-                
-                # Extract and queue links (at depth + 1)
-                links = extract_links(content, url)
-                new_depth = depth + 1
-                for link in links:
-                    if self._should_crawl(link, new_depth):
-                        self.state.pending.append((link, new_depth))
-                
-                # Save page data
-                page_data = {
-                    'url': url,
-                    'title': extracted['title'],
-                    'description': extracted['description'],
-                    'text': extracted['text'],
-                    'headings': extracted['headings'],
-                    'depth': depth,
-                    'crawled_at': time.time()
-                }
-                self._save_page(url, page_data)
-                
-                # Update stats
-                self.state.stats['pages_crawled'] += 1
-                pages_since_checkpoint += 1
-                
-                # Checkpoint
-                if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
-                    self._log(f"  Saving checkpoint...")
-                    self.state.stats['last_checkpoint'] = time.time()
-                    self.state.save()
-                    pages_since_checkpoint = 0
+            if self.workers == 1:
+                # Single-threaded mode (original behavior)
+                self._crawl_single_threaded()
+            else:
+                # Multi-threaded mode
+                self._crawl_parallel()
                 
         except KeyboardInterrupt:
             self._log("\nCrawl interrupted by user")
+            self._stop_requested = True
         
         finally:
             # Final save
-            self.state.stats['last_checkpoint'] = time.time()
+            with self.state._lock:
+                self.state.stats['last_checkpoint'] = time.time()
             self.state.save()
         
         # Calculate final stats
-        elapsed = time.time() - (self.state.stats['start_time'] or time.time())
-        stats = {
-            **self.state.stats,
-            'elapsed_seconds': elapsed,
-            'pages_per_minute': (self.state.stats['pages_crawled'] / elapsed * 60) if elapsed > 0 else 0,
-            'pending_urls': len(self.state.pending),
-            'unique_urls_seen': len(self.state.visited)
-        }
+        with self.state._lock:
+            start_time = self.state.stats.get('start_time') or time.time()
+            elapsed = time.time() - start_time
+            stats = {
+                **self.state.stats,
+                'elapsed_seconds': elapsed,
+                'pages_per_minute': (self.state.stats['pages_crawled'] / elapsed * 60) if elapsed > 0 else 0,
+                'pending_urls': len(self.state.pending),
+                'unique_urls_seen': len(self.state.visited)
+            }
         
         self._log(f"\nCrawl complete!")
         self._log(f"  Pages crawled: {stats['pages_crawled']}")
@@ -539,6 +637,127 @@ class Crawler:
         self._log(f"  Time elapsed: {elapsed / 60:.1f} minutes")
         
         return stats
+    
+    def _crawl_single_threaded(self):
+        """Original single-threaded crawl implementation."""
+        pages_since_checkpoint = 0
+        
+        while True:
+            if self._stop_requested:
+                break
+            
+            # Check max pages limit
+            with self.state._lock:
+                if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
+                    self._log(f"\nReached max pages limit: {self.max_pages}")
+                    break
+            
+            # Get next URL
+            item = self.state.pop_url()
+            if item is None:
+                break
+            
+            url, depth = item
+            
+            # Skip if already visited or shouldn't crawl
+            if self.state.is_visited(url):
+                continue
+            
+            if not self._should_crawl(url, depth):
+                self.state.increment_stat('pages_skipped')
+                continue
+            
+            # Process the page
+            new_urls = self._process_page(url, depth)
+            
+            if new_urls:
+                self.state.add_urls(new_urls)
+            
+            # Checkpoint
+            pages_since_checkpoint += 1
+            if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
+                self._log(f"  Saving checkpoint...")
+                with self.state._lock:
+                    self.state.stats['last_checkpoint'] = time.time()
+                self.state.save()
+                pages_since_checkpoint = 0
+    
+    def _crawl_parallel(self):
+        """Parallel crawl using ThreadPoolExecutor."""
+        pages_since_checkpoint = 0
+        active_futures = set()
+        
+        with ThreadPoolExecutor(max_workers=self.workers) as executor:
+            while True:
+                if self._stop_requested:
+                    break
+                
+                # Check max pages limit
+                with self.state._lock:
+                    if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
+                        self._log(f"\nReached max pages limit: {self.max_pages}")
+                        break
+                
+                # Submit new tasks to keep workers busy
+                while len(active_futures) < self.workers:
+                    item = self.state.pop_url()
+                    if item is None:
+                        break
+                    
+                    url, depth = item
+                    
+                    # Skip if already visited or shouldn't crawl
+                    if self.state.is_visited(url):
+                        continue
+                    
+                    if not self._should_crawl(url, depth):
+                        self.state.increment_stat('pages_skipped')
+                        continue
+                    
+                    # Submit task
+                    future = executor.submit(self._process_page, url, depth)
+                    future.url_depth = (url, depth)
+                    active_futures.add(future)
+                
+                # If no active futures and no pending URLs, we're done
+                if not active_futures:
+                    # Double-check pending queue
+                    with self.state._lock:
+                        if not self.state.pending:
+                            break
+                    continue
+                
+                # Wait for at least one task to complete
+                try:
+                    done_futures = set()
+                    for future in as_completed(active_futures, timeout=1.0):
+                        done_futures.add(future)
+                        try:
+                            new_urls = future.result()
+                            if new_urls:
+                                self.state.add_urls(new_urls)
+                        except Exception as e:
+                            self._log(f"  Worker error: {e}")
+                        
+                        pages_since_checkpoint += 1
+                        
+                        # Checkpoint
+                        if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
+                            self._log(f"  Saving checkpoint...")
+                            with self.state._lock:
+                                self.state.stats['last_checkpoint'] = time.time()
+                            self.state.save()
+                            pages_since_checkpoint = 0
+                    
+                    active_futures -= done_futures
+                    
+                except TimeoutError:
+                    # Timeout is fine, just continue checking
+                    pass
+            
+            # Cancel remaining futures on stop
+            for future in active_futures:
+                future.cancel()
     
     def get_crawled_pages(self):
         """Generator that yields all crawled page data."""
