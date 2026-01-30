@@ -162,13 +162,29 @@ def cmd_search(args):
     # Check for enhanced features flags
     use_enhanced = not getattr(args, 'basic', False)
     
+    # Load custom synonyms if file provided
+    custom_synonyms = None
+    synonyms_file = getattr(args, 'synonyms_file', None)
+    if synonyms_file:
+        try:
+            with open(synonyms_file, 'r') as f:
+                data = json.load(f)
+            # Expect {"groups": [["term1", "term2"], ["term3", "term4"]]}
+            custom_synonyms = [set(group) for group in data.get('groups', [])]
+            if not args.quiet:
+                print(style_info(f"Loaded {len(custom_synonyms)} synonym groups from {synonyms_file}"))
+        except (IOError, json.JSONDecodeError) as e:
+            print(style_error(f"Error loading synonyms file: {e}"))
+            return 1
+    
     if use_enhanced:
         engine = EnhancedSearchEngine.load(
             index_path,
             enable_spellcheck=True,
             enable_autocomplete=True,
             enable_facets=not getattr(args, 'no_facets', False),
-            enable_synonyms=not getattr(args, 'no_synonyms', False)
+            enable_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None,
+            synonym_groups=custom_synonyms
         )
     else:
         engine = SearchEngine.load(index_path)
@@ -188,14 +204,16 @@ def cmd_search(args):
             args.query, 
             top_k=args.limit,
             facet_filters=facet_filters if facet_filters else None,
-            expand_synonyms=not getattr(args, 'no_synonyms', False)
+            expand_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None
         )
         results = response['results']
         suggestion = response.get('suggestion')
+        expanded_query = response.get('expanded_query')
         facets = response.get('facets', {})
     else:
         results = engine.search(args.query, top_k=args.limit)
         suggestion = None
+        expanded_query = None
         facets = {}
     
     elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -216,6 +234,8 @@ def cmd_search(args):
         }
         if suggestion:
             output['suggestion'] = suggestion
+        if expanded_query:
+            output['expanded_query'] = expanded_query
         if facets:
             output['facets'] = facets
         print(json.dumps(output, indent=2))
@@ -602,8 +622,10 @@ Examples:
     # Enhanced features
     search_parser.add_argument('--basic', action='store_true',
                               help='Use basic search (disable enhanced features)')
-    search_parser.add_argument('--no-synonyms', action='store_true',
-                              help='Disable synonym expansion')
+    search_parser.add_argument('--synonyms', action='store_true',
+                              help='Enable synonym expansion (built-in programming terms)')
+    search_parser.add_argument('--synonyms-file', metavar='FILE',
+                              help='Load custom synonyms from JSON file')
     search_parser.add_argument('--no-facets', action='store_true',
                               help='Disable faceted search')
     search_parser.add_argument('--show-facets', action='store_true',

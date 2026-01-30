@@ -36,7 +36,7 @@ A self-contained Python application for searching through large technical docume
 - 💡 **Spell Correction** - "Did you mean..." suggestions for misspelled queries
 - ⌨️ **Autocomplete** - Fast prefix-based term suggestions
 - 🏷️ **Faceted Search** - Filter by document type (tutorial, reference, API, etc.)
-- 🔗 **Query Expansion** - Automatic synonym matching for better recall
+- 🔗 **Query Expansion** - Optional synonym matching (disabled by default, use `--synonyms` or custom file)
 - 🌿 **Porter Stemming** - Word variant matching (searches→search, running→run)
 
 ### Interface
@@ -191,7 +191,8 @@ Then visit http://127.0.0.1:8080 in your browser:
 | `--no-color` | Disable colored output | false |
 | `--quiet`, `-q` | Suppress loading messages | false |
 | `--basic` | Disable enhanced features | false |
-| `--no-synonyms` | Disable synonym expansion | false |
+| `--synonyms` | Enable synonym expansion (built-in programming terms) | false |
+| `--synonyms-file FILE` | Load custom synonyms from JSON file | - |
 | `--no-facets` | Disable faceted search | false |
 | `--show-facets` | Show facet counts in output | false |
 | `--filter-type TYPE` | Filter by document type | - |
