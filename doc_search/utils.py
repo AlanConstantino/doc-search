@@ -246,14 +246,28 @@ STOP_WORDS = frozenset([
 ])
 
 
-def tokenize(text: str) -> list:
+def tokenize(text: str, stem: bool = False) -> list:
     """
     Tokenize text into lowercase words, removing stop words.
+    
+    Args:
+        text: Text to tokenize.
+        stem: Whether to apply Porter stemming to tokens.
+        
+    Returns:
+        List of tokens.
     """
     # Convert to lowercase and extract words
     words = re.findall(r'\b[a-z][a-z0-9_]*\b', text.lower())
     # Filter out stop words and very short words
-    return [w for w in words if w not in STOP_WORDS and len(w) > 1]
+    tokens = [w for w in words if w not in STOP_WORDS and len(w) > 1]
+    
+    # Apply stemming if requested
+    if stem:
+        from .stemmer import stem as stem_word
+        tokens = [stem_word(t) for t in tokens]
+    
+    return tokens
 
 
 def format_size(size_bytes: int) -> str:

@@ -119,8 +119,12 @@ def cmd_index(args):
     print(f"Building index from: {pages_dir}")
     
     # Build index
-    index = BM25Index(k1=args.k1, b=args.b)
+    stem = not getattr(args, 'no_stemming', False)
+    index = BM25Index(k1=args.k1, b=args.b, stem=stem)
     num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet)
+    
+    if not args.quiet:
+        print(f"Stemming: {'enabled' if stem else 'disabled'}")
     
     if num_docs == 0:
         print("Error: No documents to index.")
@@ -475,6 +479,8 @@ Examples:
                              help='BM25 b parameter (default: 0.75)')
     index_parser.add_argument('--no-compress', action='store_true',
                              help='Don\'t compress the index file')
+    index_parser.add_argument('--no-stemming', action='store_true',
+                             help='Disable Porter stemming')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
