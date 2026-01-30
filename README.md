@@ -9,8 +9,7 @@ A self-contained Python application for searching through large technical docume
 - 🌐 **Beautiful Web UI** - Launch a local search interface with `serve` command
 - 🎨 **Colorful CLI** - ANSI-colored output with highlighted search terms
 - ⚡ **Performance Metrics** - See "Found X results in Y ms" for every search
-- ⌨️ **Keyboard Navigation** - j/k to navigate, Enter to open results
-- 🌙 **Dark Mode** - Web UI supports both dark and light themes
+- 🌙 **Pure HTML/CSS** - No JavaScript, fully server-side rendered
 
 ## Features
 
@@ -25,7 +24,7 @@ A self-contained Python application for searching through large technical docume
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
 - 🖥️ **CLI Interface** - Beautiful command-line interface with interactive mode
-- 🌐 **Web UI** - Modern search interface with real-time results
+- 🌐 **Web UI** - Beautiful search interface (pure HTML/CSS, no JavaScript)
 
 ## Installation
 
@@ -119,11 +118,11 @@ python -m doc_search serve https://docs.example.com --open
 
 Then visit http://127.0.0.1:8080 in your browser:
 
-- **Real-time search** as you type
-- **Highlighted matches** in results
-- **Relevance scores** shown for each result
-- **Keyboard navigation**: `j`/`k` to navigate, `Enter` to open, `/` to focus search
-- **Dark/light mode** toggle
+- **Clean search form** - type query, hit Enter or click Search
+- **Highlighted matches** in result snippets
+- **Relevance scores** shown for each result  
+- **Performance timing** displayed on every search
+- **Beautiful dark theme** with pure CSS styling
 
 ## Commands
 
@@ -223,20 +222,16 @@ Uses **BM25 (Best Match 25)** ranking algorithm:
 
 ## Web UI Features 🆕
 
-The web interface provides a modern, Algolia-style search experience:
+The web interface provides a clean, fast search experience with **zero JavaScript**:
 
-- **Instant search** - Results appear as you type (150ms debounce)
-- **Highlighted matches** - Search terms are highlighted in snippets
-- **Score display** - See relevance scores for each result
-- **Performance metrics** - "Found X results in Y ms" shown on every search
-- **Keyboard shortcuts**:
-  - `/` - Focus search input
-  - `j` or `↓` - Select next result
-  - `k` or `↑` - Select previous result
-  - `Enter` or `o` - Open selected result
-  - `Esc` - Clear search
-- **Theme support** - Toggle between dark and light modes
-- **Index stats** - Document count and term count displayed in footer
+- **Server-side rendering** - All HTML generated on the server
+- **Form-based search** - Traditional GET request, works everywhere
+- **Highlighted matches** - Search terms highlighted in snippets
+- **Score display** - See BM25 relevance scores for each result
+- **Performance metrics** - "Found X results in Y ms" on every search
+- **Beautiful dark theme** - Modern styling with pure CSS
+- **Index stats** - Document count and term count in footer
+- **No dependencies** - Just Python's built-in http.server
 
 ## Performance
 
