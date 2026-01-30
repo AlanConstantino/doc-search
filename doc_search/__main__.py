@@ -45,15 +45,23 @@ def get_site_dir(url_or_path: str) -> Path:
     return DEFAULT_DATA_DIR / site_hash(url_or_path)
 
 
-def get_auth(args) -> Optional[Tuple[str, str]]:
-    """Get authentication credentials from args or prompt."""
+def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
+    """Get authentication credentials from args or prompt.
+    
+    Returns:
+        (auth_tuple, auth_token) where auth_tuple is (username, password)
+        and auth_token is pre-encoded base64 token. One or both may be None.
+    """
+    auth_token = getattr(args, 'token', None)
+    
     if args.user:
         if args.password:
-            return (args.user, args.password)
+            return ((args.user, args.password), auth_token)
         else:
             password = getpass.getpass(f"Password for {args.user}: ")
-            return (args.user, password)
-    return None
+            return ((args.user, password), auth_token)
+    
+    return (None, auth_token)
 
 
 def cmd_crawl(args):
@@ -66,7 +74,7 @@ def cmd_crawl(args):
     print()
     
     # Get authentication
-    auth = get_auth(args)
+    auth, auth_token = get_auth(args)
     
     # Create crawler
     crawler = Crawler(
@@ -77,6 +85,7 @@ def cmd_crawl(args):
         max_pages=args.max_pages,
         max_depth=args.max_depth,
         auth=auth,
+        auth_token=auth_token,
         same_path=not args.no_same_path,
         verbose=not args.quiet,
         workers=args.workers
@@ -438,6 +447,7 @@ Examples:
     crawl_parser.add_argument('url', help='Base URL to crawl')
     crawl_parser.add_argument('--user', '-u', help='Username for HTTP Basic Auth')
     crawl_parser.add_argument('--password', '-p', help='Password (will prompt if not provided)')
+    crawl_parser.add_argument('--token', help='Pre-encoded Base64 auth token (alternative to user/password)')
     crawl_parser.add_argument('--delay', '-d', type=float, default=1.0,
                              help='Delay between requests in seconds (default: 1.0)')
     crawl_parser.add_argument('--timeout', '-t', type=float, default=30.0,

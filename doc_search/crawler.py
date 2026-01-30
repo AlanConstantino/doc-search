@@ -270,6 +270,7 @@ class Crawler:
         max_pages: Optional[int] = None,
         max_depth: Optional[int] = None,
         auth: Optional[Tuple[str, str]] = None,  # (username, password)
+        auth_token: Optional[str] = None,  # Pre-encoded Base64 token
         stay_on_domain: bool = True,
         same_path: bool = True,  # Only crawl URLs under the starting path
         url_filter: Optional[Callable[[str], bool]] = None,
@@ -284,6 +285,7 @@ class Crawler:
         self.max_pages = max_pages
         self.max_depth = max_depth
         self.auth = auth
+        self.auth_token = auth_token
         self.stay_on_domain = stay_on_domain
         self.same_path = same_path
         self.url_filter = url_filter
@@ -331,6 +333,14 @@ class Crawler:
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""
+        # Pre-encoded token takes priority
+        if self.auth_token:
+            # Remove 'Basic ' prefix if user included it
+            token = self.auth_token
+            if token.lower().startswith('basic '):
+                token = token[6:]
+            return f"Basic {token}"
+        # Otherwise encode from username/password
         if self.auth:
             username, password = self.auth
             credentials = f"{username}:{password}"
