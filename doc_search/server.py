@@ -525,6 +525,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the search web UI."""
     
     engine: SearchEngine = None
+    version: str = ""
     
     def log_message(self, format, *args):
         """Suppress default logging."""
@@ -572,9 +573,11 @@ class SearchHandler(BaseHTTPRequestHandler):
 def run_server(
     engine: SearchEngine,
     host: str = '127.0.0.1',
-    port: int = 8080
+    port: int = 8888,
+    version: str = ""
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it)."""
     SearchHandler.engine = engine
+    SearchHandler.version = version
     server = HTTPServer((host, port), SearchHandler)
     return server
