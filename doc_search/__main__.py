@@ -7,6 +7,7 @@ Usage:
     python -m doc_search index <site_dir>
     python -m doc_search search <site_dir> <query>
     python -m doc_search interactive <site_dir>
+    python -m doc_search serve <site_dir> [--port PORT]
 """
 
 import argparse
@@ -14,14 +15,18 @@ import getpass
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
 from . import __version__
 from .crawler import Crawler
 from .indexer import BM25Index
-from .searcher import SearchEngine, format_results
-from .utils import site_hash, format_size, format_duration
+from .searcher import SearchEngine, format_results, parse_query
+from .utils import (
+    site_hash, format_size, format_duration,
+    Colors, colorize, style_success, style_error, style_info, style_title, style_url
+)
 
 
 # Default data directory
@@ -133,30 +138,51 @@ def cmd_search(args):
             break
     
     if not index_path:
-        print(f"Error: No index found in {site_dir}")
+        print(style_error(f"Error: No index found in {site_dir}"))
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
     # Load index
     if not args.quiet:
-        print(f"Loading index from: {index_path}")
+        print(style_info(f"Loading index from: {index_path}"))
     
     engine = SearchEngine.load(index_path)
     
-    # Search
+    # Time the search
+    start_time = time.perf_counter()
     results = engine.search(args.query, top_k=args.limit)
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    
+    # Get query terms for highlighting
+    terms, phrases = parse_query(args.query)
+    query_terms = set(terms)
+    for phrase in phrases:
+        query_terms.update(phrase)
     
     # Output results
     if args.json:
-        print(json.dumps(results, indent=2))
+        output = {
+            'query': args.query,
+            'elapsed_ms': round(elapsed_ms, 2),
+            'count': len(results),
+            'results': results
+        }
+        print(json.dumps(output, indent=2))
     else:
-        print(format_results(results, show_scores=args.scores))
+        print()
+        print(format_results(
+            results, 
+            show_scores=args.scores,
+            query_terms=query_terms,
+            elapsed_ms=elapsed_ms,
+            colorize_output=not args.no_color
+        ))
     
     return 0
 
 
 def cmd_interactive(args):
-    """Interactive search mode."""
+    """Interactive search mode with beautiful colored output."""
     site_dir = get_site_dir(args.site_dir)
     
     # Find index file
@@ -167,33 +193,63 @@ def cmd_interactive(args):
             break
     
     if not index_path:
-        print(f"Error: No index found in {site_dir}")
+        print(style_error(f"Error: No index found in {site_dir}"))
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
     # Load index
-    print(f"Loading index from: {index_path}")
+    print(style_info(f"Loading index from: {index_path}"))
     engine = SearchEngine.load(index_path)
     
     stats = engine.get_stats()
-    print(f"Loaded {stats['total_documents']} documents, {stats['unique_terms']} unique terms")
+    
+    # Beautiful header
     print()
-    print("Enter search queries (empty line to quit):")
+    print(style_title("╔═══════════════════════════════════════════════════════════════╗"))
+    print(style_title("║") + "              " + style_success("doc-search") + " — Interactive Mode              " + style_title("║"))
+    print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
+    print(f"  📚 {style_info(str(stats['total_documents']))} documents indexed")
+    print(f"  🔤 {style_info(str(stats['unique_terms']))} unique terms")
+    print(f"  📏 {style_info(str(stats['avg_document_length']))} avg terms per document")
+    print()
+    print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
+    print(style_info("  Tip: Use \"quotes\" for phrase search"))
+    print()
+    
+    prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
     
     while True:
         try:
-            query = input("search> ").strip()
+            query = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print()
+            print(style_info("\nGoodbye! 👋"))
             break
         
         if not query:
+            print(style_info("\nGoodbye! 👋"))
             break
         
+        # Time the search
+        start_time = time.perf_counter()
         results = engine.search(query, top_k=args.limit)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        
+        # Get query terms for highlighting
+        terms, phrases = parse_query(query)
+        query_terms = set(terms)
+        for phrase in phrases:
+            query_terms.update(phrase)
+        
         print()
-        print(format_results(results, show_scores=args.scores))
+        print(format_results(
+            results, 
+            show_scores=args.scores,
+            query_terms=query_terms,
+            elapsed_ms=elapsed_ms,
+            colorize_output=True
+        ))
     
     return 0
 
@@ -286,6 +342,62 @@ def cmd_list(args):
     return 0
 
 
+def cmd_serve(args):
+    """Start the web UI server for searching."""
+    import webbrowser
+    from .server import run_server
+    
+    site_dir = get_site_dir(args.site_dir)
+    
+    # Find index file
+    index_path = None
+    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+        if candidate.exists():
+            index_path = candidate
+            break
+    
+    if not index_path:
+        print(style_error(f"Error: No index found in {site_dir}"))
+        print("Run 'doc_search index <site_dir>' first.")
+        return 1
+    
+    # Load index
+    print(style_info(f"Loading index from: {index_path}"))
+    engine = SearchEngine.load(index_path)
+    
+    stats = engine.get_stats()
+    
+    # Start server
+    server = run_server(engine, host=args.host, port=args.port, version=__version__)
+    
+    url = f"http://{args.host}:{args.port}"
+    
+    # Beautiful startup message
+    print()
+    print(style_title("╔═══════════════════════════════════════════════════════════════╗"))
+    print(style_title("║") + "              " + style_success("doc-search") + " — Web UI Server                 " + style_title("║"))
+    print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
+    print()
+    print(f"  🌐 Server running at: {style_url(url)}")
+    print(f"  📚 {style_info(str(stats['total_documents']))} documents indexed")
+    print(f"  🔤 {style_info(str(stats['unique_terms']))} unique terms")
+    print()
+    print(style_info("  Press Ctrl+C to stop the server"))
+    print()
+    
+    # Open browser if requested
+    if args.open:
+        webbrowser.open(url)
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print()
+        print(style_info("\nServer stopped. Goodbye! 👋"))
+    
+    return 0
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -369,6 +481,8 @@ Examples:
                               help='Output as JSON')
     search_parser.add_argument('--quiet', '-q', action='store_true',
                               help='Suppress loading messages')
+    search_parser.add_argument('--no-color', action='store_true',
+                              help='Disable colored output')
     search_parser.set_defaults(func=cmd_search)
     
     # Interactive command
@@ -388,6 +502,17 @@ Examples:
     # List command
     list_parser = subparsers.add_parser('list', help='List crawled sites')
     list_parser.set_defaults(func=cmd_list)
+    
+    # Serve command (web UI)
+    serve_parser = subparsers.add_parser('serve', help='Start web UI server')
+    serve_parser.add_argument('site_dir', help='Site data directory or original URL')
+    serve_parser.add_argument('--port', '-p', type=int, default=8080,
+                             help='Port to listen on (default: 8080)')
+    serve_parser.add_argument('--host', default='127.0.0.1',
+                             help='Host to bind to (default: 127.0.0.1)')
+    serve_parser.add_argument('--open', '-o', action='store_true',
+                             help='Open browser automatically')
+    serve_parser.set_defaults(func=cmd_serve)
     
     # Parse arguments
     args = parser.parse_args()

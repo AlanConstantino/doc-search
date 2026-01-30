@@ -4,11 +4,15 @@ Search interface for querying the BM25 index.
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .indexer import BM25Index
-from .utils import tokenize
+from .utils import (
+    tokenize, Colors, colorize, highlight_match, style_title, style_url,
+    style_score, style_number, style_snippet, style_info, style_success
+)
 
 
 def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
@@ -134,6 +138,32 @@ def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
         word = match.group(0)
         if word.lower() in terms:
             return f"{marker}{word}{marker}"
+        return word
+    
+    return re.sub(term_pattern, replacer, text, flags=re.IGNORECASE)
+
+
+def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
+    """
+    Highlight search terms in text using ANSI color codes.
+    
+    Args:
+        text: Text to highlight
+        terms: Set of terms to highlight (lowercase)
+        
+    Returns:
+        Text with ANSI-highlighted terms
+    """
+    if not terms or not text:
+        return text
+    
+    # Build pattern for all terms
+    term_pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted(terms, key=len, reverse=True)) + r')\b'
+    
+    def replacer(match):
+        word = match.group(0)
+        if word.lower() in terms:
+            return highlight_match(word)
         return word
     
     return re.sub(term_pattern, replacer, text, flags=re.IGNORECASE)
@@ -401,21 +431,42 @@ class SearchEngine:
         return self.index.get_stats()
 
 
-def format_results(results: List[Dict[str, Any]], show_scores: bool = False) -> str:
+def format_results(
+    results: List[Dict[str, Any]], 
+    show_scores: bool = False,
+    query_terms: Optional[Set[str]] = None,
+    elapsed_ms: Optional[float] = None,
+    colorize_output: bool = True
+) -> str:
     """
-    Format search results for display.
+    Format search results for display with beautiful ANSI colors.
     
     Args:
         results: List of result dictionaries
         show_scores: Include BM25 scores in output
+        query_terms: Set of query terms for ANSI highlighting (optional)
+        elapsed_ms: Search time in milliseconds (optional)
+        colorize_output: Use ANSI colors (default: True)
         
     Returns:
         Formatted string
     """
     if not results:
+        if colorize_output:
+            return style_info("No results found.")
         return "No results found."
     
     lines = []
+    
+    # Performance header
+    if elapsed_ms is not None:
+        perf_line = f"Found {len(results)} results in {elapsed_ms:.1f}ms"
+        if colorize_output:
+            lines.append(style_success(f"✓ {perf_line}"))
+        else:
+            lines.append(perf_line)
+        lines.append("")
+    
     for i, result in enumerate(results, 1):
         title = result.get('title', 'Untitled') or 'Untitled'
         url = result['url']
@@ -431,16 +482,37 @@ def format_results(results: List[Dict[str, Any]], show_scores: bool = False) -> 
         if len(snippet) > 200:
             snippet = snippet[:197] + '...'
         
-        if show_scores:
-            lines.append(f"{i}. [{score:.4f}] {title}")
+        # Apply ANSI highlighting to snippet if we have query terms
+        if colorize_output and query_terms and snippet:
+            # Convert **term** markers to ANSI codes
+            snippet = re.sub(
+                r'\*\*([^*]+)\*\*',
+                lambda m: highlight_match(m.group(1)),
+                snippet
+            )
+        
+        # Build the result lines with colors
+        if colorize_output:
+            if show_scores:
+                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}")
+            else:
+                lines.append(f"{style_number(i)} {style_title(title)}")
+            
+            lines.append(f"   {style_url(url)}")
+            
+            if snippet:
+                lines.append(f"   {snippet}")
         else:
-            lines.append(f"{i}. {title}")
-        
-        lines.append(f"   {url}")
-        
-        if snippet:
-            # Wrap long snippets
-            lines.append(f"   {snippet}")
+            # Plain text output
+            if show_scores:
+                lines.append(f"{i}. [{score:.4f}] {title}")
+            else:
+                lines.append(f"{i}. {title}")
+            
+            lines.append(f"   {url}")
+            
+            if snippet:
+                lines.append(f"   {snippet}")
         
         lines.append("")
     

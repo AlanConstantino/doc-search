@@ -3,8 +3,141 @@ Utility functions for URL normalization and helpers.
 """
 
 import re
+import sys
 import hashlib
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
+
+
+# ============================================================================
+# ANSI Terminal Colors & Formatting
+# ============================================================================
+
+class Colors:
+    """ANSI escape codes for terminal colors and styles."""
+    
+    # Check if terminal supports colors
+    _supports_color = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+    
+    # Reset
+    RESET = '\033[0m' if _supports_color else ''
+    
+    # Styles
+    BOLD = '\033[1m' if _supports_color else ''
+    DIM = '\033[2m' if _supports_color else ''
+    ITALIC = '\033[3m' if _supports_color else ''
+    UNDERLINE = '\033[4m' if _supports_color else ''
+    
+    # Foreground colors
+    BLACK = '\033[30m' if _supports_color else ''
+    RED = '\033[31m' if _supports_color else ''
+    GREEN = '\033[32m' if _supports_color else ''
+    YELLOW = '\033[33m' if _supports_color else ''
+    BLUE = '\033[34m' if _supports_color else ''
+    MAGENTA = '\033[35m' if _supports_color else ''
+    CYAN = '\033[36m' if _supports_color else ''
+    WHITE = '\033[37m' if _supports_color else ''
+    
+    # Bright foreground colors
+    BRIGHT_BLACK = '\033[90m' if _supports_color else ''
+    BRIGHT_RED = '\033[91m' if _supports_color else ''
+    BRIGHT_GREEN = '\033[92m' if _supports_color else ''
+    BRIGHT_YELLOW = '\033[93m' if _supports_color else ''
+    BRIGHT_BLUE = '\033[94m' if _supports_color else ''
+    BRIGHT_MAGENTA = '\033[95m' if _supports_color else ''
+    BRIGHT_CYAN = '\033[96m' if _supports_color else ''
+    BRIGHT_WHITE = '\033[97m' if _supports_color else ''
+    
+    @classmethod
+    def disable(cls):
+        """Disable all colors."""
+        for attr in dir(cls):
+            if attr.isupper() and not attr.startswith('_'):
+                setattr(cls, attr, '')
+    
+    @classmethod
+    def enable(cls):
+        """Re-enable colors if terminal supports them."""
+        if hasattr(sys.stdout, 'isatty') and sys.stdout.isatty():
+            cls._supports_color = True
+            # Re-apply colors
+            cls.RESET = '\033[0m'
+            cls.BOLD = '\033[1m'
+            cls.DIM = '\033[2m'
+            cls.ITALIC = '\033[3m'
+            cls.UNDERLINE = '\033[4m'
+            cls.BLACK = '\033[30m'
+            cls.RED = '\033[31m'
+            cls.GREEN = '\033[32m'
+            cls.YELLOW = '\033[33m'
+            cls.BLUE = '\033[34m'
+            cls.MAGENTA = '\033[35m'
+            cls.CYAN = '\033[36m'
+            cls.WHITE = '\033[37m'
+            cls.BRIGHT_BLACK = '\033[90m'
+            cls.BRIGHT_RED = '\033[91m'
+            cls.BRIGHT_GREEN = '\033[92m'
+            cls.BRIGHT_YELLOW = '\033[93m'
+            cls.BRIGHT_BLUE = '\033[94m'
+            cls.BRIGHT_MAGENTA = '\033[95m'
+            cls.BRIGHT_CYAN = '\033[96m'
+            cls.BRIGHT_WHITE = '\033[97m'
+
+
+def colorize(text: str, *styles) -> str:
+    """Apply color/style codes to text."""
+    if not styles:
+        return text
+    return ''.join(styles) + text + Colors.RESET
+
+
+def highlight_match(text: str) -> str:
+    """Highlight a matched term with bold + cyan."""
+    return colorize(text, Colors.BOLD, Colors.CYAN)
+
+
+def style_title(text: str) -> str:
+    """Style a title with bold + bright white."""
+    return colorize(text, Colors.BOLD, Colors.BRIGHT_WHITE)
+
+
+def style_url(text: str) -> str:
+    """Style a URL with blue + underline."""
+    return colorize(text, Colors.BLUE, Colors.UNDERLINE)
+
+
+def style_score(score: float) -> str:
+    """Style a score with yellow."""
+    return colorize(f"[{score:.4f}]", Colors.YELLOW)
+
+
+def style_number(num: int) -> str:
+    """Style a result number."""
+    return colorize(f"{num}.", Colors.BRIGHT_MAGENTA, Colors.BOLD)
+
+
+def style_snippet(text: str) -> str:
+    """Style snippet text with dim."""
+    return colorize(text, Colors.DIM)
+
+
+def style_info(text: str) -> str:
+    """Style info text with bright black (gray)."""
+    return colorize(text, Colors.BRIGHT_BLACK)
+
+
+def style_success(text: str) -> str:
+    """Style success text with green."""
+    return colorize(text, Colors.GREEN)
+
+
+def style_error(text: str) -> str:
+    """Style error text with red."""
+    return colorize(text, Colors.RED)
+
+
+def style_warning(text: str) -> str:
+    """Style warning text with yellow."""
+    return colorize(text, Colors.YELLOW)
 
 
 def normalize_url(url: str) -> str:

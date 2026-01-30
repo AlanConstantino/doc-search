@@ -4,6 +4,14 @@ A self-contained Python application for searching through large technical docume
 
 **Zero dependencies** - Uses only Python 3.9+ standard library.
 
+## ✨ What's New in v1.3.0
+
+- 🌐 **Beautiful Web UI** - Launch a local search interface with `serve` command
+- 🎨 **Colorful CLI** - ANSI-colored output with highlighted search terms
+- ⚡ **Performance Metrics** - See "Found X results in Y ms" for every search
+- ⌨️ **Keyboard Navigation** - j/k to navigate, Enter to open results
+- 🌙 **Dark Mode** - Web UI supports both dark and light themes
+
 ## Features
 
 - 🕷️ **Web Crawler** - BFS crawler with politeness delays and robots.txt compliance
@@ -12,11 +20,12 @@ A self-contained Python application for searching through large technical docume
 - 📄 **HTML Text Extraction** - Smart extraction that filters navigation/boilerplate
 - 🔍 **BM25 Search** - Industry-standard ranking algorithm (same as Elasticsearch)
 - 📝 **Phrase Search** - Support for `"exact phrase"` queries in quotes
-- ✨ **Highlighted Snippets** - Query terms are **bolded** in search results
+- ✨ **Highlighted Snippets** - Query terms are highlighted in search results
 - 📍 **Smart Snippets** - Shows most relevant section with highest term density
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
-- 🖥️ **CLI Interface** - Easy command-line interface with interactive mode
+- 🖥️ **CLI Interface** - Beautiful command-line interface with interactive mode
+- 🌐 **Web UI** - Modern, responsive search interface with real-time results
 
 ## Installation
 
@@ -64,9 +73,17 @@ python -m doc_search index https://docs.example.com
 
 ### 3. Search
 
+#### Command Line
+
 ```bash
-# Single query (terms highlighted in snippets with **term**)
+# Single query (with colored output and performance metrics)
 python -m doc_search search https://docs.example.com "api authentication"
+
+# ✓ Found 15 results in 42.3ms
+# 
+# 1. Authentication API — Example Docs
+#    https://docs.example.com/api/auth
+#    Learn how to authenticate your API requests...
 
 # Exact phrase search - words must appear adjacent
 python -m doc_search search https://docs.example.com '"list comprehension"'
@@ -77,12 +94,37 @@ python -m doc_search search https://docs.example.com 'python "list comprehension
 # Show BM25 scores
 python -m doc_search search https://docs.example.com "api authentication" --scores
 
-# Output as JSON
+# Output as JSON (includes timing data)
 python -m doc_search search https://docs.example.com "api authentication" --json
+
+# Disable colors (for piping/scripting)
+python -m doc_search search https://docs.example.com "api" --no-color
 
 # Interactive mode
 python -m doc_search interactive https://docs.example.com
 ```
+
+#### Web UI 🆕
+
+```bash
+# Start the web search interface
+python -m doc_search serve https://docs.example.com
+
+# Custom port
+python -m doc_search serve https://docs.example.com --port 3000
+
+# Open browser automatically
+python -m doc_search serve https://docs.example.com --open
+```
+
+Then visit http://127.0.0.1:8080 in your browser:
+
+- **Real-time search** as you type
+- **Highlighted matches** in results
+- **Relevance scores** shown for each result
+- **Keyboard navigation**: `j`/`k` to navigate, `Enter` to open, `/` to focus search
+- **Dark/light mode** toggle
+- **Mobile responsive** design
 
 ## Commands
 
@@ -92,6 +134,7 @@ python -m doc_search interactive https://docs.example.com
 | `index <site>` | Build search index from crawled pages |
 | `search <site> <query>` | Search the index |
 | `interactive <site>` | Interactive search mode |
+| `serve <site>` | **🆕** Start web UI server |
 | `stats <site>` | Show site statistics |
 | `list` | List all crawled sites |
 
@@ -127,8 +170,17 @@ python -m doc_search interactive https://docs.example.com
 |--------|-------------|---------|
 | `--limit`, `-l` | Number of results | 10 |
 | `--scores`, `-s` | Show BM25 scores | false |
-| `--json`, `-j` | Output as JSON | false |
+| `--json`, `-j` | Output as JSON (includes timing) | false |
+| `--no-color` | Disable colored output | false |
 | `--quiet`, `-q` | Suppress loading messages | false |
+
+### `serve` 🆕
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--port`, `-p` | Port to listen on | 8080 |
+| `--host` | Host to bind to | 127.0.0.1 |
+| `--open`, `-o` | Open browser automatically | false |
 
 ## Data Storage
 
@@ -168,6 +220,25 @@ Uses **BM25 (Best Match 25)** ranking algorithm:
 1. Query tokenization (lowercase, stopword removal)
 2. BM25 score calculation for matching documents
 3. Results ranked by relevance score
+4. Performance timing displayed for every search
+
+## Web UI Features 🆕
+
+The web interface provides a modern, Algolia-style search experience:
+
+- **Instant search** - Results appear as you type (150ms debounce)
+- **Highlighted matches** - Search terms are highlighted in snippets
+- **Score display** - See relevance scores for each result
+- **Performance metrics** - "Found X results in Y ms" shown on every search
+- **Keyboard shortcuts**:
+  - `/` - Focus search input
+  - `j` or `↓` - Select next result
+  - `k` or `↑` - Select previous result
+  - `Enter` or `o` - Open selected result
+  - `Esc` - Clear search
+- **Theme support** - Toggle between dark and light modes
+- **Index stats** - Document count and term count displayed in footer
+- **Mobile responsive** - Works great on phones and tablets
 
 ## Performance
 
@@ -186,6 +257,9 @@ Tested capabilities:
 python -m doc_search crawl https://docs.python.org/3/
 python -m doc_search index https://docs.python.org/3/
 python -m doc_search search https://docs.python.org/3/ "async await"
+
+# Or use the web UI
+python -m doc_search serve https://docs.python.org/3/ --open
 ```
 
 ### Crawl with Auth
