@@ -7,9 +7,13 @@ A self-contained Python application for searching through large technical docume
 ## Features
 
 - 🕷️ **Web Crawler** - BFS crawler with politeness delays and robots.txt compliance
+- ⚡ **Parallel Crawling** - Optional multi-threaded crawling with `--workers N`
 - 🔐 **HTTP Basic Auth** - Support for password-protected documentation
 - 📄 **HTML Text Extraction** - Smart extraction that filters navigation/boilerplate
 - 🔍 **BM25 Search** - Industry-standard ranking algorithm (same as Elasticsearch)
+- 📝 **Phrase Search** - Support for `"exact phrase"` queries in quotes
+- ✨ **Highlighted Snippets** - Query terms are **bolded** in search results
+- 📍 **Smart Snippets** - Shows most relevant section with highest term density
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
 - 🖥️ **CLI Interface** - Easy command-line interface with interactive mode
@@ -31,8 +35,11 @@ Or copy the `doc_search/` directory to your project.
 ### 1. Crawl a Documentation Site
 
 ```bash
-# Basic crawl
+# Basic crawl (single-threaded, most polite)
 python -m doc_search crawl https://docs.example.com
+
+# Parallel crawling - 4 workers (still respects per-domain rate limits)
+python -m doc_search crawl https://docs.example.com --workers 4
 
 # Crawl with authentication
 python -m doc_search crawl https://docs.example.com --user admin
@@ -58,8 +65,14 @@ python -m doc_search index https://docs.example.com
 ### 3. Search
 
 ```bash
-# Single query
+# Single query (terms highlighted in snippets with **term**)
 python -m doc_search search https://docs.example.com "api authentication"
+
+# Exact phrase search - words must appear adjacent
+python -m doc_search search https://docs.example.com '"list comprehension"'
+
+# Mix phrases with regular terms
+python -m doc_search search https://docs.example.com 'python "list comprehension" tutorial'
 
 # Show BM25 scores
 python -m doc_search search https://docs.example.com "api authentication" --scores
@@ -93,6 +106,9 @@ python -m doc_search interactive https://docs.example.com
 | `--delay`, `-d` | Delay between requests (seconds) | 1.0 |
 | `--timeout`, `-t` | Request timeout (seconds) | 30 |
 | `--max-pages`, `-m` | Maximum pages to crawl | unlimited |
+| `--max-depth` | Maximum link depth from start URL | unlimited |
+| `--workers`, `-w` | Parallel workers (respects per-domain rate limits) | 1 |
+| `--no-same-path` | Allow crawling outside the starting path | false |
 | `--fresh`, `-f` | Ignore saved state, start fresh | false |
 | `--quiet`, `-q` | Suppress progress output | false |
 
@@ -249,7 +265,6 @@ for r in results:
 
 ## Limitations
 
-- Single-threaded (by design, for politeness)
 - English tokenization only
 - No stemming (to keep dependencies at zero)
 - In-memory index (fine for 15K pages, may need adjustment for larger)
