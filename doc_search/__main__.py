@@ -70,7 +70,9 @@ def cmd_crawl(args):
         delay=args.delay,
         timeout=args.timeout,
         max_pages=args.max_pages,
+        max_depth=args.max_depth,
         auth=auth,
+        same_path=not args.no_same_path,
         verbose=not args.quiet
     )
     
@@ -214,6 +216,7 @@ def cmd_stats(args):
         stats = metadata.get('stats', {})
         print("Crawl Statistics:")
         print(f"  Pages crawled: {stats.get('pages_crawled', 0)}")
+        print(f"  Pages skipped: {stats.get('pages_skipped', 0)}")
         print(f"  Pages failed: {stats.get('pages_failed', 0)}")
         print(f"  Data downloaded: {format_size(stats.get('bytes_downloaded', 0))}")
         if stats.get('elapsed_seconds'):
@@ -290,23 +293,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Crawl a documentation site
-  python -m doc_search crawl https://docs.example.com
+  # Crawl a documentation site (stays under /3.11/ path by default)
+  python -m doc_search crawl https://docs.python.org/3.11/
+  
+  # Crawl with page limit and depth limit
+  python -m doc_search crawl https://docs.python.org/3.11/ --max-pages 500 --max-depth 5
+  
+  # Crawl entire domain (ignore path restriction)
+  python -m doc_search crawl https://docs.example.com --no-same-path
   
   # Crawl with authentication
   python -m doc_search crawl https://docs.example.com --user admin
   
-  # Resume an interrupted crawl
-  python -m doc_search crawl https://docs.example.com
-  
   # Build search index
-  python -m doc_search index ~/.doc_search/sites/abc123
+  python -m doc_search index https://docs.python.org/3.11/
   
   # Search the index
-  python -m doc_search search ~/.doc_search/sites/abc123 "api reference"
+  python -m doc_search search https://docs.python.org/3.11/ "list comprehension"
   
   # Interactive search mode
-  python -m doc_search interactive ~/.doc_search/sites/abc123
+  python -m doc_search interactive https://docs.python.org/3.11/
 """
     )
     
@@ -325,6 +331,10 @@ Examples:
                              help='Request timeout in seconds (default: 30)')
     crawl_parser.add_argument('--max-pages', '-m', type=int,
                              help='Maximum number of pages to crawl')
+    crawl_parser.add_argument('--max-depth', type=int,
+                             help='Maximum link depth from starting URL')
+    crawl_parser.add_argument('--no-same-path', action='store_true',
+                             help='Allow crawling outside the starting path (default: stay under starting path)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
                              help='Start fresh crawl (ignore saved state)')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',

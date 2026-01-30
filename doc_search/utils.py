@@ -37,11 +37,16 @@ def normalize_url(url: str) -> str:
     # Remove fragment
     fragment = ''
     
-    # Normalize path
+    # Normalize path - preserve trailing slash for directory-like paths
     path = parsed.path or '/'
-    # Remove trailing slash except for root
+    # Only remove trailing slash if path ends with a file extension
+    # This preserves /3.11/ and /library/ but normalizes /index.html/
     if path != '/' and path.endswith('/'):
-        path = path.rstrip('/')
+        # Check if it looks like a file (common HTML extensions)
+        path_without_slash = path.rstrip('/')
+        file_extensions = ('.html', '.htm', '.php', '.asp', '.aspx', '.jsp', '.shtml')
+        if any(path_without_slash.endswith(ext) for ext in file_extensions):
+            path = path_without_slash
     
     return urlunparse((scheme, netloc, path, parsed.params, query, fragment))
 
