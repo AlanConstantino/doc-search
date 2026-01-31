@@ -57,7 +57,7 @@ def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
 
 def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
     """
-    Check if a phrase appears in text (words must be adjacent).
+    Check if a phrase appears in text (words must be adjacent, separated by whitespace).
     
     Args:
         text: Text to search in
@@ -65,27 +65,24 @@ def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
         
     Returns:
         True if phrase is found
+        
+    Note:
+        Words must be separated by whitespace, not hyphens or other characters.
+        "quick brown" matches "quick brown" but NOT "quick-brown".
     """
     if not phrase_words:
         return True
     
-    # Tokenize the text
-    text_tokens = tokenize(text)
-    
-    if len(phrase_words) > len(text_tokens):
+    if not text:
         return False
     
-    # Sliding window search
-    for i in range(len(text_tokens) - len(phrase_words) + 1):
-        match = True
-        for j, word in enumerate(phrase_words):
-            if text_tokens[i + j] != word:
-                match = False
-                break
-        if match:
-            return True
+    # Build regex pattern: words separated by whitespace only
+    # \b ensures word boundaries, \s+ requires actual whitespace between words
+    # This prevents "quick-brown" from matching "quick brown"
+    pattern_parts = [re.escape(word) for word in phrase_words]
+    pattern = r'\b' + r'\s+'.join(pattern_parts) + r'\b'
     
-    return False
+    return bool(re.search(pattern, text.lower()))
 
 
 def find_phrase_positions(text: str, phrase_words: List[str]) -> List[int]:

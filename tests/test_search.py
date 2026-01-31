@@ -75,6 +75,26 @@ class TestPhraseMatch(unittest.TestCase):
         """Phrase matching should be case insensitive."""
         text = 'Python List Comprehension'
         self.assertTrue(check_phrase_match(text, ['list', 'comprehension']))
+    
+    def test_phrase_not_hyphenated(self):
+        """Hyphenated words should NOT match phrase search."""
+        text = 'quick-brown fox'
+        self.assertFalse(check_phrase_match(text, ['quick', 'brown']))
+    
+    def test_phrase_not_underscored(self):
+        """Underscored words should NOT match phrase search."""
+        text = 'quick_brown fox'
+        self.assertFalse(check_phrase_match(text, ['quick', 'brown']))
+    
+    def test_phrase_with_multiple_spaces(self):
+        """Multiple spaces between words should still match."""
+        text = 'quick    brown fox'
+        self.assertTrue(check_phrase_match(text, ['quick', 'brown']))
+    
+    def test_phrase_with_newline(self):
+        """Newline between words should still match."""
+        text = 'quick\nbrown fox'
+        self.assertTrue(check_phrase_match(text, ['quick', 'brown']))
 
 
 class TestHighlightTerms(unittest.TestCase):
