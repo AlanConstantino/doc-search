@@ -88,7 +88,8 @@ def cmd_crawl(args):
         auth_token=auth_token,
         same_path=not args.no_same_path,
         verbose=not args.quiet,
-        workers=args.workers
+        workers=args.workers,
+        extract_docs=args.extract_docs
     )
     
     # Start crawling
@@ -586,6 +587,8 @@ Examples:
                              help='Start fresh crawl (ignore saved state)')
     crawl_parser.add_argument('--workers', '-w', type=int, default=1,
                              help='Number of parallel workers (default: 1 for politeness)')
+    crawl_parser.add_argument('--extract-docs', action='store_true',
+                             help='Extract text from PDFs and Office documents')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     crawl_parser.set_defaults(func=cmd_crawl)
