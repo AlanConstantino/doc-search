@@ -60,6 +60,29 @@ python -m doc_search interactive https://docs.example.com
 python -m doc_search serve https://docs.example.com --open
 ```
 
+## Web UI
+
+The easiest way to search is through the built-in web interface:
+
+```bash
+# Start the server (opens browser automatically)
+python -m doc_search serve https://docs.example.com --open
+
+# Or specify a port
+python -m doc_search serve https://docs.example.com --port 3000
+
+# Using the script
+./scripts/serve.sh https://docs.example.com
+```
+
+This starts a local web server at `http://localhost:8080` with:
+- Search box with instant results
+- Highlighted matching terms
+- Click-through links to original pages
+- No JavaScript required (works everywhere)
+
+Press `Ctrl+C` to stop the server.
+
 ## Commands
 
 | Command | Description |
