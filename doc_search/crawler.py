@@ -217,11 +217,14 @@ class CrawlState:
             return None
     
     def add_urls(self, urls: List[Tuple[str, int]]):
-        """Add URLs to the queue (thread-safe)."""
+        """Add URLs to the queue (thread-safe), avoiding duplicates."""
         with self._lock:
+            # Build set of URLs already in pending for fast lookup
+            pending_urls = {url for url, _ in self.pending}
             for url, depth in urls:
-                if url not in self.visited:
+                if url not in self.visited and url not in pending_urls:
                     self.pending.append((url, depth))
+                    pending_urls.add(url)
     
     def mark_visited(self, url: str):
         """Mark a URL as visited (thread-safe)."""
@@ -623,7 +626,7 @@ class Crawler:
         
         # Handle 304 Not Modified (incremental crawling)
         if fetch_meta.get('not_modified'):
-            self._log(f"  ⏭️  Unchanged (304)")
+            self._log(f"  ⏭️  Unchanged (304): {url}")
             self.state.increment_stat('pages_unchanged')
             # Still extract links from existing content for discovery
             if existing_meta and existing_meta.get('text'):
@@ -646,7 +649,7 @@ class Crawler:
         content_hash = self._content_hash(content)
         if self.incremental and existing_meta:
             if existing_meta.get('content_hash') == content_hash:
-                self._log(f"  ⏭️  Unchanged (same hash)")
+                self._log(f"  ⏭️  Unchanged (same hash): {url}")
                 self.state.increment_stat('pages_unchanged')
                 return []
         
