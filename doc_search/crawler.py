@@ -549,10 +549,10 @@ class Crawler:
         
         return False
     
-    def _should_crawl(self, url: str, depth: int = 0) -> bool:
+    def _should_crawl(self, url: str, depth: int = 0, force: bool = False) -> bool:
         """Check if URL should be crawled."""
-        # Already visited
-        if self.state.is_visited(url):
+        # Already visited (skip in incremental mode with force=True)
+        if not force and self.state.is_visited(url):
             return False
         
         # Depth check
@@ -750,7 +750,27 @@ class Crawler:
             self.rate_limiter = RateLimiter(self.delay)
         
         # Load or initialize state
-        if resume and self.state.load():
+        if self.incremental:
+            # Incremental mode: re-check all previously crawled pages
+            self._log("Loading existing pages for incremental crawl...")
+            existing_urls = []
+            for page_file in self.pages_dir.glob('*.json'):
+                try:
+                    with open(page_file, 'r') as f:
+                        page_data = json.load(f)
+                        if 'url' in page_data:
+                            existing_urls.append((page_data['url'], page_data.get('depth', 0)))
+                except (json.JSONDecodeError, IOError):
+                    continue
+            
+            # Clear visited set and add all existing URLs to queue
+            self.state.clear()
+            self.state.add_urls(existing_urls)
+            self.state.add_urls([(self.base_url, 0)])  # Also check for new pages from start
+            with self.state._lock:
+                self.state.stats['start_time'] = time.time()
+            self._log(f"Found {len(existing_urls)} pages to check for updates")
+        elif resume and self.state.load():
             self._log(f"Resuming crawl: {len(self.state.visited)} pages visited, {len(self.state.pending)} pending")
         else:
             self.state.clear()
