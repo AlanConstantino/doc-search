@@ -31,9 +31,8 @@ SKIP_EXTENSIONS = frozenset([
     # Archives
     '.tar', '.gz', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz',
     '.zip', '.rar', '.7z', '.bz2', '.xz', '.lz', '.lzma',
-    # Documents
-    '.pdf', '.epub', '.mobi', '.doc', '.docx', '.xls', '.xlsx', 
-    '.ppt', '.pptx', '.odt', '.ods', '.odp',
+    # Documents (excluded by default, can be enabled with extract_docs=True)
+    '.epub', '.mobi', '.ppt', '.pptx', '.odt', '.ods', '.odp',
     # Images
     '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico', '.webp',
     '.bmp', '.tiff', '.tif', '.psd', '.ai', '.eps',
@@ -48,6 +47,13 @@ SKIP_EXTENSIONS = frozenset([
     '.whl', '.egg', '.jar', '.war', '.apk', '.ipa',
     # Source archives
     '.asc', '.sig', '.sha256', '.md5',
+])
+
+# Document extensions that can be extracted (when extract_docs=True)
+EXTRACTABLE_DOC_EXTENSIONS = frozenset([
+    '.pdf',
+    '.doc', '.docx',
+    '.xls', '.xlsx',
 ])
 
 # URL path patterns that indicate non-documentation content
@@ -131,6 +137,7 @@ class CrawlState:
             'pages_crawled': 0,
             'pages_failed': 0,
             'pages_skipped': 0,
+            'docs_extracted': 0,
             'bytes_downloaded': 0,
             'start_time': None,
             'last_checkpoint': None
@@ -188,6 +195,7 @@ class CrawlState:
                 'pages_crawled': 0,
                 'pages_failed': 0,
                 'pages_skipped': 0,
+                'docs_extracted': 0,
                 'bytes_downloaded': 0,
                 'start_time': None,
                 'last_checkpoint': None
@@ -275,7 +283,8 @@ class Crawler:
         same_path: bool = True,  # Only crawl URLs under the starting path
         url_filter: Optional[Callable[[str], bool]] = None,
         verbose: bool = True,
-        workers: int = 1  # Number of parallel workers
+        workers: int = 1,  # Number of parallel workers
+        extract_docs: bool = False  # Extract text from PDFs and Office docs
     ):
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
@@ -291,6 +300,18 @@ class Crawler:
         self.url_filter = url_filter
         self.verbose = verbose
         self.workers = max(1, workers)  # At least 1 worker
+        self.extract_docs = extract_docs
+        
+        # Initialize PDF extractor if document extraction is enabled
+        self._pdf_extractor = None
+        if self.extract_docs:
+            from .pdf_extractor import PDFExtractor
+            self._pdf_extractor = PDFExtractor(
+                timeout=timeout,
+                user_agent=self.USER_AGENT,
+                auth=auth,
+                auth_token=auth_token
+            )
         
         # Extract base path for same_path filtering
         # Preserve trailing slash for proper path matching
@@ -433,10 +454,26 @@ class Crawler:
             if path.endswith(ext):
                 return True
         
+        # Check extractable document extensions
+        # Skip them unless extract_docs is enabled
+        if not self.extract_docs:
+            for ext in EXTRACTABLE_DOC_EXTENSIONS:
+                if path.endswith(ext):
+                    return True
+        
         # Handle compound extensions like .tar.gz
         if '.tar.' in path:
             return True
         
+        return False
+    
+    def _is_extractable_doc(self, url: str) -> bool:
+        """Check if URL is an extractable document (PDF, DOCX, etc.)."""
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        for ext in EXTRACTABLE_DOC_EXTENSIONS:
+            if path.endswith(ext):
+                return True
         return False
     
     def _is_skippable_path(self, url: str) -> bool:
@@ -524,6 +561,10 @@ class Crawler:
         # Mark as visited
         self.state.mark_visited(url)
         
+        # Check if this is an extractable document (PDF, DOCX, etc.)
+        if self.extract_docs and self._is_extractable_doc(url):
+            return self._process_document(url, depth)
+        
         # Fetch page
         self._log(f"{self.state.get_progress(self.max_pages)} Crawling: {url}")
         content, content_type = self._fetch(url)
@@ -566,6 +607,52 @@ class Crawler:
         self.state.increment_stat('pages_crawled')
         
         return new_urls
+    
+    def _process_document(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """
+        Process an extractable document (PDF, DOCX, etc.).
+        Returns empty list (documents don't contain links to crawl).
+        """
+        self._log(f"{self.state.get_progress(self.max_pages)} Extracting: {url}")
+        
+        # Currently only PDF extraction is implemented
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        
+        if path.endswith('.pdf'):
+            result = self._pdf_extractor.extract_from_url(url)
+            
+            if result['error']:
+                self._log(f"  Document extraction failed: {result['error']}")
+                self.state.mark_failed(url, depth)
+                return None
+            
+            # Save document data
+            page_data = {
+                'url': url,
+                'title': result['title'] or Path(parsed.path).stem,
+                'description': f"PDF document, {result['pages']} pages",
+                'text': result['text'],
+                'headings': [],  # PDFs don't have structured headings
+                'depth': depth,
+                'crawled_at': time.time(),
+                'doc_type': 'pdf',
+                'doc_pages': result['pages'],
+                'doc_metadata': result['metadata']
+            }
+            self._save_page(url, page_data)
+            
+            # Update stats
+            self.state.increment_stat('pages_crawled')
+            self.state.increment_stat('docs_extracted')
+            
+            self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars")
+            return []
+        
+        # DOCX/XLSX extraction not yet implemented
+        self._log(f"  Skipping unsupported document type: {path}")
+        self.state.increment_stat('pages_skipped')
+        return []
     
     def crawl(self, resume: bool = True) -> Dict[str, Any]:
         """
