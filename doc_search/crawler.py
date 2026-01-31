@@ -686,7 +686,9 @@ class Crawler:
         
         # Log crawl parameters
         if self.same_path:
-            self._log(f"Path restriction: {self.base_path}/*")
+            self._log(f"📁 Path restriction: {self.base_path}/*")
+        else:
+            self._log(f"🌐 Crawling entire domain: {self.base_domain}")
         if self.max_depth is not None:
             self._log(f"Max depth: {self.max_depth}")
         if self.workers > 1:
