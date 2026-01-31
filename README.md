@@ -4,16 +4,14 @@ A self-contained Python application for searching through large technical docume
 
 **Zero dependencies** - Uses only Python 3.9+ standard library.
 
-## ✨ What's New in v1.6.0
+## ✨ What's New in v1.7.0
 
-- 📄 **Pagination** - Web UI now paginates results (10 per page, pure HTML)
-- 💡 **"Did you mean..."** - Spell check suggestions for typos using Levenshtein distance
-- ⌨️ **Autocomplete** - Type-ahead suggestions with `autocomplete` command
-- 🏷️ **Faceted Search** - Filter results by URL path category or section
-- 🔗 **Synonym Expansion** - Matches related terms (function→method, list→array, etc.)
-- 🌿 **Porter Stemming** - Better recall by matching word variants (running→run)
+- 🌐 **Domain-Agnostic Facets** - Faceted search now works with any documentation site (Python, Docusaurus, ReadTheDocs, etc.) by extracting categories from URL paths
+- 🔇 **Opt-in Synonyms** - Synonym expansion now disabled by default to improve precision; use `--synonyms` flag or `--synonyms-file` for custom groups
+- 📄 **Pagination** - Web UI paginates results (10 per page, up to 100 results) with pure HTML navigation
 
 ### Previous Updates
+- **v1.6.0**: Spell check ("Did you mean..."), Autocomplete, Faceted Search, Synonym Expansion, Porter Stemming
 - **v1.4.0**: Porter Stemming, Beautiful Web UI, Colorful CLI, Performance Metrics
 - **v1.3.0**: Web UI server (`serve` command)
 - **v1.2.0**: Phrase search, snippet highlighting, parallel crawling
@@ -32,7 +30,7 @@ A self-contained Python application for searching through large technical docume
 - 💾 **Resumable Crawls** - Interrupt and resume large crawls anytime
 - 🗜️ **Compressed Index** - gzip compression for efficient storage
 
-### Enhanced Search (v1.6.0)
+### Enhanced Search (v1.6+)
 - 💡 **Spell Correction** - "Did you mean..." suggestions for misspelled queries
 - ⌨️ **Autocomplete** - Fast prefix-based term suggestions
 - 🏷️ **Faceted Search** - Filter by URL path category (auto-extracted, domain-agnostic)
