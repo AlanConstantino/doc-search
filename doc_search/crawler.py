@@ -280,7 +280,7 @@ class Crawler:
         auth: Optional[Tuple[str, str]] = None,  # (username, password)
         auth_token: Optional[str] = None,  # Pre-encoded Base64 token
         stay_on_domain: bool = True,
-        same_path: bool = True,  # Only crawl URLs under the starting path
+        same_path: bool = False,  # If True, only crawl URLs under the starting path
         url_filter: Optional[Callable[[str], bool]] = None,
         verbose: bool = True,
         workers: int = 1,  # Number of parallel workers

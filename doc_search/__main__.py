@@ -94,7 +94,7 @@ def cmd_crawl(args):
         max_depth=args.max_depth,
         auth=auth,
         auth_token=auth_token,
-        same_path=not args.no_same_path,
+        same_path=getattr(args, 'same_path', False),
         verbose=not args.quiet,
         workers=args.workers,
         extract_docs=args.extract_docs
@@ -560,8 +560,8 @@ Examples:
   # Crawl with page limit and depth limit
   python -m doc_search crawl https://docs.python.org/3.11/ --max-pages 500 --max-depth 5
   
-  # Crawl entire domain (ignore path restriction)
-  python -m doc_search crawl https://docs.example.com --no-same-path
+  # Restrict to starting path only
+  python -m doc_search crawl https://docs.example.com/guide/ --same-path
   
   # Crawl with authentication
   python -m doc_search crawl https://docs.example.com --user admin
@@ -595,8 +595,8 @@ Examples:
                              help='Maximum number of pages to crawl')
     crawl_parser.add_argument('--max-depth', type=int,
                              help='Maximum link depth from starting URL')
-    crawl_parser.add_argument('--no-same-path', action='store_true',
-                             help='Allow crawling outside the starting path (default: stay under starting path)')
+    crawl_parser.add_argument('--same-path', action='store_true',
+                             help='Only crawl URLs under the starting path (default: crawl entire domain)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
                              help='Start fresh crawl (ignore saved state)')
     crawl_parser.add_argument('--workers', '-w', type=int, default=1,
