@@ -4,7 +4,7 @@ Search through large technical documentation websites offline.
 
 Built for sites with 5,000–15,000+ pages. Crawl once, search instantly.
 
-**Zero dependencies** — Pure Python 3.9+ standard library.
+**Zero dependencies** — Pure Python 3.6+ standard library (PDF support included via vendored PyPDF2).
 
 ## Why?
 
@@ -19,6 +19,7 @@ doc-search solves this by crawling documentation sites and building a local sear
 
 - 🕷️ **Smart Crawler** — Respects robots.txt, handles rate limits, resumes interrupted crawls
 - 🔍 **BM25 Search** — Industry-standard relevance ranking
+- 📄 **PDF Extraction** — Index PDF documents alongside HTML pages
 - 📝 **Phrase Search** — Use `"exact phrases"` in quotes
 - 💡 **Spell Check** — "Did you mean..." suggestions
 - ⌨️ **Autocomplete** — Type-ahead suggestions
@@ -81,6 +82,7 @@ python -m doc_search serve https://docs.example.com --open
 --max-depth 5        # Limit link depth
 --delay 2.0          # Seconds between requests (default: 1.0)
 --workers 4          # Parallel crawlers (default: 1)
+--extract-docs       # Extract text from PDFs
 --user admin         # HTTP Basic Auth username
 ```
 
@@ -91,6 +93,18 @@ python -m doc_search serve https://docs.example.com --open
 --json               # Output as JSON
 --synonyms           # Enable synonym expansion
 ```
+
+## PDF Extraction
+
+Extract and index text from PDF documents alongside HTML pages:
+
+```bash
+python -m doc_search crawl https://docs.example.com --extract-docs
+```
+
+PDFs are indexed with the same format as HTML pages, so they appear in search results seamlessly. Metadata (title, author, page count) is extracted when available.
+
+**Note:** Encrypted PDFs require the optional `cryptography` package. Image-only PDFs (scanned documents) won't have extractable text.
 
 ## Data Storage
 
