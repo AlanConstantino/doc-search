@@ -12,13 +12,17 @@ from urllib.error import URLError, HTTPError
 import ssl
 import base64
 
-# Add vendor directory to path for pypdf import
+# Add vendor directory to path for PyPDF2 import
 _vendor_path = Path(__file__).parent.parent / 'vendor'
 if str(_vendor_path) not in sys.path:
     sys.path.insert(0, str(_vendor_path))
 
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+# Suppress PyPDF2 deprecation warning (we're vendoring it intentionally)
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    from PyPDF2 import PdfReader
+    from PyPDF2.errors import PdfReadError
 
 
 class PDFExtractor:
