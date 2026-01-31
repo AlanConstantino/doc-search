@@ -97,7 +97,8 @@ def cmd_crawl(args):
         same_path=getattr(args, 'same_path', False),
         verbose=not args.quiet,
         workers=args.workers,
-        extract_docs=args.extract_docs
+        extract_docs=args.extract_docs,
+        incremental=getattr(args, 'incremental', False)
     )
     
     # Start crawling
@@ -599,6 +600,8 @@ Examples:
                              help='Only crawl URLs under the starting path (default: crawl entire domain)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
                              help='Start fresh crawl (ignore saved state)')
+    crawl_parser.add_argument('--incremental', '-i', action='store_true',
+                             help='Only re-download pages that have changed since last crawl')
     crawl_parser.add_argument('--workers', '-w', type=int, default=1,
                              help='Number of parallel workers (default: 1 for politeness)')
     crawl_parser.add_argument('--extract-docs', action='store_true',

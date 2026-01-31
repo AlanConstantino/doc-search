@@ -8,6 +8,7 @@ import time
 import base64
 import ssl
 import gzip
+import hashlib
 import threading
 from collections import deque, defaultdict
 from pathlib import Path
@@ -137,6 +138,7 @@ class CrawlState:
             'pages_crawled': 0,
             'pages_failed': 0,
             'pages_skipped': 0,
+            'pages_unchanged': 0,
             'docs_extracted': 0,
             'bytes_downloaded': 0,
             'start_time': None,
@@ -195,6 +197,7 @@ class CrawlState:
                 'pages_crawled': 0,
                 'pages_failed': 0,
                 'pages_skipped': 0,
+                'pages_unchanged': 0,
                 'docs_extracted': 0,
                 'bytes_downloaded': 0,
                 'start_time': None,
@@ -284,7 +287,8 @@ class Crawler:
         url_filter: Optional[Callable[[str], bool]] = None,
         verbose: bool = True,
         workers: int = 1,  # Number of parallel workers
-        extract_docs: bool = False  # Extract text from PDFs and Office docs
+        extract_docs: bool = False,  # Extract text from PDFs and Office docs
+        incremental: bool = False  # Only re-download changed pages
     ):
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
@@ -301,6 +305,7 @@ class Crawler:
         self.verbose = verbose
         self.workers = max(1, workers)  # At least 1 worker
         self.extract_docs = extract_docs
+        self.incremental = incremental
         
         # Initialize PDF extractor if document extraction is enabled
         self._pdf_extractor = None
@@ -369,10 +374,32 @@ class Crawler:
             return f"Basic {encoded}"
         return None
     
-    def _fetch(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+    def _get_page_metadata(self, url: str) -> Optional[Dict[str, Any]]:
+        """Load existing page metadata for incremental crawling."""
+        filename = url_to_filename(url) + '.json'
+        filepath = self.pages_dir / filename
+        
+        if not filepath.exists():
+            return None
+        
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return None
+    
+    def _content_hash(self, content: str) -> str:
+        """Generate SHA256 hash of content."""
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+    
+    def _fetch(self, url: str, etag: Optional[str] = None, 
+               last_modified: Optional[str] = None) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
         """
-        Fetch a URL and return (content, content_type).
-        Returns (None, None) on failure.
+        Fetch a URL and return (content, content_type, metadata).
+        Returns (None, None, {}) on failure.
+        
+        For incremental crawling, pass etag/last_modified from previous crawl.
+        Returns content=None with metadata={'not_modified': True} if unchanged.
         """
         domain = get_domain(url)
         self.rate_limiter.wait_for_domain(domain)
@@ -384,6 +411,12 @@ class Crawler:
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
         }
+        
+        # Add conditional headers for incremental crawling
+        if etag:
+            headers['If-None-Match'] = etag
+        if last_modified:
+            headers['If-Modified-Since'] = last_modified
         
         auth_header = self._get_auth_header()
         if auth_header:
@@ -418,10 +451,19 @@ class Crawler:
             
             self.state.increment_stat('bytes_downloaded', len(content_bytes))
             
-            return content, content_type
+            # Capture metadata for incremental crawling
+            metadata = {
+                'etag': response.headers.get('ETag'),
+                'last_modified': response.headers.get('Last-Modified'),
+            }
+            
+            return content, content_type, metadata
             
         except HTTPError as e:
-            if e.code == 429:
+            if e.code == 304:
+                # Not Modified - content unchanged
+                return None, None, {'not_modified': True}
+            elif e.code == 429:
                 # Rate limited - back off
                 retry_after = e.headers.get('Retry-After', '60')
                 try:
@@ -434,15 +476,15 @@ class Crawler:
                 self._log(f"  Server error: {e.code}")
             else:
                 self._log(f"  HTTP error: {e.code}")
-            return None, None
+            return None, None, {}
             
         except URLError as e:
             self._log(f"  URL error: {e.reason}")
-            return None, None
+            return None, None, {}
             
         except Exception as e:
             self._log(f"  Error: {e}")
-            return None, None
+            return None, None, {}
     
     def _is_skippable_extension(self, url: str) -> bool:
         """Check if URL has an extension that should be skipped."""
@@ -565,9 +607,29 @@ class Crawler:
         if self.extract_docs and self._is_extractable_doc(url):
             return self._process_document(url, depth)
         
+        # For incremental crawling, load existing page metadata
+        existing_meta = None
+        etag = None
+        last_modified = None
+        if self.incremental:
+            existing_meta = self._get_page_metadata(url)
+            if existing_meta:
+                etag = existing_meta.get('etag')
+                last_modified = existing_meta.get('last_modified')
+        
         # Fetch page
         self._log(f"{self.state.get_progress(self.max_pages)} Crawling: {url}")
-        content, content_type = self._fetch(url)
+        content, content_type, fetch_meta = self._fetch(url, etag=etag, last_modified=last_modified)
+        
+        # Handle 304 Not Modified (incremental crawling)
+        if fetch_meta.get('not_modified'):
+            self._log(f"  ⏭️  Unchanged (304)")
+            self.state.increment_stat('pages_unchanged')
+            # Still extract links from existing content for discovery
+            if existing_meta and existing_meta.get('text'):
+                # Re-parse for links (we don't store raw HTML, so skip link extraction)
+                pass
+            return []
         
         if content is None:
             # Track failure for retry
@@ -580,6 +642,14 @@ class Crawler:
             self.state.increment_stat('pages_skipped')
             return []
         
+        # For incremental: check content hash to detect changes even without 304
+        content_hash = self._content_hash(content)
+        if self.incremental and existing_meta:
+            if existing_meta.get('content_hash') == content_hash:
+                self._log(f"  ⏭️  Unchanged (same hash)")
+                self.state.increment_stat('pages_unchanged')
+                return []
+        
         # Extract content
         extracted = extract_text(content)
         
@@ -591,7 +661,7 @@ class Crawler:
             if self._should_crawl(link, new_depth):
                 new_urls.append((link, new_depth))
         
-        # Save page data
+        # Save page data with incremental metadata
         page_data = {
             'url': url,
             'title': extracted['title'],
@@ -599,7 +669,11 @@ class Crawler:
             'text': extracted['text'],
             'headings': extracted['headings'],
             'depth': depth,
-            'crawled_at': time.time()
+            'crawled_at': time.time(),
+            # Incremental crawling metadata
+            'etag': fetch_meta.get('etag'),
+            'last_modified': fetch_meta.get('last_modified'),
+            'content_hash': content_hash,
         }
         self._save_page(url, page_data)
         
@@ -689,6 +763,8 @@ class Crawler:
             self._log(f"📁 Path restriction: {self.base_path}/*")
         else:
             self._log(f"🌐 Crawling entire domain: {self.base_domain}")
+        if self.incremental:
+            self._log(f"🔄 Incremental mode: only re-downloading changed pages")
         if self.max_depth is not None:
             self._log(f"Max depth: {self.max_depth}")
         if self.workers > 1:
@@ -730,6 +806,8 @@ class Crawler:
         
         self._log(f"\nCrawl complete!")
         self._log(f"  Pages crawled: {stats['pages_crawled']}")
+        if self.incremental and stats.get('pages_unchanged', 0) > 0:
+            self._log(f"  Pages unchanged: {stats['pages_unchanged']}")
         self._log(f"  Pages skipped: {stats['pages_skipped']}")
         self._log(f"  Pages failed: {stats['pages_failed']}")
         self._log(f"  Data downloaded: {stats['bytes_downloaded'] / 1024 / 1024:.1f} MB")
