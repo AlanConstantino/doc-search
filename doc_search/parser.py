@@ -198,11 +198,16 @@ def extract_links(html: str, base_url: str) -> List[str]:
     
     links = []
     
-    # Find all href attributes
-    href_pattern = re.compile(r'<a[^>]+href=["\']([^"\']+)["\']', re.IGNORECASE)
+    # Find all href attributes (quoted or unquoted)
+    # Matches: href="...", href='...', href=value (unquoted)
+    href_pattern = re.compile(
+        r'<a[^>]+href=(?:"([^"]+)"|\'([^\']+)\'|([^\s>]+))',
+        re.IGNORECASE
+    )
     
     for match in href_pattern.finditer(html):
-        href = match.group(1)
+        # Get whichever group matched (double-quoted, single-quoted, or unquoted)
+        href = match.group(1) or match.group(2) or match.group(3)
         
         # Skip anchors, javascript, mailto, etc.
         if href.startswith(('#', 'javascript:', 'mailto:', 'tel:', 'data:')):

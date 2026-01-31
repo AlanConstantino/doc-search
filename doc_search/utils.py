@@ -5,6 +5,7 @@ Utility functions for URL normalization and helpers.
 import re
 import sys
 import hashlib
+import posixpath
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
 
 
@@ -170,16 +171,21 @@ def normalize_url(url: str) -> str:
     # Remove fragment
     fragment = ''
     
-    # Normalize path - preserve trailing slash for directory-like paths
+    # Normalize path - resolve .. and . sequences, preserve trailing slash for directories
     path = parsed.path or '/'
-    # Only remove trailing slash if path ends with a file extension
-    # This preserves /3.11/ and /library/ but normalizes /index.html/
-    if path != '/' and path.endswith('/'):
+    
+    # Resolve .. and . in path (e.g., /a/../b -> /b, /./a -> /a)
+    had_trailing_slash = path.endswith('/') and len(path) > 1
+    path = posixpath.normpath(path)
+    if path == '.':
+        path = '/'
+    
+    # Restore trailing slash for directory-like paths (not files)
+    if had_trailing_slash and not path.endswith('/'):
         # Check if it looks like a file (common HTML extensions)
-        path_without_slash = path.rstrip('/')
         file_extensions = ('.html', '.htm', '.php', '.asp', '.aspx', '.jsp', '.shtml')
-        if any(path_without_slash.endswith(ext) for ext in file_extensions):
-            path = path_without_slash
+        if not any(path.endswith(ext) for ext in file_extensions):
+            path = path + '/'
     
     return urlunparse((scheme, netloc, path, parsed.params, query, fragment))
 
