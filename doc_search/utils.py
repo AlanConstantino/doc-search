@@ -206,10 +206,26 @@ def url_to_filename(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
-def site_hash(url: str) -> str:
-    """Generate a hash for a site's base URL."""
-    domain = get_domain(url)
-    return hashlib.sha256(domain.encode()).hexdigest()[:12]
+def site_hash(url: str, include_path: bool = False) -> str:
+    """
+    Generate a hash for a site's base URL.
+    
+    Args:
+        url: The site URL
+        include_path: If True, include the URL path in the hash (allows
+                      separate storage for different paths on same domain)
+    
+    Returns:
+        12-character hash string
+    """
+    if include_path:
+        # Hash domain + path for separate storage per path
+        parsed = urlparse(url)
+        key = parsed.netloc.lower() + parsed.path.rstrip('/')
+    else:
+        # Hash domain only (default - one folder per domain)
+        key = get_domain(url)
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
 def resolve_url(base_url: str, href: str) -> str:

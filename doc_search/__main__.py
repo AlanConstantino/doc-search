@@ -33,8 +33,13 @@ from .utils import (
 DEFAULT_DATA_DIR = Path.home() / '.doc_search' / 'sites'
 
 
-def get_site_dir(url_or_path: str) -> Path:
-    """Get site data directory from URL or existing path."""
+def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
+    """Get site data directory from URL or existing path.
+    
+    Args:
+        url_or_path: URL or existing directory path
+        include_path: If True, include URL path in hash (separate storage per path)
+    """
     path = Path(url_or_path)
     
     # If it's an existing directory, use it
@@ -42,7 +47,7 @@ def get_site_dir(url_or_path: str) -> Path:
         return path
     
     # Otherwise, treat as URL and generate directory
-    return DEFAULT_DATA_DIR / site_hash(url_or_path)
+    return DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=include_path)
 
 
 def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
@@ -66,11 +71,14 @@ def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
 
 def cmd_crawl(args):
     """Crawl a documentation site."""
-    site_dir = get_site_dir(args.url)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.url, include_path=separate_paths)
     site_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Crawling: {args.url}")
     print(f"Data directory: {site_dir}")
+    if separate_paths:
+        print(f"Storage mode: separate paths")
     print()
     
     # Get authentication
@@ -109,7 +117,8 @@ def cmd_crawl(args):
 
 def cmd_index(args):
     """Build search index from crawled pages."""
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     pages_dir = site_dir / 'pages'
     
     if not pages_dir.exists():
@@ -142,7 +151,8 @@ def cmd_index(args):
 
 def cmd_search(args):
     """Search the index with enhanced features."""
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
     # Find index file
     index_path = None
@@ -270,7 +280,8 @@ def cmd_search(args):
 
 def cmd_autocomplete(args):
     """Get autocomplete suggestions for a prefix."""
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
     # Find index file
     index_path = None
@@ -301,7 +312,8 @@ def cmd_autocomplete(args):
 
 def cmd_interactive(args):
     """Interactive search mode with beautiful colored output and enhanced features."""
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
     # Find index file
     index_path = None
@@ -390,7 +402,8 @@ def cmd_interactive(args):
 
 def cmd_stats(args):
     """Show statistics for a crawled site."""
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
     if not site_dir.exists():
         print(f"Error: Site directory not found: {site_dir}")
@@ -481,7 +494,8 @@ def cmd_serve(args):
     import webbrowser
     from .server import run_server
     
-    site_dir = get_site_dir(args.site_dir)
+    separate_paths = getattr(args, 'separate_paths', False)
+    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
     # Find index file
     index_path = None
@@ -589,6 +603,8 @@ Examples:
                              help='Number of parallel workers (default: 1 for politeness)')
     crawl_parser.add_argument('--extract-docs', action='store_true',
                              help='Extract text from PDFs and Office documents')
+    crawl_parser.add_argument('--separate-paths', action='store_true',
+                             help='Store different URL paths separately (e.g., /3.11/ and /3.12/ get their own folders)')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     crawl_parser.set_defaults(func=cmd_crawl)
@@ -604,6 +620,8 @@ Examples:
                              help='Don\'t compress the index file')
     index_parser.add_argument('--no-stemming', action='store_true',
                              help='Disable Porter stemming')
+    index_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
@@ -637,6 +655,8 @@ Examples:
                               help='Filter by URL path category (e.g., library, tutorial, api)')
     search_parser.add_argument('--filter-section', metavar='SECTION',
                               help='Filter by section name')
+    search_parser.add_argument('--separate-paths', action='store_true',
+                              help='Use if site was crawled with --separate-paths')
     search_parser.set_defaults(func=cmd_search)
     
     # Autocomplete command
@@ -656,11 +676,15 @@ Examples:
                                    help='Number of results per query (default: 10)')
     interactive_parser.add_argument('--scores', '-s', action='store_true',
                                    help='Show BM25 scores')
+    interactive_parser.add_argument('--separate-paths', action='store_true',
+                                   help='Use if site was crawled with --separate-paths')
     interactive_parser.set_defaults(func=cmd_interactive)
     
     # Stats command
     stats_parser = subparsers.add_parser('stats', help='Show site statistics')
     stats_parser.add_argument('site_dir', help='Site data directory or original URL')
+    stats_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
     stats_parser.set_defaults(func=cmd_stats)
     
     # List command
@@ -676,6 +700,8 @@ Examples:
                              help='Host to bind to (default: 127.0.0.1)')
     serve_parser.add_argument('--open', '-o', action='store_true',
                              help='Open browser automatically')
+    serve_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
     serve_parser.set_defaults(func=cmd_serve)
     
     # Parse arguments
