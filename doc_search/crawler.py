@@ -16,7 +16,7 @@ from typing import Optional, Set, Dict, Any, Callable, Tuple, List
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from queue import Queue, Empty
 
 from .utils import (
@@ -948,7 +948,7 @@ class Crawler:
                     
                     active_futures -= done_futures
                     
-                except TimeoutError:
+                except (TimeoutError, FuturesTimeoutError):
                     # Timeout is fine, just continue checking
                     pass
             
