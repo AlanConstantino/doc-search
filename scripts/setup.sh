@@ -1,21 +1,25 @@
 #!/bin/bash
 # One-shot: Crawl + Index a site
-# Usage: ./setup.sh [URL] [--pdf]
+# Usage: ./setup.sh [URL] [--pdf] [--same-path]
 
 set -e
 
 URL="${1:-}"
 PDF_FLAG=""
+SAME_PATH_FLAG=""
 
-# Check for --pdf flag
+# Check for flags
 for arg in "$@"; do
     if [[ "$arg" == "--pdf" ]]; then
         PDF_FLAG="--extract-docs"
     fi
+    if [[ "$arg" == "--same-path" ]]; then
+        SAME_PATH_FLAG="--same-path"
+    fi
 done
 
 # Prompt for URL if not provided
-if [[ -z "$URL" || "$URL" == "--pdf" ]]; then
+if [[ -z "$URL" || "$URL" == "--"* ]]; then
     read -p "Enter URL to crawl: " URL
 fi
 
@@ -26,6 +30,7 @@ fi
 
 echo "🚀 Setting up doc-search for: $URL"
 [[ -n "$PDF_FLAG" ]] && echo "📄 PDF extraction enabled"
+[[ -n "$SAME_PATH_FLAG" ]] && echo "📁 Staying within starting path"
 echo ""
 
 # Crawl
@@ -33,7 +38,8 @@ echo "Step 1/2: Crawling..."
 python3 -m doc_search crawl "$URL" \
     --delay 1.0 \
     --workers 1 \
-    $PDF_FLAG
+    $PDF_FLAG \
+    $SAME_PATH_FLAG
 
 echo ""
 
