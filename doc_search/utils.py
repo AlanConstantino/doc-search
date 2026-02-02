@@ -322,7 +322,7 @@ STOP_WORDS = frozenset([
 ])
 
 
-def tokenize(text: str, stem: bool = False) -> list:
+def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
     
@@ -347,13 +347,14 @@ def tokenize(text: str, stem: bool = False) -> list:
        they're typically not meaningful for search (e.g., "a", "I" are already
        stop words, and other single letters are usually noise).
     
-    5. **Optional stemming**: When ``stem=True``, words are reduced to their
-       root form using the Porter Stemming algorithm (e.g., "running" → "run",
-       "files" → "file").
+    5. **Optional stemming**: When ``apply_stemming=True``, words are reduced
+       to their root form using the Porter Stemming algorithm (e.g.,
+       "running" → "run", "files" → "file").
     
     Args:
         text: The input text to tokenize.
-        stem: If True, apply Porter stemming to each token. Default is False.
+        apply_stemming: If True, apply Porter stemming to each token.
+            Default is False.
     
     Returns:
         A list of processed tokens (lowercase strings).
@@ -365,7 +366,7 @@ def tokenize(text: str, stem: bool = False) -> list:
         >>> tokenize("Python3 programming is fun!")
         ['python3', 'programming', 'fun']
         
-        >>> tokenize("running files", stem=True)
+        >>> tokenize("running files", apply_stemming=True)
         ['run', 'file']
         
         >>> tokenize("A B C test")  # Single letters filtered
@@ -384,9 +385,9 @@ def tokenize(text: str, stem: bool = False) -> list:
     tokens = [w for w in words if w not in STOP_WORDS and len(w) > 1]
     
     # Apply stemming if requested
-    if stem:
-        from .stemmer import stem as stem_word
-        tokens = [stem_word(t) for t in tokens]
+    if apply_stemming:
+        from .stemmer import stem
+        tokens = [stem(t) for t in tokens]
     
     return tokens
 

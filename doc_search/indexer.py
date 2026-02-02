@@ -70,14 +70,14 @@ class BM25Index:
         self.url_to_id[url] = doc_id
         
         # Tokenize content (title gets more weight by being included multiple times)
-        title_tokens = tokenize(title, stem=self.stem) * 3  # Title words count 3x
+        title_tokens = tokenize(title, apply_stemming=self.stem) * 3  # Title words count 3x
         heading_tokens = []
         if headings:
             for level, heading_text in headings:
                 weight = max(1, 4 - level)  # h1=3x, h2=2x, h3+=1x
-                heading_tokens.extend(tokenize(heading_text, stem=self.stem) * weight)
+                heading_tokens.extend(tokenize(heading_text, apply_stemming=self.stem) * weight)
         
-        text_tokens = tokenize(text, stem=self.stem)
+        text_tokens = tokenize(text, apply_stemming=self.stem)
         all_tokens = title_tokens + heading_tokens + text_tokens
         
         # Calculate term frequencies
@@ -186,7 +186,7 @@ class BM25Index:
         Returns:
             List of result dicts with 'url', 'title', 'description', 'score'
         """
-        query_terms = tokenize(query, stem=self.stem)
+        query_terms = tokenize(query, apply_stemming=self.stem)
         
         if not query_terms:
             return []
