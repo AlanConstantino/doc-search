@@ -78,24 +78,41 @@ class TestEnhancedSearchEngine(unittest.TestCase):
     
     def test_basic_search(self):
         """Basic search should work."""
-        response = self.engine.search('python classes')
+        results = self.engine.search('python classes')
         
-        self.assertIn('results', response)
-        self.assertTrue(len(response['results']) > 0)
+        self.assertIsInstance(results, list)
+        self.assertTrue(len(results) > 0)
         
         # First result should be about classes
-        first = response['results'][0]
+        first = results[0]
         self.assertIn('classes', first['title'].lower())
     
-    def test_search_returns_dict(self):
-        """Search should return dict with expected keys."""
-        response = self.engine.search('python')
+    def test_search_returns_list(self):
+        """Search should return list for LSP compliance with SearchEngine."""
+        results = self.engine.search('python')
+        
+        self.assertIsInstance(results, list)
+        if results:
+            self.assertIn('url', results[0])
+            self.assertIn('title', results[0])
+    
+    def test_search_enhanced_returns_dict(self):
+        """search_enhanced should return dict with expected keys."""
+        response = self.engine.search_enhanced('python')
         
         self.assertIsInstance(response, dict)
         self.assertIn('results', response)
         self.assertIn('suggestion', response)
         self.assertIn('facets', response)
         self.assertIn('query', response)
+    
+    def test_last_metadata_attributes(self):
+        """Search should populate last_* instance attributes."""
+        self.engine.search('python')
+        
+        self.assertEqual(self.engine.last_query, 'python')
+        self.assertIsInstance(self.engine.last_facets, dict)
+        # last_suggestion may be None if no typo
     
     def test_spelling_suggestion(self):
         """Should suggest corrections for misspelled queries."""
@@ -128,28 +145,30 @@ class TestEnhancedSearchEngine(unittest.TestCase):
     def test_facet_filter(self):
         """Should filter results by facet."""
         # Get all results first
-        all_response = self.engine.search('python')
-        all_count = len(all_response['results'])
+        all_results = self.engine.search('python')
+        all_count = len(all_results)
         
         # Filter by category (from URL path)
-        filtered_response = self.engine.search(
+        filtered_results = self.engine.search(
             'python',
             facet_filters={'category': 'tutorial'}
         )
         
         # Filtered should have fewer or equal results
-        self.assertLessEqual(len(filtered_response['results']), all_count)
+        self.assertLessEqual(len(filtered_results), all_count)
     
     def test_synonym_expansion(self):
         """Search should expand synonyms."""
-        response = self.engine.search('function', expand_synonyms=True)
+        results = self.engine.search('function', expand_synonyms=True)
         
-        # Check if expanded_query is set (if synonyms were found)
-        # The response should still work
-        self.assertIn('results', response)
+        # The search should return results
+        self.assertIsInstance(results, list)
+        
+        # Check if expanded_query is set via attribute
+        # (may be None if no synonyms found)
     
     def test_search_simple_backward_compat(self):
-        """search_simple should return just results list."""
+        """search_simple should return just results list (same as search now)."""
         results = self.engine.search_simple('python')
         
         self.assertIsInstance(results, list)
@@ -186,13 +205,13 @@ class TestEnhancedSearchEngineDisabledFeatures(unittest.TestCase):
     
     def test_search_with_disabled_features(self):
         """Search should work with features disabled."""
-        response = self.engine.search('test')
+        results = self.engine.search('test')
         
-        self.assertIn('results', response)
+        self.assertIsInstance(results, list)
         # No suggestion when spellcheck disabled
-        self.assertIsNone(response['suggestion'])
+        self.assertIsNone(self.engine.last_suggestion)
         # Empty facets when facets disabled
-        self.assertEqual(response['facets'], {})
+        self.assertEqual(self.engine.last_facets, {})
     
     def test_autocomplete_when_disabled(self):
         """Autocomplete should return empty when disabled."""
@@ -233,33 +252,33 @@ class TestEnhancedSearchEngineIntegration(unittest.TestCase):
     
     def test_combined_features(self):
         """Test multiple features in one search."""
-        response = self.engine.search('functoin', expand_synonyms=True)
+        results = self.engine.search('functoin', expand_synonyms=True)
         
         # Should have results (even with typo if synonym helps)
-        self.assertIn('results', response)
+        self.assertIsInstance(results, list)
         
-        # Should have suggestion for typo
-        if response['suggestion']:
-            self.assertNotEqual(response['suggestion'], 'functoin')
+        # Should have suggestion for typo (accessed via attribute)
+        if self.engine.last_suggestion:
+            self.assertNotEqual(self.engine.last_suggestion, 'functoin')
     
     def test_faceted_search_workflow(self):
         """Test typical faceted search workflow."""
         # 1. Initial search
-        response1 = self.engine.search('reference')
+        self.engine.search('reference')
         
-        # 2. Get available facets
-        facets = response1['facets']
+        # 2. Get available facets from last search
+        facets = self.engine.last_facets
         
         # 3. Apply filter if we have facets
         if facets and 'category' in facets:
             first_category = list(facets['category'].keys())[0]
-            response2 = self.engine.search(
+            filtered_results = self.engine.search(
                 'reference',
                 facet_filters={'category': first_category}
             )
             
             # Should have results
-            self.assertIn('results', response2)
+            self.assertIsInstance(filtered_results, list)
     
     def test_autocomplete_workflow(self):
         """Test autocomplete -> search workflow."""
@@ -269,8 +288,8 @@ class TestEnhancedSearchEngineIntegration(unittest.TestCase):
         # 2. User selects a suggestion or continues typing
         if suggestions:
             query = suggestions[0]
-            response = self.engine.search(query)
-            self.assertIn('results', response)
+            results = self.engine.search(query)
+            self.assertIsInstance(results, list)
 
 
 if __name__ == '__main__':

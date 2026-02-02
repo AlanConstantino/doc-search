@@ -250,6 +250,11 @@ class EnhancedSearchEngine(SearchEngine):
     - Autocomplete / type-ahead suggestions
     - Faceted search (filter by section/type)
     - Query expansion with synonyms (disabled by default)
+    
+    Note: The search() method returns List[Dict[str, Any]] for LSP compliance
+    with SearchEngine. Enhanced metadata (suggestion, facets, etc.) is stored
+    in instance attributes after each search, or use search_enhanced() for
+    a dict response containing all metadata.
     """
     
     def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None,
@@ -283,6 +288,12 @@ class EnhancedSearchEngine(SearchEngine):
         self._autocomplete: Optional[Autocomplete] = None
         self._facets: Optional[FacetIndex] = None
         self._synonyms: Optional[SynonymExpander] = None
+        
+        # Last search metadata (populated after each search() call)
+        self.last_suggestion: Optional[str] = None
+        self.last_facets: Dict[str, Dict[str, int]] = {}
+        self.last_query: str = ''
+        self.last_expanded_query: Optional[str] = None
         
         # Build enhanced features from index
         self._build_enhanced_features()
@@ -418,9 +429,15 @@ class EnhancedSearchEngine(SearchEngine):
         snippet_length: int = 150,
         facet_filters: Optional[Dict[str, str]] = None,
         expand_synonyms: bool = True
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
-        Enhanced search with additional features.
+        Search the index with enhanced features.
+        
+        Returns the same type as SearchEngine.search() for LSP compliance.
+        Enhanced metadata (suggestion, facets, expanded_query) is stored in
+        instance attributes: last_suggestion, last_facets, last_expanded_query.
+        
+        Use search_enhanced() to get a dict response with all metadata included.
         
         Args:
             query: Search query
@@ -432,34 +449,32 @@ class EnhancedSearchEngine(SearchEngine):
             expand_synonyms: Whether to expand query with synonyms
             
         Returns:
-            Dict with 'results', 'suggestion', 'facets' keys
+            List of result dictionaries (same as SearchEngine.search())
         """
-        response: Dict[str, Any] = {
-            'results': [],
-            'suggestion': None,
-            'facets': {},
-            'query': query,
-            'expanded_query': None
-        }
+        # Reset last search metadata
+        self.last_suggestion = None
+        self.last_facets = {}
+        self.last_query = query
+        self.last_expanded_query = None
         
         # Parse query
         terms, phrases = parse_query(query)
         
         if not terms and not phrases:
-            return response
+            return []
         
         # Check for spelling suggestions
         if self._spellchecker:
             suggestion = self.get_spelling_suggestion(query)
             if suggestion and suggestion.lower() != query.lower():
-                response['suggestion'] = suggestion
+                self.last_suggestion = suggestion
         
         # Expand query with synonyms
         expanded_terms = list(terms)
         if expand_synonyms and self._synonyms and terms:
             expanded_terms = self._synonyms.expand_terms(terms, max_per_term=2)
             if expanded_terms != list(terms):
-                response['expanded_query'] = ' '.join(expanded_terms)
+                self.last_expanded_query = ' '.join(expanded_terms)
         
         # Flatten phrases into terms for BM25 scoring
         all_terms = list(expanded_terms)
@@ -540,22 +555,66 @@ class EnhancedSearchEngine(SearchEngine):
             if len(results) >= top_k:
                 break
         
-        response['results'] = results
-        
         # Get facet counts for results
         if self._facets and results:
-            response['facets'] = self.get_facet_counts(results)
+            self.last_facets = self.get_facet_counts(results)
         
-        return response
+        return results
+    
+    def search_enhanced(
+        self, 
+        query: str, 
+        top_k: int = 10,
+        min_score: float = 0.0,
+        highlight: bool = True,
+        snippet_length: int = 150,
+        facet_filters: Optional[Dict[str, str]] = None,
+        expand_synonyms: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Enhanced search that returns a dict with results and metadata.
+        
+        This is a convenience method that calls search() and packages the
+        results with the metadata stored in instance attributes.
+        
+        Args:
+            query: Search query
+            top_k: Maximum results
+            min_score: Minimum score threshold
+            highlight: Highlight query terms
+            snippet_length: Target snippet length
+            facet_filters: Optional facet filters (type -> value)
+            expand_synonyms: Whether to expand query with synonyms
+            
+        Returns:
+            Dict with 'results', 'suggestion', 'facets', 'query', 'expanded_query' keys
+        """
+        results = self.search(
+            query=query,
+            top_k=top_k,
+            min_score=min_score,
+            highlight=highlight,
+            snippet_length=snippet_length,
+            facet_filters=facet_filters,
+            expand_synonyms=expand_synonyms
+        )
+        
+        return {
+            'results': results,
+            'suggestion': self.last_suggestion,
+            'facets': self.last_facets,
+            'query': self.last_query,
+            'expanded_query': self.last_expanded_query
+        }
     
     def search_simple(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
         """
         Simple search that returns just results (like base SearchEngine).
         
-        For backward compatibility.
+        Deprecated: Use search() directly, which now returns List[Dict[str, Any]].
+        This method is kept for backward compatibility.
         """
-        response = self.search(query, top_k=top_k, **kwargs)
-        return response['results']
+        return self.search(query, top_k=top_k, **kwargs)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get enhanced search engine statistics."""
