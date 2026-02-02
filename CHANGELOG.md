@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/health` endpoint for server monitoring
 - Structured error tracking with `CrawlError` dataclass
 - Error summary in `stats` command (`--show-errors` for details)
-- Comprehensive test coverage (459 tests)
+- Comprehensive test coverage (743 tests)
+  - CLI command tests for all commands
+  - CLI parser tests
+  - Integration tests (crawl → index → search workflow)
 
 ### Changed
 - Extracted `CrawlState` to `crawl_state.py`
