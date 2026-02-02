@@ -426,9 +426,9 @@ class SearchEngine:
     
     def get_document(self, url: str) -> Optional[Dict[str, Any]]:
         """Get document metadata by URL."""
-        doc_id = self.index.url_to_id.get(url)
+        doc_id = self.index.get_doc_id(url)
         if doc_id is not None:
-            return self.index.documents.get(doc_id)
+            return self.index.get_document(doc_id)
         return None
     
     def get_stats(self) -> Dict[str, Any]:
@@ -679,7 +679,7 @@ class EnhancedSearchEngine(SearchEngine):
             # Get doc IDs from results
             doc_ids = set()
             for r in results:
-                doc_id = self.index.url_to_id.get(r['url'])
+                doc_id = self.index.get_doc_id(r['url'])
                 if doc_id is not None:
                     doc_ids.add(doc_id)
             return self._facets.get_facet_counts(doc_ids)
@@ -757,13 +757,18 @@ class EnhancedSearchEngine(SearchEngine):
         # Apply facet filters
         if facet_filters and self._facets:
             filtered_urls = set()
-            all_doc_ids = {self.index.url_to_id[r['url']] for r in bm25_results 
-                          if r['url'] in self.index.url_to_id}
+            all_doc_ids = set()
+            for r in bm25_results:
+                doc_id = self.index.get_doc_id(r['url'])
+                if doc_id is not None:
+                    all_doc_ids.add(doc_id)
             filtered_doc_ids = self._facets.filter_by_facets(all_doc_ids, facet_filters)
             
-            # Map back to URLs
-            id_to_url = {v: k for k, v in self.index.url_to_id.items()}
-            filtered_urls = {id_to_url[doc_id] for doc_id in filtered_doc_ids}
+            # Map back to URLs using document metadata
+            for doc_id in filtered_doc_ids:
+                doc = self.index.get_document(doc_id)
+                if doc:
+                    filtered_urls.add(doc['url'])
             bm25_results = [r for r in bm25_results if r['url'] in filtered_urls]
         
         # Process results (phrase matching, snippets, etc.)
@@ -807,7 +812,7 @@ class EnhancedSearchEngine(SearchEngine):
             
             # Add facets for this result
             if self._facets:
-                doc_id = self.index.url_to_id.get(r['url'])
+                doc_id = self.index.get_doc_id(r['url'])
                 if doc_id is not None:
                     result['facets'] = self._facets.get_doc_facets(doc_id)
             

@@ -55,5 +55,95 @@ class TestBM25IndexParameters(unittest.TestCase):
         self.assertIn('b', str(ctx.exception))
 
 
+class TestBM25IndexAccessors(unittest.TestCase):
+    """Tests for BM25Index accessor methods."""
+    
+    def setUp(self):
+        """Set up a test index with sample documents."""
+        self.index = BM25Index()
+        
+        # Add sample documents
+        self.index.add_document(
+            doc_id=0,
+            url='https://example.com/page1',
+            title='First Page',
+            text='This is the first page content.',
+            description='Description of first page'
+        )
+        self.index.add_document(
+            doc_id=1,
+            url='https://example.com/page2',
+            title='Second Page',
+            text='This is the second page content.',
+            description='Description of second page'
+        )
+    
+    def test_get_doc_id_existing(self):
+        """get_doc_id should return correct ID for existing URL."""
+        doc_id = self.index.get_doc_id('https://example.com/page1')
+        self.assertEqual(doc_id, 0)
+        
+        doc_id = self.index.get_doc_id('https://example.com/page2')
+        self.assertEqual(doc_id, 1)
+    
+    def test_get_doc_id_nonexistent(self):
+        """get_doc_id should return None for non-existent URL."""
+        doc_id = self.index.get_doc_id('https://example.com/nonexistent')
+        self.assertIsNone(doc_id)
+    
+    def test_get_document_existing(self):
+        """get_document should return document metadata for existing ID."""
+        doc = self.index.get_document(0)
+        self.assertIsNotNone(doc)
+        self.assertEqual(doc['url'], 'https://example.com/page1')
+        self.assertEqual(doc['title'], 'First Page')
+        self.assertEqual(doc['description'], 'Description of first page')
+    
+    def test_get_document_nonexistent(self):
+        """get_document should return None for non-existent ID."""
+        doc = self.index.get_document(999)
+        self.assertIsNone(doc)
+    
+    def test_has_url_existing(self):
+        """has_url should return True for indexed URLs."""
+        self.assertTrue(self.index.has_url('https://example.com/page1'))
+        self.assertTrue(self.index.has_url('https://example.com/page2'))
+    
+    def test_has_url_nonexistent(self):
+        """has_url should return False for non-indexed URLs."""
+        self.assertFalse(self.index.has_url('https://example.com/nonexistent'))
+        self.assertFalse(self.index.has_url('https://other.com/page'))
+    
+    def test_accessor_chain(self):
+        """Test get_doc_id -> get_document chain."""
+        url = 'https://example.com/page2'
+        doc_id = self.index.get_doc_id(url)
+        self.assertIsNotNone(doc_id)
+        
+        doc = self.index.get_document(doc_id)
+        self.assertIsNotNone(doc)
+        self.assertEqual(doc['url'], url)
+
+
+class TestBM25IndexEmpty(unittest.TestCase):
+    """Tests for BM25Index accessors with empty index."""
+    
+    def setUp(self):
+        """Set up an empty index."""
+        self.index = BM25Index()
+    
+    def test_get_doc_id_empty(self):
+        """get_doc_id should return None for empty index."""
+        self.assertIsNone(self.index.get_doc_id('https://any.url'))
+    
+    def test_get_document_empty(self):
+        """get_document should return None for empty index."""
+        self.assertIsNone(self.index.get_document(0))
+    
+    def test_has_url_empty(self):
+        """has_url should return False for empty index."""
+        self.assertFalse(self.index.has_url('https://any.url'))
+
+
 if __name__ == '__main__':
     unittest.main()

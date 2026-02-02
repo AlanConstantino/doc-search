@@ -312,3 +312,39 @@ class BM25Index:
             'b': self.b,
             'stemming': self.stem
         }
+    
+    def get_doc_id(self, url: str) -> Optional[int]:
+        """
+        Get the document ID for a given URL.
+        
+        Args:
+            url: The document URL
+            
+        Returns:
+            Document ID if found, None otherwise
+        """
+        return self.url_to_id.get(url)
+    
+    def get_document(self, doc_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get document metadata by document ID.
+        
+        Args:
+            doc_id: The document ID
+            
+        Returns:
+            Document dict with 'url', 'title', 'description' if found, None otherwise
+        """
+        return self.documents.get(doc_id)
+    
+    def has_url(self, url: str) -> bool:
+        """
+        Check if a URL is in the index.
+        
+        Args:
+            url: The URL to check
+            
+        Returns:
+            True if URL is indexed, False otherwise
+        """
+        return url in self.url_to_id
