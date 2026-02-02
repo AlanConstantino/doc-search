@@ -282,19 +282,69 @@ class Crawler:
                     wait_time = DEFAULT_RATE_LIMIT_BACKOFF
                 self.rate_limiter.set_backoff(domain, wait_time)
                 self._log(f"  Rate limited, backing off for {wait_time}s")
+                return None, None, {
+                    'error_type': 'http',
+                    'error_message': f'HTTP {e.code}: Rate limited (retry after {wait_time}s)'
+                }
             elif e.code >= 500:
                 self._log(f"  Server error: {e.code}")
+                return None, None, {
+                    'error_type': 'http',
+                    'error_message': f'HTTP {e.code}: Server error'
+                }
             else:
                 self._log(f"  HTTP error: {e.code}")
-            return None, None, {}
+                return None, None, {
+                    'error_type': 'http',
+                    'error_message': f'HTTP {e.code}'
+                }
             
         except URLError as e:
-            self._log(f"  URL error: {e.reason}")
-            return None, None, {}
+            reason = str(e.reason)
+            # Check for SSL errors
+            if 'ssl' in reason.lower() or 'certificate' in reason.lower():
+                self._log(f"  SSL error: {reason}")
+                return None, None, {
+                    'error_type': 'ssl',
+                    'error_message': reason
+                }
+            # Check for timeout
+            elif 'timed out' in reason.lower() or 'timeout' in reason.lower():
+                self._log(f"  Timeout: {reason}")
+                return None, None, {
+                    'error_type': 'timeout',
+                    'error_message': reason
+                }
+            else:
+                self._log(f"  URL error: {reason}")
+                return None, None, {
+                    'error_type': 'network',
+                    'error_message': reason
+                }
+            
+        except ssl.SSLError as e:
+            message = str(e)
+            self._log(f"  SSL error: {message}")
+            return None, None, {
+                'error_type': 'ssl',
+                'error_message': message
+            }
+            
+        except TimeoutError as e:
+            message = str(e) or 'Connection timed out'
+            self._log(f"  Timeout: {message}")
+            return None, None, {
+                'error_type': 'timeout',
+                'error_message': message
+            }
             
         except Exception as e:
-            self._log(f"  Error: {e}")
-            return None, None, {}
+            message = str(e)
+            self._log(f"  Error: {message}")
+            return None, None, {
+                'error_type': 'unknown',
+                'error_message': message
+            }
     
     def _is_skippable_extension(self, url: str) -> bool:
         """Check if URL has an extension that should be skipped."""
@@ -442,6 +492,12 @@ class Crawler:
             return []
         
         if content is None:
+            # Record error if available in metadata
+            error_type = fetch_meta.get('error_type')
+            error_message = fetch_meta.get('error_message')
+            if error_type and error_message:
+                self.state.record_error(url, error_type, error_message)
+            
             # Track failure for retry
             self.state.mark_failed(url, depth)
             return None
@@ -508,6 +564,7 @@ class Crawler:
             
             if result['error']:
                 self._log(f"  Document extraction failed: {result['error']}")
+                self.state.record_error(url, 'parse', f"PDF extraction failed: {result['error']}")
                 self.state.mark_failed(url, depth)
                 return None
             
