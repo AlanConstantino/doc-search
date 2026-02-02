@@ -620,10 +620,14 @@ class SearchHandler(BaseHTTPRequestHandler):
     
     engine: SearchEngine = None
     version: str = ""
+    log_requests: bool = False
     
     def log_message(self, format, *args):
-        """Suppress default logging."""
-        pass
+        """Log HTTP requests if enabled."""
+        if self.log_requests:
+            message = format % args
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{timestamp}] {self.address_string()} - {message}")
     
     def send_html(self, content: str, status: int = 200):
         """Send HTML response."""
@@ -692,10 +696,23 @@ def run_server(
     engine: SearchEngine,
     host: str = '127.0.0.1',
     port: int = 8888,
-    version: str = ""
+    version: str = "",
+    log_requests: bool = False
 ) -> HTTPServer:
-    """Create and return the HTTP server (doesn't start it)."""
+    """Create and return the HTTP server (doesn't start it).
+    
+    Args:
+        engine: The SearchEngine instance to use for queries
+        host: Host address to bind to
+        port: Port number to listen on
+        version: Version string to display
+        log_requests: If True, log HTTP requests to stdout
+        
+    Returns:
+        HTTPServer instance (call serve_forever() to start)
+    """
     SearchHandler.engine = engine
     SearchHandler.version = version
+    SearchHandler.log_requests = log_requests
     server = HTTPServer((host, port), SearchHandler)
     return server
