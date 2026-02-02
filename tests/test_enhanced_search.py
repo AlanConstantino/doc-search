@@ -5,6 +5,7 @@ Tests for the EnhancedSearchEngine with all 4 new features.
 import unittest
 import tempfile
 import json
+import warnings
 from pathlib import Path
 
 from doc_search.indexer import BM25Index
@@ -169,12 +170,27 @@ class TestEnhancedSearchEngine(unittest.TestCase):
     
     def test_search_simple_backward_compat(self):
         """search_simple should return just results list (same as search now)."""
-        results = self.engine.search_simple('python')
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            results = self.engine.search_simple('python')
         
         self.assertIsInstance(results, list)
         if results:
             self.assertIn('url', results[0])
             self.assertIn('title', results[0])
+    
+    def test_search_simple_deprecation_warning(self):
+        """search_simple should emit a DeprecationWarning."""
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.engine.search_simple('python')
+            
+            # Check that a DeprecationWarning was raised
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn('search_simple', str(w[0].message))
+            self.assertIn('deprecated', str(w[0].message))
+            self.assertIn('2.0.0', str(w[0].message))
     
     def test_enhanced_stats(self):
         """Should return enhanced statistics."""
