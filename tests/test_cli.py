@@ -4468,5 +4468,111 @@ class TestParserShortOptions(unittest.TestCase):
 import argparse
 
 
+class TestGetSiteDirValidation(CLITestCase):
+    """Tests for get_site_dir validation (Phase 2.8)."""
+    
+    def test_get_site_dir_with_valid_http_url(self):
+        """get_site_dir should accept http:// URLs."""
+        result = get_site_dir('http://example.com/docs')
+        # Should return a path in DEFAULT_DATA_DIR
+        self.assertTrue(str(result).startswith(str(DEFAULT_DATA_DIR)))
+    
+    def test_get_site_dir_with_valid_https_url(self):
+        """get_site_dir should accept https:// URLs."""
+        result = get_site_dir('https://example.com/docs')
+        # Should return a path in DEFAULT_DATA_DIR
+        self.assertTrue(str(result).startswith(str(DEFAULT_DATA_DIR)))
+    
+    def test_get_site_dir_with_existing_directory(self):
+        """get_site_dir should accept existing directories."""
+        result = get_site_dir(str(self.site_dir))
+        self.assertEqual(result, self.site_dir)
+    
+    def test_get_site_dir_with_nonexistent_path(self):
+        """get_site_dir should raise ValueError for non-existent paths."""
+        with self.assertRaises(ValueError) as ctx:
+            get_site_dir('/nonexistent/path/to/nowhere')
+        
+        error_msg = str(ctx.exception)
+        self.assertIn('Directory not found', error_msg)
+        self.assertIn('http://', error_msg)  # Should suggest URL format
+        self.assertIn('https://', error_msg)
+    
+    def test_get_site_dir_with_file_instead_of_directory(self):
+        """get_site_dir should raise ValueError when path is a file."""
+        # Create a file in the temp directory
+        test_file = self.site_dir / 'test_file.txt'
+        test_file.write_text('test content')
+        
+        with self.assertRaises(ValueError) as ctx:
+            get_site_dir(str(test_file))
+        
+        error_msg = str(ctx.exception)
+        self.assertIn('Not a directory', error_msg)
+        self.assertIn('found a file', error_msg)
+    
+    def test_get_site_dir_with_invalid_url_scheme(self):
+        """get_site_dir should raise ValueError for non-http(s) URLs."""
+        # ftp:// is not a valid URL scheme for this tool
+        with self.assertRaises(ValueError) as ctx:
+            get_site_dir('ftp://example.com/docs')
+        
+        error_msg = str(ctx.exception)
+        self.assertIn('Directory not found', error_msg)
+
+
+class TestSiteDirValidationInCommands(CLITestCase):
+    """Tests that CLI commands properly handle site_dir validation errors."""
+    
+    def test_index_with_nonexistent_path_shows_error(self):
+        """index command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['index', '/nonexistent/path'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_search_with_nonexistent_path_shows_error(self):
+        """search command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['search', '/nonexistent/path', 'query'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_stats_with_nonexistent_path_shows_error(self):
+        """stats command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['stats', '/nonexistent/path'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_interactive_with_nonexistent_path_shows_error(self):
+        """interactive command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['interactive', '/nonexistent/path'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_autocomplete_with_nonexistent_path_shows_error(self):
+        """autocomplete command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['autocomplete', '/nonexistent/path', 'prefix'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_serve_with_nonexistent_path_shows_error(self):
+        """serve command should show helpful error for non-existent path."""
+        code, stdout, stderr = run_cli(['serve', '/nonexistent/path'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+    
+    def test_crawl_with_invalid_url_shows_error(self):
+        """crawl command should show helpful error for invalid URL."""
+        code, stdout, stderr = run_cli(['crawl', 'not-a-url-or-path'])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Directory not found', stdout)
+
+
 if __name__ == '__main__':
     unittest.main()
