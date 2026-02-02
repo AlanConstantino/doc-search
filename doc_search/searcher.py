@@ -5,6 +5,7 @@ Search interface for querying the BM25 index.
 import json
 import re
 import time
+import warnings
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 
@@ -611,9 +612,19 @@ class EnhancedSearchEngine(SearchEngine):
         """
         Simple search that returns just results (like base SearchEngine).
         
-        Deprecated: Use search() directly, which now returns List[Dict[str, Any]].
-        This method is kept for backward compatibility.
+        .. deprecated:: 1.9.0
+            Use :meth:`search` directly, which now returns ``List[Dict[str, Any]]``.
+            This method will be removed in version 2.0.0.
+        
+        Migration:
+            Replace ``engine.search_simple(query)`` with ``engine.search(query)``.
         """
+        warnings.warn(
+            "search_simple() is deprecated and will be removed in version 2.0.0. "
+            "Use search() directly, which now returns List[Dict[str, Any]].",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return self.search(query, top_k=top_k, **kwargs)
     
     def get_stats(self) -> Dict[str, Any]:
