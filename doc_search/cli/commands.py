@@ -3,6 +3,16 @@ Command implementations for doc-search CLI.
 
 This module contains all the cmd_* functions that implement
 the various CLI commands (crawl, index, search, etc.).
+
+API Usage:
+    All CLI commands use the unified search API:
+    - cmd_search: Uses EnhancedSearchEngine.search_enhanced() or SearchEngine.search()
+    - cmd_serve: Uses SearchEngine.search() via the web server
+    - cmd_autocomplete: Uses EnhancedSearchEngine.get_autocomplete_suggestions()
+    - cmd_interactive: Uses EnhancedSearchEngine.search_enhanced()
+    - cmd_stats: Uses SearchEngine.get_stats()
+    
+    Note: The deprecated search_simple() method is NOT used by the CLI.
 """
 
 import getpass
