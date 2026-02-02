@@ -264,7 +264,20 @@ def is_html_content(content_type: str) -> bool:
     return 'text/html' in content_type or 'application/xhtml' in content_type
 
 
-# Common stop words to exclude from indexing
+# Common stop words to exclude from indexing.
+# These are high-frequency words that appear in almost every document and
+# provide little discriminative value for search. Filtering them reduces
+# index size and improves search relevance.
+#
+# Categories:
+#   - Articles: a, an, the
+#   - Prepositions: at, by, for, from, in, of, on, to, with, etc.
+#   - Conjunctions: and, but, or, nor, so, etc.
+#   - Pronouns: i, you, he, she, it, we, they, etc.
+#   - Auxiliary verbs: am, is, are, was, were, be, been, being, etc.
+#   - Modal verbs: can, could, may, might, must, shall, should, will, would
+#   - Common adverbs: how, when, where, why, very, just, now, etc.
+#   - Quantifiers: all, any, both, each, every, few, more, most, some, etc.
 STOP_WORDS = frozenset([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
     'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 'that',
@@ -284,18 +297,63 @@ STOP_WORDS = frozenset([
 
 def tokenize(text: str, stem: bool = False) -> list:
     """
-    Tokenize text into lowercase words, removing stop words.
+    Tokenize text into lowercase words for indexing and search.
+    
+    This function performs the following transformations:
+    
+    1. **Case normalization**: All text is converted to lowercase.
+    
+    2. **Word extraction**: Uses regex pattern ``[a-z][a-z0-9_]*`` to extract
+       words that start with a letter and contain only letters, digits, or
+       underscores. This means:
+       - Words must start with a-z (not numbers or symbols)
+       - Words can contain digits after the first letter (e.g., "python3")
+       - Underscores are allowed (e.g., "my_function")
+       - Punctuation and special characters are stripped
+    
+    3. **Stop word removal**: Common English words (articles, prepositions,
+       pronouns, etc.) are filtered out. See ``STOP_WORDS`` for the full list.
+       These words appear in nearly every document and don't help distinguish
+       between documents.
+    
+    4. **Short word filtering**: Single-character tokens are removed since
+       they're typically not meaningful for search (e.g., "a", "I" are already
+       stop words, and other single letters are usually noise).
+    
+    5. **Optional stemming**: When ``stem=True``, words are reduced to their
+       root form using the Porter Stemming algorithm (e.g., "running" → "run",
+       "files" → "file").
     
     Args:
-        text: Text to tokenize.
-        stem: Whether to apply Porter stemming to tokens.
-        
+        text: The input text to tokenize.
+        stem: If True, apply Porter stemming to each token. Default is False.
+    
     Returns:
-        List of tokens.
+        A list of processed tokens (lowercase strings).
+    
+    Examples:
+        >>> tokenize("The quick brown fox")
+        ['quick', 'brown', 'fox']
+        
+        >>> tokenize("Python3 programming is fun!")
+        ['python3', 'programming', 'fun']
+        
+        >>> tokenize("running files", stem=True)
+        ['run', 'file']
+        
+        >>> tokenize("A B C test")  # Single letters filtered
+        ['test']
+    
+    Note:
+        - Numbers alone are not tokenized (must start with a letter)
+        - Email addresses and URLs are split at punctuation
+        - Non-ASCII characters are ignored (English-only tokenization)
     """
     # Convert to lowercase and extract words
+    # Pattern: start with letter, followed by letters/digits/underscores
     words = re.findall(r'\b[a-z][a-z0-9_]*\b', text.lower())
-    # Filter out stop words and very short words
+    
+    # Filter out stop words and single-character words
     tokens = [w for w in words if w not in STOP_WORDS and len(w) > 1]
     
     # Apply stemming if requested
