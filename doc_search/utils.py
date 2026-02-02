@@ -3,12 +3,37 @@ Utility functions for URL normalization and helpers.
 """
 
 import re
+import ssl
 import sys
 import base64
 import hashlib
 import posixpath
 from typing import Optional, Tuple
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
+
+
+def create_permissive_ssl_context() -> ssl.SSLContext:
+    """
+    Create SSL context that skips certificate verification.
+    
+    This is useful for crawling documentation sites with self-signed
+    certificates or internal sites where SSL verification is not needed.
+    
+    Warning:
+        This disables SSL certificate verification, which makes connections
+        vulnerable to man-in-the-middle attacks. Only use for trusted sources.
+    
+    Returns:
+        An SSLContext configured to skip certificate verification.
+    
+    Example:
+        >>> ctx = create_permissive_ssl_context()
+        >>> urlopen(url, context=ctx)
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 # ============================================================================

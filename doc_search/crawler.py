@@ -5,7 +5,6 @@ Supports parallel crawling with per-domain rate limiting.
 
 import json
 import time
-import ssl
 import gzip
 import hashlib
 import threading
@@ -18,7 +17,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 
 from .utils import (
     normalize_url, is_same_domain, url_to_filename, 
-    is_html_content, get_domain, make_basic_auth_header
+    is_html_content, get_domain, make_basic_auth_header,
+    create_permissive_ssl_context
 )
 from .robots import RobotsChecker
 from .parser import extract_text, extract_links
@@ -150,9 +150,7 @@ class Crawler:
         self.rate_limiter = RateLimiter(delay)
         
         # SSL context that doesn't verify (for self-signed certs in docs)
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.ssl_context = create_permissive_ssl_context()
         
         # Output lock for verbose messages
         self._print_lock = threading.Lock()
