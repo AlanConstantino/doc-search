@@ -1,0 +1,207 @@
+"""
+Argument parsers for doc-search CLI commands.
+
+This module defines all CLI argument parsers and their options.
+"""
+
+import argparse
+from .. import __version__
+from .commands import (
+    cmd_crawl, cmd_index, cmd_search, cmd_autocomplete,
+    cmd_interactive, cmd_stats, cmd_list, cmd_serve
+)
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create and return the main argument parser with all subcommands."""
+    parser = argparse.ArgumentParser(
+        prog='doc_search',
+        description='Search through large documentation websites.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Crawl a documentation site (stays under /3.11/ path by default)
+  python -m doc_search crawl https://docs.python.org/3.11/
+  
+  # Crawl with page limit and depth limit
+  python -m doc_search crawl https://docs.python.org/3.11/ --max-pages 500 --max-depth 5
+  
+  # Restrict to starting path only
+  python -m doc_search crawl https://docs.example.com/guide/ --same-path
+  
+  # Crawl with authentication
+  python -m doc_search crawl https://docs.example.com --user admin
+  
+  # Build search index
+  python -m doc_search index https://docs.python.org/3.11/
+  
+  # Search the index
+  python -m doc_search search https://docs.python.org/3.11/ "list comprehension"
+  
+  # Interactive search mode
+  python -m doc_search interactive https://docs.python.org/3.11/
+"""
+    )
+    
+    parser.add_argument('--version', action='version', version=f'doc_search {__version__}')
+    
+    subparsers = parser.add_subparsers(dest='command', help='Command to run')
+    
+    # Add all command parsers
+    _add_crawl_parser(subparsers)
+    _add_index_parser(subparsers)
+    _add_search_parser(subparsers)
+    _add_autocomplete_parser(subparsers)
+    _add_interactive_parser(subparsers)
+    _add_stats_parser(subparsers)
+    _add_list_parser(subparsers)
+    _add_serve_parser(subparsers)
+    
+    return parser
+
+
+def _add_crawl_parser(subparsers):
+    """Add the crawl command parser."""
+    crawl_parser = subparsers.add_parser('crawl', help='Crawl a documentation site')
+    crawl_parser.add_argument('url', help='Base URL to crawl')
+    crawl_parser.add_argument('--user', '-u', help='Username for HTTP Basic Auth')
+    crawl_parser.add_argument('--password', '-p', help='Password (will prompt if not provided)')
+    crawl_parser.add_argument('--token', help='Pre-encoded Base64 auth token (alternative to user/password)')
+    crawl_parser.add_argument('--delay', '-d', type=float, default=1.0,
+                             help='Delay between requests in seconds (default: 1.0)')
+    crawl_parser.add_argument('--timeout', '-t', type=float, default=30.0,
+                             help='Request timeout in seconds (default: 30)')
+    crawl_parser.add_argument('--max-pages', '-m', type=int,
+                             help='Maximum number of pages to crawl')
+    crawl_parser.add_argument('--max-depth', type=int,
+                             help='Maximum link depth from starting URL')
+    crawl_parser.add_argument('--same-path', action='store_true',
+                             help='Only crawl URLs under the starting path (default: crawl entire domain)')
+    crawl_parser.add_argument('--fresh', '-f', action='store_true',
+                             help='Start fresh crawl (ignore saved state)')
+    crawl_parser.add_argument('--incremental', '-i', action='store_true',
+                             help='Only re-download pages that have changed since last crawl')
+    crawl_parser.add_argument('--workers', '-w', type=int, default=1,
+                             help='Number of parallel workers (default: 1 for politeness)')
+    crawl_parser.add_argument('--extract-docs', action='store_true',
+                             help='Extract text from PDFs and Office documents')
+    crawl_parser.add_argument('--separate-paths', action='store_true',
+                             help='Store different URL paths separately (e.g., /3.11/ and /3.12/ get their own folders)')
+    crawl_parser.add_argument('--quiet', '-q', action='store_true',
+                             help='Suppress progress output')
+    crawl_parser.set_defaults(func=cmd_crawl)
+
+
+def _add_index_parser(subparsers):
+    """Add the index command parser."""
+    index_parser = subparsers.add_parser('index', help='Build search index')
+    index_parser.add_argument('site_dir', help='Site data directory or original URL')
+    index_parser.add_argument('--k1', type=float, default=1.5,
+                             help='BM25 k1 parameter (default: 1.5)')
+    index_parser.add_argument('--b', type=float, default=0.75,
+                             help='BM25 b parameter (default: 0.75)')
+    index_parser.add_argument('--no-compress', action='store_true',
+                             help='Don\'t compress the index file')
+    index_parser.add_argument('--no-stemming', action='store_true',
+                             help='Disable Porter stemming')
+    index_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
+    index_parser.add_argument('--quiet', '-q', action='store_true',
+                             help='Suppress progress output')
+    index_parser.set_defaults(func=cmd_index)
+
+
+def _add_search_parser(subparsers):
+    """Add the search command parser."""
+    search_parser = subparsers.add_parser('search', help='Search the index')
+    search_parser.add_argument('site_dir', help='Site data directory or original URL')
+    search_parser.add_argument('query', help='Search query')
+    search_parser.add_argument('--limit', '-l', type=int, default=10,
+                              help='Number of results (default: 10)')
+    search_parser.add_argument('--scores', '-s', action='store_true',
+                              help='Show BM25 scores')
+    search_parser.add_argument('--json', '-j', action='store_true',
+                              help='Output as JSON')
+    search_parser.add_argument('--quiet', '-q', action='store_true',
+                              help='Suppress loading messages')
+    search_parser.add_argument('--no-color', action='store_true',
+                              help='Disable colored output')
+    # Enhanced features
+    search_parser.add_argument('--basic', action='store_true',
+                              help='Use basic search (disable enhanced features)')
+    search_parser.add_argument('--synonyms', action='store_true',
+                              help='Enable synonym expansion (built-in programming terms)')
+    search_parser.add_argument('--synonyms-file', metavar='FILE',
+                              help='Load custom synonyms from JSON file')
+    search_parser.add_argument('--no-facets', action='store_true',
+                              help='Disable faceted search')
+    search_parser.add_argument('--show-facets', action='store_true',
+                              help='Show facet counts in output')
+    search_parser.add_argument('--filter-category', metavar='CATEGORY',
+                              help='Filter by URL path category (e.g., library, tutorial, api)')
+    search_parser.add_argument('--filter-section', metavar='SECTION',
+                              help='Filter by section name')
+    search_parser.add_argument('--separate-paths', action='store_true',
+                              help='Use if site was crawled with --separate-paths')
+    search_parser.set_defaults(func=cmd_search)
+
+
+def _add_autocomplete_parser(subparsers):
+    """Add the autocomplete command parser."""
+    auto_parser = subparsers.add_parser('autocomplete', help='Get autocomplete suggestions')
+    auto_parser.add_argument('site_dir', help='Site data directory or original URL')
+    auto_parser.add_argument('prefix', help='Prefix to get suggestions for')
+    auto_parser.add_argument('--limit', '-l', type=int, default=10,
+                            help='Maximum suggestions (default: 10)')
+    auto_parser.add_argument('--json', '-j', action='store_true',
+                            help='Output as JSON')
+    auto_parser.set_defaults(func=cmd_autocomplete)
+
+
+def _add_interactive_parser(subparsers):
+    """Add the interactive command parser."""
+    interactive_parser = subparsers.add_parser('interactive', help='Interactive search mode')
+    interactive_parser.add_argument('site_dir', help='Site data directory or original URL')
+    interactive_parser.add_argument('--limit', '-l', type=int, default=10,
+                                   help='Number of results per query (default: 10)')
+    interactive_parser.add_argument('--scores', '-s', action='store_true',
+                                   help='Show BM25 scores')
+    interactive_parser.add_argument('--separate-paths', action='store_true',
+                                   help='Use if site was crawled with --separate-paths')
+    interactive_parser.set_defaults(func=cmd_interactive)
+
+
+def _add_stats_parser(subparsers):
+    """Add the stats command parser."""
+    stats_parser = subparsers.add_parser('stats', help='Show site statistics')
+    stats_parser.add_argument('site_dir', help='Site data directory or original URL')
+    stats_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
+    stats_parser.set_defaults(func=cmd_stats)
+
+
+def _add_list_parser(subparsers):
+    """Add the list command parser."""
+    list_parser = subparsers.add_parser('list', help='List crawled sites')
+    list_parser.set_defaults(func=cmd_list)
+
+
+def _add_serve_parser(subparsers):
+    """Add the serve command parser."""
+    serve_parser = subparsers.add_parser('serve', help='Start web UI server')
+    serve_parser.add_argument('site_dir', help='Site data directory or original URL')
+    serve_parser.add_argument('--port', '-p', type=int, default=8080,
+                             help='Port to listen on (default: 8080)')
+    serve_parser.add_argument('--host', default='127.0.0.1',
+                             help='Host to bind to (default: 127.0.0.1)')
+    serve_parser.add_argument('--open', '-o', action='store_true',
+                             help='Open browser automatically')
+    serve_parser.add_argument('--log-requests', action='store_true',
+                             help='Log HTTP requests to stdout')
+    serve_parser.add_argument('--per-page', type=int, default=10,
+                             help='Results per page (default: 10)')
+    serve_parser.add_argument('--max-results', type=int, default=100,
+                             help='Maximum total results for pagination (default: 100)')
+    serve_parser.add_argument('--separate-paths', action='store_true',
+                             help='Use if site was crawled with --separate-paths')
+    serve_parser.set_defaults(func=cmd_serve)
