@@ -6,14 +6,40 @@ This module contains the CrawlState class which manages:
 - Pending URL queue
 - Failed URL retry counts
 - Crawl statistics
+- Error tracking
 - State persistence to disk
 """
 
 import json
 import threading
+import time
 from collections import deque
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Set, Dict, List, Tuple
+
+
+@dataclass
+class CrawlError:
+    """Represents an error that occurred during crawling."""
+    url: str
+    error_type: str  # e.g., 'http', 'timeout', 'parse', 'ssl'
+    message: str
+    timestamp: float  # Unix timestamp
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'CrawlError':
+        """Create a CrawlError from a dictionary."""
+        return cls(
+            url=data['url'],
+            error_type=data['error_type'],
+            message=data['message'],
+            timestamp=data['timestamp']
+        )
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization."""
+        return asdict(self)
 
 
 class CrawlState:
@@ -26,6 +52,7 @@ class CrawlState:
         self.visited: Set[str] = set()
         self.pending: deque = deque()  # (url, depth) tuples
         self.failed: Dict[str, int] = {}  # url -> retry count
+        self.errors: List[CrawlError] = []  # Structured error tracking
         self.stats = {
             'pages_crawled': 0,
             'pages_failed': 0,
@@ -45,6 +72,7 @@ class CrawlState:
                 'visited': list(self.visited),
                 'pending': list(self.pending),
                 'failed': self.failed,
+                'errors': [e.to_dict() for e in self.errors],
                 'stats': self.stats
             }
         
@@ -74,6 +102,10 @@ class CrawlState:
                     else:
                         self.pending.append((item, 0))  # Assume depth 0 for old format
                 self.failed = state.get('failed', {})
+                # Restore errors from state
+                self.errors = [
+                    CrawlError.from_dict(e) for e in state.get('errors', [])
+                ]
                 self.stats = state.get('stats', self.stats)
             return True
         except (json.JSONDecodeError, IOError):
@@ -85,6 +117,7 @@ class CrawlState:
             self.visited.clear()
             self.pending.clear()
             self.failed.clear()
+            self.errors.clear()
             self.stats = {
                 'pages_crawled': 0,
                 'pages_failed': 0,
@@ -156,3 +189,27 @@ class CrawlState:
             pending = len(self.pending)
             limit = max_pages or '∞'
             return f"[{crawled}/{limit}] (queue: {pending})"
+    
+    def record_error(self, url: str, error_type: str, message: str):
+        """Record a crawl error (thread-safe)."""
+        error = CrawlError(
+            url=url,
+            error_type=error_type,
+            message=message,
+            timestamp=time.time()
+        )
+        with self._lock:
+            self.errors.append(error)
+    
+    def get_errors(self) -> List[CrawlError]:
+        """Get all recorded errors (thread-safe)."""
+        with self._lock:
+            return list(self.errors)
+    
+    def get_error_summary(self) -> Dict[str, int]:
+        """Get error counts grouped by type (thread-safe)."""
+        with self._lock:
+            summary: Dict[str, int] = {}
+            for error in self.errors:
+                summary[error.error_type] = summary.get(error.error_type, 0) + 1
+            return summary
