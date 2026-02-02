@@ -14,7 +14,8 @@ from urllib.error import URLError, HTTPError
 from http.client import HTTPMessage
 from io import BytesIO
 
-from doc_search.crawler import Crawler, CrawlState, RateLimiter
+from doc_search.crawler import Crawler, RateLimiter
+from doc_search.crawl_state import CrawlState, CrawlError
 
 
 # ============================================================================
@@ -628,6 +629,204 @@ class TestCrawlState(CrawlerTestCase):
         
         self.assertEqual(len(errors), 0)
         self.assertEqual(state.stats['pages_crawled'], 1000)
+    
+    # -------------------------------------------------------------------------
+    # Error tracking tests
+    # -------------------------------------------------------------------------
+    
+    def test_record_error(self):
+        """record_error should add a CrawlError to the errors list."""
+        state = self.create_crawl_state()
+        
+        state.record_error(
+            url='https://example.com/error',
+            error_type='http',
+            message='404 Not Found'
+        )
+        
+        errors = state.get_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].url, 'https://example.com/error')
+        self.assertEqual(errors[0].error_type, 'http')
+        self.assertEqual(errors[0].message, '404 Not Found')
+        self.assertIsInstance(errors[0].timestamp, float)
+    
+    def test_record_multiple_errors(self):
+        """Should be able to record multiple errors."""
+        state = self.create_crawl_state()
+        
+        state.record_error('https://example.com/a', 'http', '404')
+        state.record_error('https://example.com/b', 'timeout', 'Connection timed out')
+        state.record_error('https://example.com/c', 'ssl', 'Certificate error')
+        
+        errors = state.get_errors()
+        self.assertEqual(len(errors), 3)
+    
+    def test_get_error_summary(self):
+        """get_error_summary should return counts by error type."""
+        state = self.create_crawl_state()
+        
+        state.record_error('https://example.com/a', 'http', '404')
+        state.record_error('https://example.com/b', 'http', '500')
+        state.record_error('https://example.com/c', 'timeout', 'Timed out')
+        state.record_error('https://example.com/d', 'ssl', 'SSL error')
+        state.record_error('https://example.com/e', 'http', '403')
+        
+        summary = state.get_error_summary()
+        
+        self.assertEqual(summary['http'], 3)
+        self.assertEqual(summary['timeout'], 1)
+        self.assertEqual(summary['ssl'], 1)
+    
+    def test_errors_persist_through_save_load(self):
+        """Errors should be persisted and restored correctly."""
+        state1 = self.create_crawl_state()
+        
+        state1.record_error('https://example.com/a', 'http', '404 Not Found')
+        state1.record_error('https://example.com/b', 'timeout', 'Connection timed out')
+        state1.save()
+        
+        # Load into new instance
+        state2 = self.create_crawl_state()
+        result = state2.load()
+        
+        self.assertTrue(result)
+        errors = state2.get_errors()
+        self.assertEqual(len(errors), 2)
+        
+        self.assertEqual(errors[0].url, 'https://example.com/a')
+        self.assertEqual(errors[0].error_type, 'http')
+        self.assertEqual(errors[0].message, '404 Not Found')
+        
+        self.assertEqual(errors[1].url, 'https://example.com/b')
+        self.assertEqual(errors[1].error_type, 'timeout')
+    
+    def test_clear_removes_errors(self):
+        """clear() should remove all errors."""
+        state = self.create_crawl_state()
+        
+        state.record_error('https://example.com/a', 'http', '404')
+        state.record_error('https://example.com/b', 'timeout', 'Timed out')
+        
+        state.clear()
+        
+        errors = state.get_errors()
+        self.assertEqual(len(errors), 0)
+    
+    def test_record_error_is_thread_safe(self):
+        """record_error should be thread-safe under concurrent access."""
+        state = self.create_crawl_state()
+        errors_list = []
+        
+        def record_many(start):
+            try:
+                for i in range(20):
+                    state.record_error(
+                        f'https://example.com/page{start}_{i}',
+                        'http',
+                        f'Error {start}_{i}'
+                    )
+            except Exception as e:
+                errors_list.append(e)
+        
+        threads = [threading.Thread(target=record_many, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors_list), 0)
+        # Should have 100 errors (5 threads × 20 errors each)
+        self.assertEqual(len(state.get_errors()), 100)
+
+
+# ============================================================================
+# CrawlError Tests
+# ============================================================================
+
+class TestCrawlError(CrawlerTestCase):
+    """Tests for CrawlError dataclass."""
+    
+    def test_crawl_error_creation(self):
+        """Should create CrawlError with all fields."""
+        error = CrawlError(
+            url='https://example.com/page',
+            error_type='http',
+            message='404 Not Found',
+            timestamp=1234567890.123
+        )
+        
+        self.assertEqual(error.url, 'https://example.com/page')
+        self.assertEqual(error.error_type, 'http')
+        self.assertEqual(error.message, '404 Not Found')
+        self.assertEqual(error.timestamp, 1234567890.123)
+    
+    def test_crawl_error_to_dict(self):
+        """to_dict should return serializable dictionary."""
+        error = CrawlError(
+            url='https://example.com/page',
+            error_type='timeout',
+            message='Connection timed out',
+            timestamp=1234567890.0
+        )
+        
+        result = error.to_dict()
+        
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result['url'], 'https://example.com/page')
+        self.assertEqual(result['error_type'], 'timeout')
+        self.assertEqual(result['message'], 'Connection timed out')
+        self.assertEqual(result['timestamp'], 1234567890.0)
+    
+    def test_crawl_error_from_dict(self):
+        """from_dict should create CrawlError from dictionary."""
+        data = {
+            'url': 'https://example.com/page',
+            'error_type': 'ssl',
+            'message': 'Certificate verification failed',
+            'timestamp': 1234567890.5
+        }
+        
+        error = CrawlError.from_dict(data)
+        
+        self.assertEqual(error.url, 'https://example.com/page')
+        self.assertEqual(error.error_type, 'ssl')
+        self.assertEqual(error.message, 'Certificate verification failed')
+        self.assertEqual(error.timestamp, 1234567890.5)
+    
+    def test_crawl_error_round_trip(self):
+        """to_dict → from_dict should preserve all data."""
+        original = CrawlError(
+            url='https://example.com/test',
+            error_type='parse',
+            message='Invalid HTML structure',
+            timestamp=9876543210.999
+        )
+        
+        # Round-trip through dict
+        data = original.to_dict()
+        restored = CrawlError.from_dict(data)
+        
+        self.assertEqual(restored.url, original.url)
+        self.assertEqual(restored.error_type, original.error_type)
+        self.assertEqual(restored.message, original.message)
+        self.assertEqual(restored.timestamp, original.timestamp)
+    
+    def test_crawl_error_json_serializable(self):
+        """CrawlError.to_dict() should be JSON serializable."""
+        error = CrawlError(
+            url='https://example.com/page',
+            error_type='http',
+            message='500 Internal Server Error',
+            timestamp=time.time()
+        )
+        
+        # Should not raise
+        json_str = json.dumps(error.to_dict())
+        
+        # Should be valid JSON
+        parsed = json.loads(json_str)
+        self.assertEqual(parsed['url'], error.url)
 
 
 # ============================================================================
