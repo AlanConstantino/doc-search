@@ -925,5 +925,454 @@ class TestCmdCrawlArgParsing(unittest.TestCase):
         self.assertIn('url', output.lower())
 
 
+# ============================================================================
+# cmd_index Tests
+# ============================================================================
+
+class MockBM25Index:
+    """Mock BM25Index for testing CLI index command without real indexing.
+    
+    This mock provides the same interface as BM25Index to allow testing
+    the index command without actually processing documents.
+    """
+    
+    def __init__(self, k1: float = 1.5, b: float = 0.75, stem: bool = True):
+        """
+        Create mock index.
+        
+        Args:
+            k1: BM25 k1 parameter
+            b: BM25 b parameter
+            stem: Whether stemming is enabled
+        """
+        # Validate parameters like real BM25Index does
+        if k1 < 0:
+            raise ValueError(f"k1 must be non-negative, got {k1}")
+        if not (0 <= b <= 1):
+            raise ValueError(f"b must be between 0 and 1, got {b}")
+        
+        self.k1 = k1
+        self.b = b
+        self.stem = stem
+        self.build_calls: List[Dict[str, Any]] = []
+        self.save_calls: List[Dict[str, Any]] = []
+        self._num_docs_to_return = 10  # Default return value
+    
+    def set_num_docs(self, num: int):
+        """Set the number of documents to return from build_from_pages."""
+        self._num_docs_to_return = num
+    
+    def build_from_pages(self, pages_dir: Path, verbose: bool = True) -> int:
+        """Return mock document count."""
+        self.build_calls.append({'pages_dir': pages_dir, 'verbose': verbose})
+        return self._num_docs_to_return
+    
+    def save(self, path: Path, compress: bool = True) -> Path:
+        """Return mock save path and create a dummy file for stat()."""
+        self.save_calls.append({'path': path, 'compress': compress})
+        if compress:
+            output_path = path.with_suffix('.json.gz')
+        else:
+            output_path = path.with_suffix('.json')
+        # Create a dummy file so cmd_index can stat() it
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b'mock index content')
+        return output_path
+
+
+class TestCmdIndex(CLITestCase):
+    """Tests for the cmd_index CLI command."""
+    
+    def test_index_basic(self):
+        """Should build index from pages directory."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, stdout, stderr = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            # Verify BM25Index was created with default parameters
+            MockIndexClass.assert_called_once_with(k1=1.5, b=0.75, stem=True)
+            
+            # Verify build_from_pages was called
+            self.assertEqual(len(mock_index.build_calls), 1)
+            self.assertEqual(mock_index.build_calls[0]['pages_dir'], 
+                           self.site_dir / 'pages')
+            
+            # Verify save was called with compression enabled (default)
+            self.assertEqual(len(mock_index.save_calls), 1)
+            self.assertTrue(mock_index.save_calls[0]['compress'])
+            
+            self.assertEqual(code, 0)
+    
+    def test_index_custom_k1(self):
+        """Should pass custom k1 parameter to BM25Index."""
+        mock_index = MockBM25Index(k1=1.2)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--k1', '1.2'
+            ])
+            
+            MockIndexClass.assert_called_once_with(k1=1.2, b=0.75, stem=True)
+            self.assertEqual(code, 0)
+    
+    def test_index_custom_b(self):
+        """Should pass custom b parameter to BM25Index."""
+        mock_index = MockBM25Index(b=0.5)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--b', '0.5'
+            ])
+            
+            MockIndexClass.assert_called_once_with(k1=1.5, b=0.5, stem=True)
+            self.assertEqual(code, 0)
+    
+    def test_index_custom_k1_and_b(self):
+        """Should pass both custom k1 and b parameters."""
+        mock_index = MockBM25Index(k1=2.0, b=0.9)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--k1', '2.0',
+                '--b', '0.9'
+            ])
+            
+            MockIndexClass.assert_called_once_with(k1=2.0, b=0.9, stem=True)
+            self.assertEqual(code, 0)
+    
+    def test_index_no_stemming(self):
+        """Should disable stemming when --no-stemming flag is set."""
+        mock_index = MockBM25Index(stem=False)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, stdout, _ = run_cli([
+                'index', str(self.site_dir),
+                '--no-stemming'
+            ])
+            
+            MockIndexClass.assert_called_once_with(k1=1.5, b=0.75, stem=False)
+            self.assertIn('disabled', stdout.lower())
+            self.assertEqual(code, 0)
+    
+    def test_index_no_compress(self):
+        """Should disable compression when --no-compress flag is set."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--no-compress'
+            ])
+            
+            # Verify save was called with compress=False
+            self.assertEqual(len(mock_index.save_calls), 1)
+            self.assertFalse(mock_index.save_calls[0]['compress'])
+            self.assertEqual(code, 0)
+    
+    def test_index_quiet_mode(self):
+        """Should pass verbose=False when --quiet flag is set."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--quiet'
+            ])
+            
+            # Verify build_from_pages was called with verbose=False
+            self.assertFalse(mock_index.build_calls[0]['verbose'])
+            self.assertEqual(code, 0)
+    
+    def test_index_verbose_by_default(self):
+        """Should pass verbose=True by default."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            # Verify build_from_pages was called with verbose=True
+            self.assertTrue(mock_index.build_calls[0]['verbose'])
+            self.assertEqual(code, 0)
+    
+    def test_index_with_all_options(self):
+        """Should pass all options correctly."""
+        mock_index = MockBM25Index(k1=1.8, b=0.6, stem=False)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir),
+                '--k1', '1.8',
+                '--b', '0.6',
+                '--no-stemming',
+                '--no-compress',
+                '--quiet'
+            ])
+            
+            MockIndexClass.assert_called_once_with(k1=1.8, b=0.6, stem=False)
+            self.assertFalse(mock_index.build_calls[0]['verbose'])
+            self.assertFalse(mock_index.save_calls[0]['compress'])
+            self.assertEqual(code, 0)
+    
+    def test_index_prints_build_info(self):
+        """Should print information about the build."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, stdout, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            self.assertIn('Building index from:', stdout)
+            self.assertIn('pages', stdout)
+            self.assertEqual(code, 0)
+    
+    def test_index_prints_save_info(self):
+        """Should print information about saved index."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            # Create a mock index file so stat() works
+            index_path = self.site_dir / 'index.json.gz'
+            index_path.write_bytes(b'test')
+            
+            code, stdout, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            self.assertIn('Index saved to:', stdout)
+            self.assertIn('Index size:', stdout)
+            self.assertEqual(code, 0)
+
+
+class TestCmdIndexErrorHandling(CLITestCase):
+    """Tests for error handling in cmd_index."""
+    
+    def test_index_missing_pages_directory(self):
+        """Should fail when pages directory doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir) / 'empty_site'
+            site_dir.mkdir()
+            # No pages/ subdirectory
+            
+            code, stdout, _ = run_cli([
+                'index', str(site_dir)
+            ])
+            
+            self.assertEqual(code, 1)
+            self.assertIn('Error:', stdout)
+            self.assertIn('No crawled pages found', stdout)
+    
+    def test_index_zero_documents(self):
+        """Should fail when no documents are indexed."""
+        mock_index = MockBM25Index()
+        mock_index.set_num_docs(0)  # Simulate empty pages directory
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, stdout, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            self.assertEqual(code, 1)
+            self.assertIn('Error: No documents to index', stdout)
+    
+    def test_index_invalid_k1_negative(self):
+        """Should fail when k1 is negative.
+        
+        BM25Index raises ValueError for invalid k1. Since cmd_index doesn't 
+        catch this and run_cli catches all exceptions returning code 1,
+        we verify the error code and that BM25Index was called with invalid params.
+        """
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.side_effect = ValueError("k1 must be non-negative, got -1.0")
+            
+            code, stdout, stderr = run_cli(['index', str(self.site_dir), '--k1', '-1.0'])
+            
+            # run_cli catches the exception and returns 1
+            self.assertEqual(code, 1)
+            # Verify BM25Index was called with the invalid k1
+            MockIndexClass.assert_called_once_with(k1=-1.0, b=0.75, stem=True)
+    
+    def test_index_invalid_b_out_of_range(self):
+        """Should fail when b is outside [0, 1] range.
+        
+        BM25Index raises ValueError for invalid b. Since cmd_index doesn't 
+        catch this and run_cli catches all exceptions returning code 1,
+        we verify the error code and that BM25Index was called with invalid params.
+        """
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.side_effect = ValueError("b must be between 0 and 1, got 1.5")
+            
+            code, stdout, stderr = run_cli(['index', str(self.site_dir), '--b', '1.5'])
+            
+            # run_cli catches the exception and returns 1
+            self.assertEqual(code, 1)
+            # Verify BM25Index was called with the invalid b
+            MockIndexClass.assert_called_once_with(k1=1.5, b=1.5, stem=True)
+    
+    def test_index_missing_site_dir_argument(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['index'])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code
+        self.assertNotEqual(code, 0)
+
+
+class TestCmdIndexArgParsing(unittest.TestCase):
+    """Tests for index argument parsing."""
+    
+    def test_parse_index_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['index', '/path/to/site'])
+        
+        self.assertEqual(args.command, 'index')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.k1, 1.5)
+        self.assertEqual(args.b, 0.75)
+        self.assertFalse(args.no_compress)
+        self.assertFalse(args.no_stemming)
+        self.assertFalse(args.quiet)
+    
+    def test_parse_index_k1_float(self):
+        """Should parse k1 as float."""
+        args = parse_args(['index', '/path/to/site', '--k1', '2.5'])
+        
+        self.assertEqual(args.k1, 2.5)
+        self.assertIsInstance(args.k1, float)
+    
+    def test_parse_index_b_float(self):
+        """Should parse b as float."""
+        args = parse_args(['index', '/path/to/site', '--b', '0.85'])
+        
+        self.assertEqual(args.b, 0.85)
+        self.assertIsInstance(args.b, float)
+    
+    def test_parse_index_no_stemming_flag(self):
+        """Should parse --no-stemming flag."""
+        args = parse_args(['index', '/path/to/site', '--no-stemming'])
+        
+        self.assertTrue(args.no_stemming)
+    
+    def test_parse_index_no_compress_flag(self):
+        """Should parse --no-compress flag."""
+        args = parse_args(['index', '/path/to/site', '--no-compress'])
+        
+        self.assertTrue(args.no_compress)
+    
+    def test_parse_index_quiet_flag(self):
+        """Should parse --quiet flag."""
+        args = parse_args(['index', '/path/to/site', '--quiet'])
+        
+        self.assertTrue(args.quiet)
+    
+    def test_parse_index_separate_paths_flag(self):
+        """Should parse --separate-paths flag."""
+        args = parse_args(['index', '/path/to/site', '--separate-paths'])
+        
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_index_help(self):
+        """Should show help text for index command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['index', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('index', output.lower())
+        self.assertIn('site_dir', output)
+        self.assertIn('k1', output)
+        self.assertIn('b', output)
+
+
+class TestCmdIndexIntegration(CLITestCase):
+    """Integration tests for cmd_index using real file structures."""
+    
+    def test_index_with_page_files(self):
+        """Should index actual page files in pages directory."""
+        # Create mock page files
+        page1 = {
+            'url': 'https://example.com/page1',
+            'title': 'Page One',
+            'text': 'This is page one content.'
+        }
+        page2 = {
+            'url': 'https://example.com/page2',
+            'title': 'Page Two',
+            'text': 'This is page two content with more text.'
+        }
+        self.create_mock_page('page1', page1)
+        self.create_mock_page('page2', page2)
+        
+        mock_index = MockBM25Index()
+        mock_index.set_num_docs(2)
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            # Verify pages_dir was passed correctly
+            pages_dir = mock_index.build_calls[0]['pages_dir']
+            self.assertTrue(pages_dir.exists())
+            self.assertEqual(len(list(pages_dir.glob('*.json'))), 2)
+            self.assertEqual(code, 0)
+    
+    def test_index_save_path_uses_site_dir(self):
+        """Should save index to site directory."""
+        mock_index = MockBM25Index()
+        
+        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
+            MockIndexClass.return_value = mock_index
+            
+            code, _, _ = run_cli([
+                'index', str(self.site_dir)
+            ])
+            
+            # Verify save path is in site_dir
+            save_path = mock_index.save_calls[0]['path']
+            self.assertEqual(save_path.parent, self.site_dir)
+            self.assertEqual(save_path.stem, 'index')
+            self.assertEqual(code, 0)
+
+
 if __name__ == '__main__':
     unittest.main()
