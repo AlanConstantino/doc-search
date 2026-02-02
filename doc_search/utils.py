@@ -201,9 +201,23 @@ def is_same_domain(url1: str, url2: str) -> bool:
     return get_domain(url1) == get_domain(url2)
 
 
+def hash_string(s: str, length: int = 16) -> str:
+    """
+    Generate a truncated SHA256 hash of a string.
+    
+    Args:
+        s: String to hash
+        length: Number of hex characters to return (max 64)
+        
+    Returns:
+        Truncated hex digest string
+    """
+    return hashlib.sha256(s.encode()).hexdigest()[:length]
+
+
 def url_to_filename(url: str) -> str:
     """Convert URL to a safe filename using hash."""
-    return hashlib.sha256(url.encode()).hexdigest()[:16]
+    return hash_string(url, length=16)
 
 
 def site_hash(url: str, include_path: bool = False) -> str:
@@ -225,7 +239,7 @@ def site_hash(url: str, include_path: bool = False) -> str:
     else:
         # Hash domain only (default - one folder per domain)
         key = get_domain(url)
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    return hash_string(key, length=12)
 
 
 def resolve_url(base_url: str, href: str) -> str:
