@@ -623,6 +623,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     log_requests: bool = False
     per_page: int = 10
     max_results: int = 100
+    start_time: float = None  # Server start time for uptime calculation
     
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -640,9 +641,25 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     
+    def send_json(self, data: dict, status: int = 200):
+        """Send JSON response."""
+        import json
+        body = json.dumps(data).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.end_headers()
+        self.wfile.write(body)
+    
     def do_GET(self):
         """Handle GET requests."""
         parsed = urllib.parse.urlparse(self.path)
+        
+        # Handle /health endpoint
+        if parsed.path == '/health':
+            self.handle_health()
+            return
+        
         query_params = urllib.parse.parse_qs(parsed.query)
         
         # Get search query
@@ -662,9 +679,9 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         if query:
             # Perform search - fetch enough for pagination
-            start_time = time.perf_counter()
+            search_start = time.perf_counter()
             all_results = self.engine.search(query, top_k=max_results)
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            elapsed_ms = (time.perf_counter() - search_start) * 1000
             
             total_results = len(all_results)
             
@@ -692,6 +709,44 @@ class SearchHandler(BaseHTTPRequestHandler):
             html_content = render_page(stats=stats)
         
         self.send_html(html_content)
+    
+    def handle_health(self):
+        """Handle /health endpoint for monitoring and load balancers."""
+        try:
+            # Get index stats
+            stats = self.engine.get_stats() if self.engine else {}
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = time.time() - self.start_time
+            
+            # Build health response
+            health_data = {
+                'status': 'ok',
+                'documents': stats.get('total_documents', 0),
+                'terms': stats.get('unique_terms', 0),
+                'uptime_seconds': round(uptime_seconds, 1),
+                'version': self.version or __version__
+            }
+            
+            # Determine if healthy (has at least some documents indexed)
+            is_healthy = stats.get('total_documents', 0) > 0
+            status_code = 200 if is_healthy else 503
+            
+            if not is_healthy:
+                health_data['status'] = 'unhealthy'
+                health_data['reason'] = 'No documents indexed'
+            
+            self.send_json(health_data, status_code)
+            
+        except Exception as e:
+            # On error, return 503
+            error_data = {
+                'status': 'unhealthy',
+                'error': str(e)
+            }
+            self.send_json(error_data, 503)
 
 
 def run_server(
@@ -722,5 +777,6 @@ def run_server(
     SearchHandler.log_requests = log_requests
     SearchHandler.per_page = per_page
     SearchHandler.max_results = max_results
+    SearchHandler.start_time = time.time()  # Record server start time
     server = HTTPServer((host, port), SearchHandler)
     return server
