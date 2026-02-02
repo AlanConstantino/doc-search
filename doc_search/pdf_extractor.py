@@ -9,9 +9,8 @@ from typing import Optional, Dict, Any
 from io import BytesIO
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
-import ssl
 
-from .utils import make_basic_auth_header
+from .utils import make_basic_auth_header, create_permissive_ssl_context
 
 # Add vendor directory to path for PyPDF2 import
 _vendor_path = Path(__file__).parent.parent / 'vendor'
@@ -46,9 +45,7 @@ class PDFExtractor:
         self.auth_token = auth_token
         
         # SSL context for self-signed certs
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.ssl_context = create_permissive_ssl_context()
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""

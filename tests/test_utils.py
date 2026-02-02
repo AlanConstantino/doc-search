@@ -3,10 +3,12 @@ Tests for utility functions including URL normalization.
 """
 
 import base64
+import ssl
 import unittest
 from doc_search.utils import (
     normalize_url, tokenize, is_valid_url, get_domain,
-    hash_string, url_to_filename, site_hash, make_basic_auth_header
+    hash_string, url_to_filename, site_hash, make_basic_auth_header,
+    create_permissive_ssl_context
 )
 
 
@@ -353,6 +355,31 @@ class TestMakeBasicAuthHeader(unittest.TestCase):
         token = result[6:]
         decoded = base64.b64decode(token).decode()
         self.assertEqual(decoded, ":pass")
+
+
+class TestCreatePermissiveSslContext(unittest.TestCase):
+    """Tests for create_permissive_ssl_context function."""
+    
+    def test_returns_ssl_context(self):
+        """Should return an SSLContext instance."""
+        ctx = create_permissive_ssl_context()
+        self.assertIsInstance(ctx, ssl.SSLContext)
+    
+    def test_check_hostname_disabled(self):
+        """Should have hostname checking disabled."""
+        ctx = create_permissive_ssl_context()
+        self.assertFalse(ctx.check_hostname)
+    
+    def test_cert_verification_disabled(self):
+        """Should have certificate verification disabled (CERT_NONE)."""
+        ctx = create_permissive_ssl_context()
+        self.assertEqual(ctx.verify_mode, ssl.CERT_NONE)
+    
+    def test_returns_new_instance_each_call(self):
+        """Should return a new SSLContext on each call."""
+        ctx1 = create_permissive_ssl_context()
+        ctx2 = create_permissive_ssl_context()
+        self.assertIsNot(ctx1, ctx2)
 
 
 if __name__ == '__main__':
