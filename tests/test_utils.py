@@ -3,7 +3,10 @@ Tests for utility functions including URL normalization.
 """
 
 import unittest
-from doc_search.utils import normalize_url, tokenize, is_valid_url, get_domain
+from doc_search.utils import (
+    normalize_url, tokenize, is_valid_url, get_domain,
+    hash_string, url_to_filename, site_hash
+)
 
 
 class TestNormalizeUrl(unittest.TestCase):
@@ -192,6 +195,90 @@ class TestIsValidUrl(unittest.TestCase):
     def test_relative_url(self):
         """Should reject relative URLs."""
         self.assertFalse(is_valid_url("/path/to/page"))
+
+
+class TestHashString(unittest.TestCase):
+    """Tests for hash_string function."""
+    
+    def test_default_length(self):
+        """Default length should be 16 characters."""
+        result = hash_string("test")
+        self.assertEqual(len(result), 16)
+    
+    def test_custom_length(self):
+        """Should respect custom length parameter."""
+        result = hash_string("test", length=8)
+        self.assertEqual(len(result), 8)
+        
+        result = hash_string("test", length=32)
+        self.assertEqual(len(result), 32)
+    
+    def test_deterministic(self):
+        """Same input should produce same output."""
+        result1 = hash_string("hello world")
+        result2 = hash_string("hello world")
+        self.assertEqual(result1, result2)
+    
+    def test_different_inputs(self):
+        """Different inputs should produce different outputs."""
+        result1 = hash_string("test1")
+        result2 = hash_string("test2")
+        self.assertNotEqual(result1, result2)
+    
+    def test_hex_characters(self):
+        """Output should be valid hex characters."""
+        import re
+        result = hash_string("test")
+        self.assertTrue(re.match(r'^[0-9a-f]+$', result))
+
+
+class TestUrlToFilename(unittest.TestCase):
+    """Tests for url_to_filename function."""
+    
+    def test_returns_hash(self):
+        """Should return a hash string."""
+        result = url_to_filename("https://example.com/page")
+        self.assertEqual(len(result), 16)
+    
+    def test_deterministic(self):
+        """Same URL should produce same filename."""
+        url = "https://example.com/test"
+        result1 = url_to_filename(url)
+        result2 = url_to_filename(url)
+        self.assertEqual(result1, result2)
+    
+    def test_different_urls(self):
+        """Different URLs should produce different filenames."""
+        result1 = url_to_filename("https://example.com/page1")
+        result2 = url_to_filename("https://example.com/page2")
+        self.assertNotEqual(result1, result2)
+
+
+class TestSiteHash(unittest.TestCase):
+    """Tests for site_hash function."""
+    
+    def test_default_length(self):
+        """Should return 12-character hash by default."""
+        result = site_hash("https://example.com/docs")
+        self.assertEqual(len(result), 12)
+    
+    def test_domain_only_default(self):
+        """By default, should hash only the domain."""
+        result1 = site_hash("https://example.com/path1")
+        result2 = site_hash("https://example.com/path2")
+        self.assertEqual(result1, result2)
+    
+    def test_include_path(self):
+        """With include_path=True, should include path in hash."""
+        result1 = site_hash("https://example.com/path1", include_path=True)
+        result2 = site_hash("https://example.com/path2", include_path=True)
+        self.assertNotEqual(result1, result2)
+    
+    def test_trailing_slash_normalized(self):
+        """Trailing slash should not affect hash when include_path=True."""
+        result1 = site_hash("https://example.com/docs/", include_path=True)
+        result2 = site_hash("https://example.com/docs", include_path=True)
+        self.assertEqual(result1, result2)
 
 
 if __name__ == '__main__':
