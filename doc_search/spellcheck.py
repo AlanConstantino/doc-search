@@ -6,6 +6,8 @@ Pure Python implementation using Levenshtein distance.
 
 from typing import List, Dict, Set, Tuple, Optional
 
+from .constants import DEFAULT_MAX_EDIT_DISTANCE, DEFAULT_MAX_SUGGESTIONS
+
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     """
@@ -98,13 +100,13 @@ class SpellChecker:
     Uses Damerau-Levenshtein distance to find similar words.
     """
     
-    def __init__(self, vocabulary: Set[str], max_distance: int = 2):
+    def __init__(self, vocabulary: Set[str], max_distance: int = DEFAULT_MAX_EDIT_DISTANCE):
         """
         Initialize spell checker with vocabulary.
         
         Args:
             vocabulary: Set of known correct words
-            max_distance: Maximum edit distance for suggestions (default: 2)
+            max_distance: Maximum edit distance for suggestions
         """
         self.vocabulary = vocabulary
         self.max_distance = max_distance
@@ -156,7 +158,7 @@ class SpellChecker:
         """Check if a word is in the vocabulary."""
         return word.lower() in self.vocabulary
     
-    def suggest(self, word: str, max_suggestions: int = 5) -> List[Tuple[str, int]]:
+    def suggest(self, word: str, max_suggestions: int = DEFAULT_MAX_SUGGESTIONS) -> List[Tuple[str, int]]:
         """
         Get spelling suggestions for a word.
         
