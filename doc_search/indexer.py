@@ -23,6 +23,12 @@ class BM25Index:
     """
     
     def __init__(self, k1: float = 1.5, b: float = 0.75, stem: bool = True):
+        # Validate BM25 parameters
+        if k1 < 0:
+            raise ValueError(f"k1 must be non-negative, got {k1}")
+        if not (0 <= b <= 1):
+            raise ValueError(f"b must be between 0 and 1, got {b}")
+        
         self.k1 = k1
         self.b = b
         self.stem = stem
