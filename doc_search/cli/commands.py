@@ -31,15 +31,36 @@ def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
     Args:
         url_or_path: URL or existing directory path
         include_path: If True, include URL path in hash (separate storage per path)
+    
+    Returns:
+        Path to the site data directory
+    
+    Raises:
+        ValueError: If input is neither a valid URL nor an existing directory
     """
+    # Check if it's a URL (http:// or https://)
+    if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
+        return DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=include_path)
+    
+    # Not a URL - must be an existing directory path
     path = Path(url_or_path)
     
-    # If it's an existing directory, use it
-    if path.is_dir():
-        return path
+    # Check if path exists
+    if not path.exists():
+        raise ValueError(
+            f"Directory not found: {url_or_path}\n"
+            f"If this is a URL, it must start with http:// or https://\n"
+            f"If this is a path, the directory must exist."
+        )
     
-    # Otherwise, treat as URL and generate directory
-    return DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=include_path)
+    # Check if it's actually a directory (not a file)
+    if not path.is_dir():
+        raise ValueError(
+            f"Not a directory: {url_or_path}\n"
+            f"Expected a directory path, but found a file."
+        )
+    
+    return path
 
 
 def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
@@ -64,7 +85,11 @@ def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
 def cmd_crawl(args):
     """Crawl a documentation site."""
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.url, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.url, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     site_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Crawling: {args.url}")
@@ -111,7 +136,11 @@ def cmd_crawl(args):
 def cmd_index(args):
     """Build search index from crawled pages."""
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     pages_dir = site_dir / 'pages'
     
     if not pages_dir.exists():
@@ -145,7 +174,11 @@ def cmd_index(args):
 def cmd_search(args):
     """Search the index with enhanced features."""
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     
     # Find index file
     index_path = None
@@ -274,7 +307,11 @@ def cmd_search(args):
 def cmd_autocomplete(args):
     """Get autocomplete suggestions for a prefix."""
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     
     # Find index file
     index_path = None
@@ -306,7 +343,11 @@ def cmd_autocomplete(args):
 def cmd_interactive(args):
     """Interactive search mode with beautiful colored output and enhanced features."""
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     
     # Find index file
     index_path = None
@@ -399,7 +440,11 @@ def cmd_stats(args):
     from datetime import datetime
     
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     
     if not site_dir.exists():
         print(f"Error: Site directory not found: {site_dir}")
@@ -524,7 +569,11 @@ def cmd_serve(args):
     from ..server import run_server
     
     separate_paths = getattr(args, 'separate_paths', False)
-    site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    try:
+        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+    except ValueError as e:
+        print(style_error(f"Error: {e}"))
+        return 1
     
     # Find index file
     index_path = None
