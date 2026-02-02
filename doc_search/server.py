@@ -621,6 +621,8 @@ class SearchHandler(BaseHTTPRequestHandler):
     engine: SearchEngine = None
     version: str = ""
     log_requests: bool = False
+    per_page: int = 10
+    max_results: int = 100
     
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -652,8 +654,8 @@ class SearchHandler(BaseHTTPRequestHandler):
         except ValueError:
             page = 1
         
-        per_page = 10
-        max_results = 100  # Maximum results to fetch
+        per_page = self.per_page
+        max_results = self.max_results
         
         # Get stats
         stats = self.engine.get_stats() if self.engine else {}
@@ -697,7 +699,9 @@ def run_server(
     host: str = '127.0.0.1',
     port: int = 8888,
     version: str = "",
-    log_requests: bool = False
+    log_requests: bool = False,
+    per_page: int = 10,
+    max_results: int = 100
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -707,6 +711,8 @@ def run_server(
         port: Port number to listen on
         version: Version string to display
         log_requests: If True, log HTTP requests to stdout
+        per_page: Number of results per page
+        max_results: Maximum total results for pagination
         
     Returns:
         HTTPServer instance (call serve_forever() to start)
@@ -714,5 +720,7 @@ def run_server(
     SearchHandler.engine = engine
     SearchHandler.version = version
     SearchHandler.log_requests = log_requests
+    SearchHandler.per_page = per_page
+    SearchHandler.max_results = max_results
     server = HTTPServer((host, port), SearchHandler)
     return server
