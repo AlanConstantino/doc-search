@@ -3687,5 +3687,786 @@ class TestCmdListIntegration(unittest.TestCase):
             self.assertRegex(line.strip(), r'^site_\w+: https?://.+ \(\d+ pages\)$')
 
 
+# ============================================================================
+# CLI Parsers Module Tests (Phase 1.8)
+# ============================================================================
+
+class TestCLIParsersModule(unittest.TestCase):
+    """Comprehensive tests for the CLI parsers module.
+    
+    Tests the parser creation, structure, and all subcommand parsers
+    as defined in doc_search.cli.parsers.
+    """
+    
+    def test_create_parser_returns_argument_parser(self):
+        """create_parser should return an ArgumentParser instance."""
+        parser = create_parser()
+        self.assertIsInstance(parser, argparse.ArgumentParser)
+    
+    def test_parser_prog_name(self):
+        """Parser should have correct program name."""
+        parser = create_parser()
+        self.assertEqual(parser.prog, 'doc_search')
+    
+    def test_parser_description_exists(self):
+        """Parser should have a description."""
+        parser = create_parser()
+        self.assertIsNotNone(parser.description)
+        self.assertIn('documentation', parser.description.lower())
+    
+    def test_parser_epilog_contains_examples(self):
+        """Parser epilog should contain usage examples."""
+        parser = create_parser()
+        self.assertIsNotNone(parser.epilog)
+        self.assertIn('Examples:', parser.epilog)
+        self.assertIn('crawl', parser.epilog)
+        self.assertIn('index', parser.epilog)
+        self.assertIn('search', parser.epilog)
+    
+    def test_all_subcommands_registered(self):
+        """All expected subcommands should be registered."""
+        expected_commands = [
+            'crawl', 'index', 'search', 'autocomplete',
+            'interactive', 'stats', 'list', 'serve'
+        ]
+        
+        parser = create_parser()
+        
+        # Get subparser actions
+        subparsers_action = None
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                subparsers_action = action
+                break
+        
+        self.assertIsNotNone(subparsers_action)
+        
+        # Check all expected commands exist
+        registered_commands = list(subparsers_action.choices.keys())
+        for cmd in expected_commands:
+            self.assertIn(cmd, registered_commands, f"Command '{cmd}' should be registered")
+    
+    def test_subcommand_count_is_exactly_eight(self):
+        """Parser should have exactly 8 subcommands."""
+        parser = create_parser()
+        
+        subparsers_action = None
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                subparsers_action = action
+                break
+        
+        self.assertEqual(len(subparsers_action.choices), 8)
+    
+    def test_each_subcommand_has_func(self):
+        """Each subcommand should have a func default set."""
+        parser = create_parser()
+        
+        commands = ['crawl', 'index', 'search', 'autocomplete',
+                   'interactive', 'stats', 'list', 'serve']
+        
+        for cmd in commands:
+            # Get the subparser for this command
+            subparsers_action = None
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    subparsers_action = action
+                    break
+            
+            subparser = subparsers_action.choices[cmd]
+            defaults = subparser._defaults
+            self.assertIn('func', defaults, f"Command '{cmd}' should have a func default")
+            self.assertTrue(callable(defaults['func']), f"Command '{cmd}' func should be callable")
+    
+    def test_no_command_prints_help(self):
+        """Running with no command should result in help being printed."""
+        with capture_output() as (stdout, stderr):
+            code, out, err = run_cli([])
+        
+        # Should return non-zero (indicates need for command)
+        self.assertEqual(code, 1)
+    
+    def test_invalid_command_fails(self):
+        """Running with invalid command should fail."""
+        with capture_output() as (stdout, stderr):
+            try:
+                args = parse_args(['nonexistent_command'])
+                code = 1 if not args.command else 0
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else 1
+        
+        self.assertNotEqual(code, 0)
+    
+    def test_version_format(self):
+        """Version output should follow expected format."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['--version'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        # Should contain program name and version number
+        self.assertIn('doc_search', output)
+        # Version should be in format like "1.0.0" or similar
+        import re
+        self.assertTrue(re.search(r'\d+\.\d+\.\d+', output), 
+                       "Version should contain semantic version number")
+
+
+class TestMainParserHelpText(unittest.TestCase):
+    """Tests for main parser help text content."""
+    
+    def test_main_help_contains_all_commands(self):
+        """Main help text should list all commands."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        commands = ['crawl', 'index', 'search', 'autocomplete',
+                   'interactive', 'stats', 'list', 'serve']
+        
+        for cmd in commands:
+            self.assertIn(cmd, output, f"Help should mention '{cmd}' command")
+    
+    def test_main_help_contains_usage(self):
+        """Main help text should contain usage information."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('usage:', output.lower())
+    
+    def test_main_help_shows_version_option(self):
+        """Main help text should show --version option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--version', output)
+
+
+class TestCmdAutocompleteArgParsing(unittest.TestCase):
+    """Tests for autocomplete argument parsing."""
+    
+    def test_parse_autocomplete_basic(self):
+        """Should parse autocomplete command with required arguments."""
+        args = parse_args(['autocomplete', '/path/to/site', 'pyt'])
+        
+        self.assertEqual(args.command, 'autocomplete')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.prefix, 'pyt')
+    
+    def test_parse_autocomplete_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['autocomplete', '/path/to/site', 'test'])
+        
+        self.assertEqual(args.limit, 10)  # Default limit
+        self.assertFalse(args.json)  # Default not JSON output
+    
+    def test_parse_autocomplete_limit(self):
+        """Should parse --limit option."""
+        args = parse_args(['autocomplete', '/path/to/site', 'prefix', '--limit', '5'])
+        
+        self.assertEqual(args.limit, 5)
+        self.assertIsInstance(args.limit, int)
+    
+    def test_parse_autocomplete_limit_short(self):
+        """Should parse -l short option for limit."""
+        args = parse_args(['autocomplete', '/path/to/site', 'prefix', '-l', '15'])
+        
+        self.assertEqual(args.limit, 15)
+    
+    def test_parse_autocomplete_json_flag(self):
+        """Should parse --json flag."""
+        args = parse_args(['autocomplete', '/path/to/site', 'prefix', '--json'])
+        
+        self.assertTrue(args.json)
+    
+    def test_parse_autocomplete_json_short(self):
+        """Should parse -j short option for json."""
+        args = parse_args(['autocomplete', '/path/to/site', 'prefix', '-j'])
+        
+        self.assertTrue(args.json)
+    
+    def test_parse_autocomplete_all_options(self):
+        """Should parse all options together."""
+        args = parse_args([
+            'autocomplete', '/path/to/site', 'python',
+            '--limit', '20',
+            '--json'
+        ])
+        
+        self.assertEqual(args.command, 'autocomplete')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.prefix, 'python')
+        self.assertEqual(args.limit, 20)
+        self.assertTrue(args.json)
+    
+    def test_parse_autocomplete_missing_site_dir(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['autocomplete'])
+                self.fail("Should have raised SystemExit")
+            except SystemExit as e:
+                self.assertNotEqual(e.code, 0)
+    
+    def test_parse_autocomplete_missing_prefix(self):
+        """Should fail when prefix is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['autocomplete', '/path/to/site'])
+                self.fail("Should have raised SystemExit")
+            except SystemExit as e:
+                self.assertNotEqual(e.code, 0)
+    
+    def test_parse_autocomplete_help(self):
+        """Should show help text for autocomplete command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['autocomplete', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('autocomplete', output.lower())
+        self.assertIn('prefix', output.lower())
+        self.assertIn('site_dir', output)
+    
+    def test_parse_autocomplete_help_shows_limit_option(self):
+        """Help text should show --limit option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['autocomplete', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--limit', output)
+        self.assertIn('-l', output)
+    
+    def test_parse_autocomplete_help_shows_json_option(self):
+        """Help text should show --json option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['autocomplete', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--json', output)
+        self.assertIn('-j', output)
+    
+    def test_parse_autocomplete_empty_prefix(self):
+        """Should accept empty string as prefix."""
+        args = parse_args(['autocomplete', '/path/to/site', ''])
+        
+        self.assertEqual(args.prefix, '')
+    
+    def test_parse_autocomplete_single_char_prefix(self):
+        """Should accept single character prefix."""
+        args = parse_args(['autocomplete', '/path/to/site', 'a'])
+        
+        self.assertEqual(args.prefix, 'a')
+
+
+class TestCmdInteractiveArgParsing(unittest.TestCase):
+    """Tests for interactive argument parsing."""
+    
+    def test_parse_interactive_basic(self):
+        """Should parse interactive command with site_dir."""
+        args = parse_args(['interactive', '/path/to/site'])
+        
+        self.assertEqual(args.command, 'interactive')
+        self.assertEqual(args.site_dir, '/path/to/site')
+    
+    def test_parse_interactive_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['interactive', '/path/to/site'])
+        
+        self.assertEqual(args.limit, 10)  # Default limit
+        self.assertFalse(args.scores)  # Default no scores
+        self.assertFalse(args.separate_paths)  # Default no separate paths
+    
+    def test_parse_interactive_limit(self):
+        """Should parse --limit option."""
+        args = parse_args(['interactive', '/path/to/site', '--limit', '20'])
+        
+        self.assertEqual(args.limit, 20)
+        self.assertIsInstance(args.limit, int)
+    
+    def test_parse_interactive_limit_short(self):
+        """Should parse -l short option for limit."""
+        args = parse_args(['interactive', '/path/to/site', '-l', '15'])
+        
+        self.assertEqual(args.limit, 15)
+    
+    def test_parse_interactive_scores_flag(self):
+        """Should parse --scores flag."""
+        args = parse_args(['interactive', '/path/to/site', '--scores'])
+        
+        self.assertTrue(args.scores)
+    
+    def test_parse_interactive_scores_short(self):
+        """Should parse -s short option for scores."""
+        args = parse_args(['interactive', '/path/to/site', '-s'])
+        
+        self.assertTrue(args.scores)
+    
+    def test_parse_interactive_separate_paths_flag(self):
+        """Should parse --separate-paths flag."""
+        args = parse_args(['interactive', '/path/to/site', '--separate-paths'])
+        
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_interactive_all_options(self):
+        """Should parse all options together."""
+        args = parse_args([
+            'interactive', '/path/to/site',
+            '--limit', '25',
+            '--scores',
+            '--separate-paths'
+        ])
+        
+        self.assertEqual(args.command, 'interactive')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.limit, 25)
+        self.assertTrue(args.scores)
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_interactive_missing_site_dir(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['interactive'])
+                self.fail("Should have raised SystemExit")
+            except SystemExit as e:
+                self.assertNotEqual(e.code, 0)
+    
+    def test_parse_interactive_help(self):
+        """Should show help text for interactive command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['interactive', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('interactive', output.lower())
+        self.assertIn('site_dir', output)
+    
+    def test_parse_interactive_help_shows_limit_option(self):
+        """Help text should show --limit option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['interactive', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--limit', output)
+        self.assertIn('-l', output)
+    
+    def test_parse_interactive_help_shows_scores_option(self):
+        """Help text should show --scores option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['interactive', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--scores', output)
+        self.assertIn('-s', output)
+    
+    def test_parse_interactive_help_shows_separate_paths_option(self):
+        """Help text should show --separate-paths option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['interactive', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('--separate-paths', output)
+    
+    def test_parse_interactive_url_as_site_dir(self):
+        """Should accept URL as site_dir (for URL-to-path conversion)."""
+        args = parse_args(['interactive', 'https://docs.python.org/3.11/'])
+        
+        self.assertEqual(args.site_dir, 'https://docs.python.org/3.11/')
+
+
+class TestAllSubcommandHelpTexts(unittest.TestCase):
+    """Tests to verify all subcommand help texts contain expected content."""
+    
+    def test_crawl_help_mentions_url(self):
+        """Crawl help should mention url argument."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['crawl', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('url', output.lower())
+    
+    def test_index_help_mentions_site_dir(self):
+        """Index help should mention site_dir argument."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['index', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('site_dir', output)
+    
+    def test_search_help_mentions_query(self):
+        """Search help should mention query argument."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['search', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('query', output.lower())
+    
+    def test_serve_help_mentions_port(self):
+        """Serve help should mention port option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['serve', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('--port', output)
+    
+    def test_stats_help_mentions_show_errors(self):
+        """Stats help should mention show-errors option."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['stats', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('--show-errors', output)
+    
+    def test_list_help_exists(self):
+        """List help should exist and show usage."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['list', '--help'])
+            except SystemExit:
+                pass
+        output = stdout.getvalue()
+        self.assertIn('usage:', output.lower())
+
+
+class TestParserTypeConversions(unittest.TestCase):
+    """Tests for argument type conversions in parsers."""
+    
+    def test_crawl_delay_is_float(self):
+        """Crawl --delay should be converted to float."""
+        args = parse_args(['crawl', 'https://example.com', '--delay', '2.5'])
+        self.assertIsInstance(args.delay, float)
+        self.assertEqual(args.delay, 2.5)
+    
+    def test_crawl_timeout_is_float(self):
+        """Crawl --timeout should be converted to float."""
+        args = parse_args(['crawl', 'https://example.com', '--timeout', '45.0'])
+        self.assertIsInstance(args.timeout, float)
+        self.assertEqual(args.timeout, 45.0)
+    
+    def test_crawl_max_pages_is_int(self):
+        """Crawl --max-pages should be converted to int."""
+        args = parse_args(['crawl', 'https://example.com', '--max-pages', '500'])
+        self.assertIsInstance(args.max_pages, int)
+        self.assertEqual(args.max_pages, 500)
+    
+    def test_crawl_max_depth_is_int(self):
+        """Crawl --max-depth should be converted to int."""
+        args = parse_args(['crawl', 'https://example.com', '--max-depth', '5'])
+        self.assertIsInstance(args.max_depth, int)
+        self.assertEqual(args.max_depth, 5)
+    
+    def test_crawl_workers_is_int(self):
+        """Crawl --workers should be converted to int."""
+        args = parse_args(['crawl', 'https://example.com', '--workers', '4'])
+        self.assertIsInstance(args.workers, int)
+        self.assertEqual(args.workers, 4)
+    
+    def test_index_k1_is_float(self):
+        """Index --k1 should be converted to float."""
+        args = parse_args(['index', '/path', '--k1', '1.2'])
+        self.assertIsInstance(args.k1, float)
+        self.assertEqual(args.k1, 1.2)
+    
+    def test_index_b_is_float(self):
+        """Index --b should be converted to float."""
+        args = parse_args(['index', '/path', '--b', '0.8'])
+        self.assertIsInstance(args.b, float)
+        self.assertEqual(args.b, 0.8)
+    
+    def test_search_limit_is_int(self):
+        """Search --limit should be converted to int."""
+        args = parse_args(['search', '/path', 'query', '--limit', '25'])
+        self.assertIsInstance(args.limit, int)
+        self.assertEqual(args.limit, 25)
+    
+    def test_serve_port_is_int(self):
+        """Serve --port should be converted to int."""
+        args = parse_args(['serve', '/path', '--port', '9000'])
+        self.assertIsInstance(args.port, int)
+        self.assertEqual(args.port, 9000)
+    
+    def test_serve_per_page_is_int(self):
+        """Serve --per-page should be converted to int."""
+        args = parse_args(['serve', '/path', '--per-page', '20'])
+        self.assertIsInstance(args.per_page, int)
+        self.assertEqual(args.per_page, 20)
+    
+    def test_serve_max_results_is_int(self):
+        """Serve --max-results should be converted to int."""
+        args = parse_args(['serve', '/path', '--max-results', '500'])
+        self.assertIsInstance(args.max_results, int)
+        self.assertEqual(args.max_results, 500)
+    
+    def test_autocomplete_limit_is_int(self):
+        """Autocomplete --limit should be converted to int."""
+        args = parse_args(['autocomplete', '/path', 'prefix', '--limit', '15'])
+        self.assertIsInstance(args.limit, int)
+        self.assertEqual(args.limit, 15)
+    
+    def test_interactive_limit_is_int(self):
+        """Interactive --limit should be converted to int."""
+        args = parse_args(['interactive', '/path', '--limit', '30'])
+        self.assertIsInstance(args.limit, int)
+        self.assertEqual(args.limit, 30)
+
+
+class TestParserDefaultValues(unittest.TestCase):
+    """Tests for default values in all command parsers."""
+    
+    def test_crawl_default_delay(self):
+        """Crawl should have default delay of 1.0."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertEqual(args.delay, 1.0)
+    
+    def test_crawl_default_timeout(self):
+        """Crawl should have default timeout of 30.0."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertEqual(args.timeout, 30.0)
+    
+    def test_crawl_default_workers(self):
+        """Crawl should have default workers of 1."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertEqual(args.workers, 1)
+    
+    def test_crawl_default_flags_false(self):
+        """Crawl flags should default to False."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertFalse(args.same_path)
+        self.assertFalse(args.fresh)
+        self.assertFalse(args.incremental)
+        self.assertFalse(args.extract_docs)
+        self.assertFalse(args.separate_paths)
+        self.assertFalse(args.quiet)
+    
+    def test_crawl_default_max_pages_none(self):
+        """Crawl --max-pages should default to None."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertIsNone(args.max_pages)
+    
+    def test_crawl_default_max_depth_none(self):
+        """Crawl --max-depth should default to None."""
+        args = parse_args(['crawl', 'https://example.com'])
+        self.assertIsNone(args.max_depth)
+    
+    def test_index_default_k1(self):
+        """Index should have default k1 of 1.5."""
+        args = parse_args(['index', '/path'])
+        self.assertEqual(args.k1, 1.5)
+    
+    def test_index_default_b(self):
+        """Index should have default b of 0.75."""
+        args = parse_args(['index', '/path'])
+        self.assertEqual(args.b, 0.75)
+    
+    def test_index_default_flags_false(self):
+        """Index flags should default to False."""
+        args = parse_args(['index', '/path'])
+        self.assertFalse(args.no_compress)
+        self.assertFalse(args.no_stemming)
+        self.assertFalse(args.separate_paths)
+        self.assertFalse(args.quiet)
+    
+    def test_search_default_limit(self):
+        """Search should have default limit of 10."""
+        args = parse_args(['search', '/path', 'query'])
+        self.assertEqual(args.limit, 10)
+    
+    def test_search_default_flags_false(self):
+        """Search flags should default to False."""
+        args = parse_args(['search', '/path', 'query'])
+        self.assertFalse(args.scores)
+        self.assertFalse(args.json)
+        self.assertFalse(args.quiet)
+        self.assertFalse(args.no_color)
+        self.assertFalse(args.basic)
+        self.assertFalse(args.synonyms)
+        self.assertFalse(args.no_facets)
+        self.assertFalse(args.show_facets)
+        self.assertFalse(args.separate_paths)
+    
+    def test_search_default_filters_none(self):
+        """Search filter options should default to None."""
+        args = parse_args(['search', '/path', 'query'])
+        self.assertIsNone(args.filter_category)
+        self.assertIsNone(args.filter_section)
+        self.assertIsNone(args.synonyms_file)
+    
+    def test_autocomplete_default_limit(self):
+        """Autocomplete should have default limit of 10."""
+        args = parse_args(['autocomplete', '/path', 'prefix'])
+        self.assertEqual(args.limit, 10)
+    
+    def test_autocomplete_default_json_false(self):
+        """Autocomplete --json should default to False."""
+        args = parse_args(['autocomplete', '/path', 'prefix'])
+        self.assertFalse(args.json)
+    
+    def test_interactive_default_limit(self):
+        """Interactive should have default limit of 10."""
+        args = parse_args(['interactive', '/path'])
+        self.assertEqual(args.limit, 10)
+    
+    def test_interactive_default_flags_false(self):
+        """Interactive flags should default to False."""
+        args = parse_args(['interactive', '/path'])
+        self.assertFalse(args.scores)
+        self.assertFalse(args.separate_paths)
+    
+    def test_stats_default_show_errors_false(self):
+        """Stats --show-errors should default to False."""
+        args = parse_args(['stats', '/path'])
+        self.assertFalse(args.show_errors)
+    
+    def test_stats_default_separate_paths_false(self):
+        """Stats --separate-paths should default to False."""
+        args = parse_args(['stats', '/path'])
+        self.assertFalse(args.separate_paths)
+    
+    def test_serve_default_port(self):
+        """Serve should have default port of 8080."""
+        args = parse_args(['serve', '/path'])
+        self.assertEqual(args.port, 8080)
+    
+    def test_serve_default_host(self):
+        """Serve should have default host of 127.0.0.1."""
+        args = parse_args(['serve', '/path'])
+        self.assertEqual(args.host, '127.0.0.1')
+    
+    def test_serve_default_per_page(self):
+        """Serve should have default per_page of 10."""
+        args = parse_args(['serve', '/path'])
+        self.assertEqual(args.per_page, 10)
+    
+    def test_serve_default_max_results(self):
+        """Serve should have default max_results of 100."""
+        args = parse_args(['serve', '/path'])
+        self.assertEqual(args.max_results, 100)
+    
+    def test_serve_default_flags_false(self):
+        """Serve flags should default to False."""
+        args = parse_args(['serve', '/path'])
+        self.assertFalse(args.open)
+        self.assertFalse(args.log_requests)
+        self.assertFalse(args.separate_paths)
+
+
+class TestParserShortOptions(unittest.TestCase):
+    """Tests for short option aliases in all commands."""
+    
+    def test_crawl_short_options(self):
+        """Crawl should accept short options."""
+        args = parse_args([
+            'crawl', 'https://example.com',
+            '-u', 'user', '-p', 'pass',
+            '-d', '2.0', '-t', '60',
+            '-m', '100', '-w', '4',
+            '-f', '-i', '-q'
+        ])
+        self.assertEqual(args.user, 'user')
+        self.assertEqual(args.password, 'pass')
+        self.assertEqual(args.delay, 2.0)
+        self.assertEqual(args.timeout, 60)
+        self.assertEqual(args.max_pages, 100)
+        self.assertEqual(args.workers, 4)
+        self.assertTrue(args.fresh)
+        self.assertTrue(args.incremental)
+        self.assertTrue(args.quiet)
+    
+    def test_index_short_options(self):
+        """Index should accept short options."""
+        args = parse_args(['index', '/path', '-q'])
+        self.assertTrue(args.quiet)
+    
+    def test_search_short_options(self):
+        """Search should accept short options."""
+        args = parse_args([
+            'search', '/path', 'query',
+            '-l', '20', '-s', '-j', '-q'
+        ])
+        self.assertEqual(args.limit, 20)
+        self.assertTrue(args.scores)
+        self.assertTrue(args.json)
+        self.assertTrue(args.quiet)
+    
+    def test_autocomplete_short_options(self):
+        """Autocomplete should accept short options."""
+        args = parse_args([
+            'autocomplete', '/path', 'prefix',
+            '-l', '15', '-j'
+        ])
+        self.assertEqual(args.limit, 15)
+        self.assertTrue(args.json)
+    
+    def test_interactive_short_options(self):
+        """Interactive should accept short options."""
+        args = parse_args([
+            'interactive', '/path',
+            '-l', '25', '-s'
+        ])
+        self.assertEqual(args.limit, 25)
+        self.assertTrue(args.scores)
+    
+    def test_stats_short_options(self):
+        """Stats should accept short options."""
+        args = parse_args(['stats', '/path', '-e'])
+        self.assertTrue(args.show_errors)
+    
+    def test_serve_short_options(self):
+        """Serve should accept short options."""
+        args = parse_args([
+            'serve', '/path',
+            '-p', '9000', '-o'
+        ])
+        self.assertEqual(args.port, 9000)
+        self.assertTrue(args.open)
+
+
+# Need to import argparse at module level for isinstance checks
+import argparse
+
+
 if __name__ == '__main__':
     unittest.main()
