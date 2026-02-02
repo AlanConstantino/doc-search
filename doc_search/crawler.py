@@ -5,7 +5,6 @@ Supports parallel crawling with per-domain rate limiting.
 
 import json
 import time
-import base64
 import ssl
 import gzip
 import hashlib
@@ -19,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 
 from .utils import (
     normalize_url, is_same_domain, url_to_filename, 
-    is_html_content, get_domain
+    is_html_content, get_domain, make_basic_auth_header
 )
 from .robots import RobotsChecker
 from .parser import extract_text, extract_links
@@ -169,20 +168,7 @@ class Crawler:
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""
-        # Pre-encoded token takes priority
-        if self.auth_token:
-            # Remove 'Basic ' prefix if user included it
-            token = self.auth_token
-            if token.lower().startswith('basic '):
-                token = token[6:]
-            return f"Basic {token}"
-        # Otherwise encode from username/password
-        if self.auth:
-            username, password = self.auth
-            credentials = f"{username}:{password}"
-            encoded = base64.b64encode(credentials.encode()).decode()
-            return f"Basic {encoded}"
-        return None
+        return make_basic_auth_header(auth=self.auth, auth_token=self.auth_token)
     
     def _get_page_metadata(self, url: str) -> Optional[Dict[str, Any]]:
         """Load existing page metadata for incremental crawling."""

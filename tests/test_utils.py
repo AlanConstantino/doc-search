@@ -2,10 +2,11 @@
 Tests for utility functions including URL normalization.
 """
 
+import base64
 import unittest
 from doc_search.utils import (
     normalize_url, tokenize, is_valid_url, get_domain,
-    hash_string, url_to_filename, site_hash
+    hash_string, url_to_filename, site_hash, make_basic_auth_header
 )
 
 
@@ -279,6 +280,79 @@ class TestSiteHash(unittest.TestCase):
         result1 = site_hash("https://example.com/docs/", include_path=True)
         result2 = site_hash("https://example.com/docs", include_path=True)
         self.assertEqual(result1, result2)
+
+
+class TestMakeBasicAuthHeader(unittest.TestCase):
+    """Tests for make_basic_auth_header function."""
+    
+    def test_no_credentials(self):
+        """Should return None when no credentials provided."""
+        result = make_basic_auth_header()
+        self.assertIsNone(result)
+    
+    def test_username_password(self):
+        """Should encode username:password as Base64."""
+        result = make_basic_auth_header(auth=("user", "pass"))
+        # "user:pass" -> base64 -> "dXNlcjpwYXNz"
+        expected = "Basic dXNlcjpwYXNz"
+        self.assertEqual(result, expected)
+    
+    def test_username_password_special_chars(self):
+        """Should handle special characters in credentials."""
+        result = make_basic_auth_header(auth=("user@domain.com", "p@ss:word!"))
+        # Verify it's a valid Base64 encoding
+        self.assertTrue(result.startswith("Basic "))
+        # Decode and verify
+        token = result[6:]  # Remove "Basic "
+        decoded = base64.b64decode(token).decode()
+        self.assertEqual(decoded, "user@domain.com:p@ss:word!")
+    
+    def test_pre_encoded_token(self):
+        """Should use pre-encoded token directly."""
+        token = base64.b64encode(b"user:pass").decode()
+        result = make_basic_auth_header(auth_token=token)
+        self.assertEqual(result, f"Basic {token}")
+    
+    def test_pre_encoded_token_with_basic_prefix(self):
+        """Should strip 'Basic ' prefix if included in token."""
+        token = base64.b64encode(b"user:pass").decode()
+        result = make_basic_auth_header(auth_token=f"Basic {token}")
+        self.assertEqual(result, f"Basic {token}")
+    
+    def test_pre_encoded_token_with_lowercase_prefix(self):
+        """Should strip 'basic ' prefix (case-insensitive)."""
+        token = base64.b64encode(b"user:pass").decode()
+        result = make_basic_auth_header(auth_token=f"basic {token}")
+        self.assertEqual(result, f"Basic {token}")
+    
+    def test_token_takes_priority(self):
+        """Token should take priority over username/password."""
+        token = base64.b64encode(b"token:creds").decode()
+        result = make_basic_auth_header(
+            auth=("user", "pass"),
+            auth_token=token
+        )
+        # Should use token, not auth
+        self.assertEqual(result, f"Basic {token}")
+        # Verify it's NOT the auth credentials
+        decoded = base64.b64decode(token).decode()
+        self.assertEqual(decoded, "token:creds")
+    
+    def test_empty_password(self):
+        """Should handle empty password."""
+        result = make_basic_auth_header(auth=("user", ""))
+        self.assertTrue(result.startswith("Basic "))
+        token = result[6:]
+        decoded = base64.b64decode(token).decode()
+        self.assertEqual(decoded, "user:")
+    
+    def test_empty_username(self):
+        """Should handle empty username."""
+        result = make_basic_auth_header(auth=("", "pass"))
+        self.assertTrue(result.startswith("Basic "))
+        token = result[6:]
+        decoded = base64.b64decode(token).decode()
+        self.assertEqual(decoded, ":pass")
 
 
 if __name__ == '__main__':
