@@ -395,6 +395,9 @@ def cmd_interactive(args):
 
 def cmd_stats(args):
     """Show statistics for a crawled site."""
+    from ..crawl_state import CrawlState
+    from datetime import datetime
+    
     separate_paths = getattr(args, 'separate_paths', False)
     site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
     
@@ -444,6 +447,39 @@ def cmd_stats(args):
         print(f"  Avg document length: {idx_stats['avg_document_length']} terms")
         print(f"  BM25 k1={idx_stats['k1']}, b={idx_stats['b']}")
         print(f"  Index size: {format_size(index_path.stat().st_size)}")
+    
+    # Load and display error summary from crawl state
+    crawl_state_file = site_dir / 'crawl_state.json'
+    if crawl_state_file.exists():
+        state = CrawlState(crawl_state_file)
+        if state.load():
+            errors = state.get_errors()
+            if errors:
+                print()
+                print("Crawl Errors:")
+                
+                # Group errors by type
+                error_summary = state.get_error_summary()
+                for error_type, count in sorted(error_summary.items(), key=lambda x: -x[1]):
+                    print(f"  {error_type}: {count}")
+                
+                print(f"  Total: {len(errors)}")
+                
+                # Show detailed error list if --show-errors flag is set
+                show_errors = getattr(args, 'show_errors', False)
+                if show_errors:
+                    print()
+                    print("Recent Errors (last 10):")
+                    # Sort by timestamp descending and take last 10
+                    recent_errors = sorted(errors, key=lambda e: e.timestamp, reverse=True)[:10]
+                    for error in recent_errors:
+                        timestamp = datetime.fromtimestamp(error.timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                        # Truncate long URLs
+                        url = error.url
+                        if len(url) > 60:
+                            url = url[:57] + '...'
+                        print(f"  [{timestamp}] [{error.error_type}] {url}")
+                        print(f"    {error.message}")
     
     return 0
 

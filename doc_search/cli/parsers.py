@@ -175,6 +175,8 @@ def _add_stats_parser(subparsers):
     """Add the stats command parser."""
     stats_parser = subparsers.add_parser('stats', help='Show site statistics')
     stats_parser.add_argument('site_dir', help='Site data directory or original URL')
+    stats_parser.add_argument('--show-errors', '-e', action='store_true',
+                             help='Show detailed list of crawl errors')
     stats_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     stats_parser.set_defaults(func=cmd_stats)
