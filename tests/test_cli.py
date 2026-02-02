@@ -1927,6 +1927,535 @@ class TestCmdSearchArgParsing(unittest.TestCase):
         self.assertIn('query', output.lower())
 
 
+# ============================================================================
+# cmd_serve Tests
+# ============================================================================
+
+class MockHTTPServer:
+    """Mock HTTPServer for testing CLI serve command without real server.
+    
+    This mock provides the same interface as HTTPServer to allow testing
+    the serve command without binding to actual network ports.
+    """
+    
+    def __init__(self, address: tuple, handler_class):
+        """
+        Create mock server.
+        
+        Args:
+            address: Tuple of (host, port)
+            handler_class: Request handler class
+        """
+        self.server_address = address
+        self.handler_class = handler_class
+        self.serve_forever_calls = 0
+        self.shutdown_calls = 0
+    
+    def serve_forever(self):
+        """Mock serve_forever - immediately raises KeyboardInterrupt to simulate Ctrl+C."""
+        self.serve_forever_calls += 1
+        # Simulate immediate Ctrl+C to avoid blocking tests
+        raise KeyboardInterrupt()
+    
+    def shutdown(self):
+        """Mock shutdown."""
+        self.shutdown_calls += 1
+
+
+class TestCmdServe(CLITestCase):
+    """Tests for the cmd_serve CLI command."""
+    
+    def test_serve_basic(self):
+        """Should start server with default options."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, stdout, _ = run_cli([
+                    'serve', str(self.site_dir)
+                ])
+                
+                # Verify SearchEngine.load was called with correct path
+                MockEngineClass.load.assert_called_once()
+                load_args = MockEngineClass.load.call_args[0]
+                self.assertEqual(load_args[0], self.site_dir / 'index.json')
+                
+                # Verify run_server was called with defaults
+                mock_run_server.assert_called_once()
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['host'], '127.0.0.1')
+                self.assertEqual(call_kwargs['port'], 8080)
+                self.assertFalse(call_kwargs['log_requests'])
+                self.assertEqual(call_kwargs['per_page'], 10)
+                self.assertEqual(call_kwargs['max_results'], 100)
+                
+                # Server should have been started
+                self.assertEqual(mock_server.serve_forever_calls, 1)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_custom_host(self):
+        """Should pass custom host to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('0.0.0.0', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--host', '0.0.0.0'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['host'], '0.0.0.0')
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_custom_port(self):
+        """Should pass custom port to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 9000), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--port', '9000'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['port'], 9000)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_custom_host_and_port(self):
+        """Should pass both custom host and port to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('192.168.1.100', 3000), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--host', '192.168.1.100',
+                    '--port', '3000'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['host'], '192.168.1.100')
+                self.assertEqual(call_kwargs['port'], 3000)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_with_log_requests(self):
+        """Should enable request logging when --log-requests flag is set."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--log-requests'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertTrue(call_kwargs['log_requests'])
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_custom_per_page(self):
+        """Should pass custom per_page to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--per-page', '25'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['per_page'], 25)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_custom_max_results(self):
+        """Should pass custom max_results to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir),
+                    '--max-results', '500'
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                self.assertEqual(call_kwargs['max_results'], 500)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_with_open_flag(self):
+        """Should open browser when --open flag is set."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                with patch('webbrowser.open') as mock_webbrowser:
+                    MockEngineClass.load.return_value = mock_engine
+                    mock_run_server.return_value = mock_server
+                    
+                    code, _, _ = run_cli([
+                        'serve', str(self.site_dir),
+                        '--open'
+                    ])
+                    
+                    # Verify webbrowser.open was called with correct URL
+                    mock_webbrowser.assert_called_once_with('http://127.0.0.1:8080')
+                    
+                    self.assertEqual(code, 0)
+    
+    def test_serve_with_open_flag_custom_url(self):
+        """Should open browser with custom host/port URL."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('0.0.0.0', 9000), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                with patch('webbrowser.open') as mock_webbrowser:
+                    MockEngineClass.load.return_value = mock_engine
+                    mock_run_server.return_value = mock_server
+                    
+                    code, _, _ = run_cli([
+                        'serve', str(self.site_dir),
+                        '--host', '0.0.0.0',
+                        '--port', '9000',
+                        '--open'
+                    ])
+                    
+                    # Verify webbrowser.open was called with correct URL
+                    mock_webbrowser.assert_called_once_with('http://0.0.0.0:9000')
+                    
+                    self.assertEqual(code, 0)
+    
+    def test_serve_without_open_flag(self):
+        """Should not open browser when --open flag is not set."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                with patch('webbrowser.open') as mock_webbrowser:
+                    MockEngineClass.load.return_value = mock_engine
+                    mock_run_server.return_value = mock_server
+                    
+                    code, _, _ = run_cli([
+                        'serve', str(self.site_dir)
+                    ])
+                    
+                    # Verify webbrowser.open was NOT called
+                    mock_webbrowser.assert_not_called()
+                    
+                    self.assertEqual(code, 0)
+    
+    def test_serve_passes_version(self):
+        """Should pass version to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir)
+                ])
+                
+                call_kwargs = mock_run_server.call_args[1]
+                # Version should be passed (from __version__)
+                self.assertIn('version', call_kwargs)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_passes_engine(self):
+        """Should pass loaded SearchEngine to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir)
+                ])
+                
+                # Verify engine was passed as first positional argument
+                call_args = mock_run_server.call_args[0]
+                self.assertEqual(call_args[0], mock_engine)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_with_all_options(self):
+        """Should pass all options correctly to run_server."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('localhost', 5000), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                with patch('webbrowser.open') as mock_webbrowser:
+                    MockEngineClass.load.return_value = mock_engine
+                    mock_run_server.return_value = mock_server
+                    
+                    code, _, _ = run_cli([
+                        'serve', str(self.site_dir),
+                        '--host', 'localhost',
+                        '--port', '5000',
+                        '--log-requests',
+                        '--per-page', '20',
+                        '--max-results', '200',
+                        '--open'
+                    ])
+                    
+                    call_kwargs = mock_run_server.call_args[1]
+                    self.assertEqual(call_kwargs['host'], 'localhost')
+                    self.assertEqual(call_kwargs['port'], 5000)
+                    self.assertTrue(call_kwargs['log_requests'])
+                    self.assertEqual(call_kwargs['per_page'], 20)
+                    self.assertEqual(call_kwargs['max_results'], 200)
+                    
+                    mock_webbrowser.assert_called_once_with('http://localhost:5000')
+                    
+                    self.assertEqual(code, 0)
+    
+    def test_serve_prints_startup_info(self):
+        """Should print server startup information."""
+        mock_engine = MockSearchEngine(stats={
+            'total_documents': 500,
+            'unique_terms': 10000,
+            'avg_document_length': 150,
+            'k1': 1.5,
+            'b': 0.75
+        })
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, stdout, _ = run_cli([
+                    'serve', str(self.site_dir)
+                ])
+                
+                # Should print URL
+                self.assertIn('http://127.0.0.1:8080', stdout)
+                # Should print doc count
+                self.assertIn('500', stdout)
+                # Should print term count
+                self.assertIn('10000', stdout)
+                
+                self.assertEqual(code, 0)
+    
+    def test_serve_loads_compressed_index(self):
+        """Should load compressed index (index.json.gz) when available."""
+        mock_engine = MockSearchEngine()
+        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        
+        # Create compressed index file
+        compressed_index = self.site_dir / 'index.json.gz'
+        import gzip
+        with gzip.open(compressed_index, 'wt') as f:
+            json.dump({'k1': 1.5, 'b': 0.75, 'documents': {}, 'index': {}}, f)
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            with patch('doc_search.server.run_server') as mock_run_server:
+                MockEngineClass.load.return_value = mock_engine
+                mock_run_server.return_value = mock_server
+                
+                code, _, _ = run_cli([
+                    'serve', str(self.site_dir)
+                ])
+                
+                # Verify it loaded the compressed index
+                load_args = MockEngineClass.load.call_args[0]
+                self.assertEqual(load_args[0], compressed_index)
+                
+                self.assertEqual(code, 0)
+
+
+class TestCmdServeErrorHandling(CLITestCase):
+    """Tests for error handling in cmd_serve."""
+    
+    def test_serve_missing_index(self):
+        """Should fail when no index file exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir)
+            # No index file
+            
+            code, stdout, _ = run_cli([
+                'serve', str(site_dir)
+            ])
+            
+            self.assertEqual(code, 1)
+            self.assertIn('Error:', stdout)
+            self.assertIn('No index found', stdout)
+    
+    def test_serve_missing_index_suggests_indexing(self):
+        """Should suggest running index command when index is missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir)
+            
+            code, stdout, _ = run_cli([
+                'serve', str(site_dir)
+            ])
+            
+            self.assertEqual(code, 1)
+            self.assertIn('doc_search index', stdout)
+    
+    def test_serve_missing_site_dir_argument(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['serve'])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code (argparse error)
+        self.assertNotEqual(code, 0)
+
+
+class TestCmdServeArgParsing(unittest.TestCase):
+    """Tests for serve argument parsing."""
+    
+    def test_parse_serve_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['serve', '/path/to/site'])
+        
+        self.assertEqual(args.command, 'serve')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.host, '127.0.0.1')
+        self.assertEqual(args.port, 8080)
+        self.assertFalse(args.open)
+        self.assertFalse(args.log_requests)
+        self.assertEqual(args.per_page, 10)
+        self.assertEqual(args.max_results, 100)
+    
+    def test_parse_serve_host(self):
+        """Should parse --host option."""
+        args = parse_args(['serve', '/path/to/site', '--host', '0.0.0.0'])
+        
+        self.assertEqual(args.host, '0.0.0.0')
+    
+    def test_parse_serve_port(self):
+        """Should parse --port option."""
+        args = parse_args(['serve', '/path/to/site', '--port', '9000'])
+        
+        self.assertEqual(args.port, 9000)
+        self.assertIsInstance(args.port, int)
+    
+    def test_parse_serve_open_flag(self):
+        """Should parse --open flag."""
+        args = parse_args(['serve', '/path/to/site', '--open'])
+        
+        self.assertTrue(args.open)
+    
+    def test_parse_serve_log_requests_flag(self):
+        """Should parse --log-requests flag."""
+        args = parse_args(['serve', '/path/to/site', '--log-requests'])
+        
+        self.assertTrue(args.log_requests)
+    
+    def test_parse_serve_per_page(self):
+        """Should parse --per-page option."""
+        args = parse_args(['serve', '/path/to/site', '--per-page', '25'])
+        
+        self.assertEqual(args.per_page, 25)
+        self.assertIsInstance(args.per_page, int)
+    
+    def test_parse_serve_max_results(self):
+        """Should parse --max-results option."""
+        args = parse_args(['serve', '/path/to/site', '--max-results', '500'])
+        
+        self.assertEqual(args.max_results, 500)
+        self.assertIsInstance(args.max_results, int)
+    
+    def test_parse_serve_separate_paths_flag(self):
+        """Should parse --separate-paths flag."""
+        args = parse_args(['serve', '/path/to/site', '--separate-paths'])
+        
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_serve_help(self):
+        """Should show help text for serve command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['serve', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('serve', output.lower())
+        self.assertIn('host', output)
+        self.assertIn('port', output)
+
+
 class TestCmdSearchIntegration(CLITestCase):
     """Integration tests for cmd_search using real file structures."""
     
