@@ -637,6 +637,10 @@ class TestCrawlState(CrawlerTestCase):
 class TestRateLimiter(CrawlerTestCase):
     """Tests for RateLimiter class."""
     
+    # -------------------------------------------------------------------------
+    # Basic delay configuration tests
+    # -------------------------------------------------------------------------
+    
     def test_default_delay(self):
         """Should use default delay for unknown domains."""
         limiter = RateLimiter(default_delay=0.5)
@@ -649,6 +653,221 @@ class TestRateLimiter(CrawlerTestCase):
         
         self.assertEqual(limiter.get_delay('slow.example.com'), 2.0)
         self.assertEqual(limiter.get_delay('other.com'), 0.5)
+    
+    def test_zero_default_delay(self):
+        """Should support zero delay."""
+        limiter = RateLimiter(default_delay=0.0)
+        self.assertEqual(limiter.get_delay('example.com'), 0.0)
+    
+    def test_update_domain_delay(self):
+        """Should update existing domain delay."""
+        limiter = RateLimiter(default_delay=0.5)
+        limiter.set_domain_delay('example.com', 1.0)
+        limiter.set_domain_delay('example.com', 2.0)
+        
+        self.assertEqual(limiter.get_delay('example.com'), 2.0)
+    
+    # -------------------------------------------------------------------------
+    # Delay enforcement tests
+    # -------------------------------------------------------------------------
+    
+    def test_enforces_minimum_delay_between_requests(self):
+        """Should enforce minimum delay between consecutive requests."""
+        delay = 0.1  # 100ms delay
+        limiter = RateLimiter(default_delay=delay)
+        domain = 'example.com'
+        
+        # First request should be immediate
+        start1 = time.time()
+        limiter.wait_for_domain(domain)
+        elapsed1 = time.time() - start1
+        
+        # Second request should wait for delay
+        start2 = time.time()
+        limiter.wait_for_domain(domain)
+        elapsed2 = time.time() - start2
+        
+        # First request should be nearly instant (< 50ms tolerance)
+        self.assertLess(elapsed1, 0.05)
+        
+        # Second request should have waited approximately delay time
+        # Allow 50% tolerance for timing variations
+        self.assertGreaterEqual(elapsed2, delay * 0.5)
+    
+    def test_respects_per_domain_delay(self):
+        """Should use per-domain delay instead of default."""
+        limiter = RateLimiter(default_delay=1.0)  # Long default
+        limiter.set_domain_delay('fast.com', 0.05)  # Short delay
+        
+        # First request
+        limiter.wait_for_domain('fast.com')
+        
+        # Second request should use the short delay
+        start = time.time()
+        limiter.wait_for_domain('fast.com')
+        elapsed = time.time() - start
+        
+        # Should be close to 50ms, not 1000ms (allow some tolerance)
+        self.assertLess(elapsed, 0.3)  # Much less than 1.0s default
+    
+    def test_different_domains_dont_block_each_other(self):
+        """Requests to different domains should not interfere."""
+        limiter = RateLimiter(default_delay=0.5)  # 500ms delay
+        
+        # Make request to domain A
+        limiter.wait_for_domain('domain-a.com')
+        
+        # Immediately make request to domain B - should not wait
+        start = time.time()
+        limiter.wait_for_domain('domain-b.com')
+        elapsed = time.time() - start
+        
+        # Should be nearly instant (domains are independent)
+        self.assertLess(elapsed, 0.1)
+    
+    def test_multiple_domains_tracked_independently(self):
+        """Each domain should have its own timing."""
+        limiter = RateLimiter(default_delay=0.1)
+        
+        # Request to one domain, then immediately to another
+        # Second domain should not be affected by first
+        limiter.wait_for_domain('domain1.com')
+        
+        # Immediately request domain2 - should be instant (different domain)
+        start = time.time()
+        limiter.wait_for_domain('domain2.com')
+        elapsed = time.time() - start
+        self.assertLess(elapsed, 0.05)  # Should be instant
+        
+        # Now request domain1 again immediately - should wait
+        start = time.time()
+        limiter.wait_for_domain('domain1.com')
+        elapsed = time.time() - start
+        self.assertGreaterEqual(elapsed, 0.05)  # Should wait for delay
+    
+    # -------------------------------------------------------------------------
+    # Backoff tests
+    # -------------------------------------------------------------------------
+    
+    def test_backoff_delays_requests(self):
+        """set_backoff should delay subsequent requests."""
+        limiter = RateLimiter(default_delay=0.0)  # No normal delay
+        domain = 'example.com'
+        
+        # Set short backoff (100ms)
+        limiter.set_backoff(domain, 0.1)
+        
+        # Request should be delayed
+        start = time.time()
+        limiter.wait_for_domain(domain)
+        elapsed = time.time() - start
+        
+        # Should have waited for backoff
+        self.assertGreaterEqual(elapsed, 0.05)  # At least half the backoff
+    
+    def test_backoff_expires(self):
+        """Backoff should expire after the specified time."""
+        limiter = RateLimiter(default_delay=0.0)
+        domain = 'example.com'
+        
+        # Set very short backoff
+        limiter.set_backoff(domain, 0.05)
+        
+        # Wait for backoff to expire
+        time.sleep(0.1)
+        
+        # Request should be immediate (backoff expired)
+        start = time.time()
+        limiter.wait_for_domain(domain)
+        elapsed = time.time() - start
+        
+        self.assertLess(elapsed, 0.05)  # Should be nearly instant
+    
+    def test_backoff_overrides_normal_delay(self):
+        """Backoff should take precedence over normal delay."""
+        limiter = RateLimiter(default_delay=0.05)
+        domain = 'example.com'
+        
+        # Make initial request to start timing
+        limiter.wait_for_domain(domain)
+        
+        # Set longer backoff
+        limiter.set_backoff(domain, 0.15)
+        
+        # Should wait for backoff (longer than normal delay)
+        start = time.time()
+        limiter.wait_for_domain(domain)
+        elapsed = time.time() - start
+        
+        # Should be closer to backoff time than normal delay
+        self.assertGreaterEqual(elapsed, 0.1)
+    
+    def test_backoff_only_affects_specified_domain(self):
+        """Backoff on one domain should not affect others."""
+        limiter = RateLimiter(default_delay=0.0)
+        
+        # Set backoff on domain A
+        limiter.set_backoff('domain-a.com', 1.0)  # Long backoff
+        
+        # Domain B should be unaffected
+        start = time.time()
+        limiter.wait_for_domain('domain-b.com')
+        elapsed = time.time() - start
+        
+        self.assertLess(elapsed, 0.05)  # Should be instant
+    
+    # -------------------------------------------------------------------------
+    # Thread safety tests
+    # -------------------------------------------------------------------------
+    
+    def test_concurrent_wait_for_domain_is_thread_safe(self):
+        """wait_for_domain should be thread-safe under concurrent access."""
+        limiter = RateLimiter(default_delay=0.01)  # 10ms delay
+        domain = 'example.com'
+        errors = []
+        request_times = []
+        lock = threading.Lock()
+        
+        def make_requests():
+            try:
+                for _ in range(5):
+                    limiter.wait_for_domain(domain)
+                    with lock:
+                        request_times.append(time.time())
+            except Exception as e:
+                errors.append(e)
+        
+        threads = [threading.Thread(target=make_requests) for _ in range(3)]
+        start_time = time.time()
+        
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
+        # Should have 15 requests total (3 threads × 5 requests)
+        self.assertEqual(len(request_times), 15)
+    
+    def test_concurrent_set_domain_delay_is_thread_safe(self):
+        """set_domain_delay should be thread-safe."""
+        limiter = RateLimiter(default_delay=0.5)
+        errors = []
+        
+        def set_delays(start):
+            try:
+                for i in range(20):
+                    limiter.set_domain_delay(f'domain{start}_{i}.com', 0.1 * i)
+            except Exception as e:
+                errors.append(e)
+        
+        threads = [threading.Thread(target=set_delays, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
 
 
 # ============================================================================
