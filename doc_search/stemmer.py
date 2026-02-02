@@ -7,8 +7,8 @@ Reference: https://tartarus.org/martin/PorterStemmer/def.txt
 This is a complete implementation with all 5 steps.
 """
 
-import re
 from functools import lru_cache
+from typing import List, Tuple
 
 
 def _is_consonant(word: str, i: int) -> bool:
@@ -39,11 +39,11 @@ def _measure(word: str) -> int:
         return 0
     
     # Build consonant/vowel pattern
-    pattern = []
+    pattern: List[str] = []
     for i in range(len(word)):
         pattern.append('C' if _is_consonant(word, i) else 'V')
     
-    pattern_str = ''.join(pattern)
+    pattern_str: str = ''.join(pattern)
     
     # Count VC sequences
     count = 0
@@ -190,7 +190,7 @@ def _step2(word: str) -> str:
     """
     Step 2: Handle various suffixes when m > 0.
     """
-    pairs = [
+    pairs: List[Tuple[str, str]] = [
         ('ational', 'ate'),
         ('tional', 'tion'),
         ('enci', 'ence'),
@@ -227,7 +227,7 @@ def _step3(word: str) -> str:
     """
     Step 3: Handle various suffixes when m > 0.
     """
-    pairs = [
+    pairs: List[Tuple[str, str]] = [
         ('icate', 'ic'),
         ('ative', ''),
         ('alize', 'al'),
@@ -251,7 +251,7 @@ def _step4(word: str) -> str:
     """
     Step 4: Remove various suffixes when m > 1.
     """
-    suffixes = [
+    suffixes: List[str] = [
         'al', 'ance', 'ence', 'er', 'ic', 'able', 'ible', 'ant', 'ement',
         'ment', 'ent', 'ion', 'ou', 'ism', 'ate', 'iti', 'ous', 'ive', 'ize'
     ]
@@ -339,6 +339,18 @@ def stem(word: str) -> str:
     return word
 
 
-def stem_tokens(tokens: list) -> list:
-    """Stem a list of tokens."""
+def stem_tokens(tokens: List[str]) -> List[str]:
+    """
+    Stem a list of tokens.
+    
+    Args:
+        tokens: List of words to stem.
+        
+    Returns:
+        List of stemmed words in the same order.
+        
+    Examples:
+        >>> stem_tokens(['running', 'files', 'caresses'])
+        ['run', 'file', 'caress']
+    """
     return [stem(token) for token in tokens]
