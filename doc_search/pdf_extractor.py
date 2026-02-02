@@ -10,7 +10,8 @@ from io import BytesIO
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import ssl
-import base64
+
+from .utils import make_basic_auth_header
 
 # Add vendor directory to path for PyPDF2 import
 _vendor_path = Path(__file__).parent.parent / 'vendor'
@@ -51,17 +52,7 @@ class PDFExtractor:
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""
-        if self.auth_token:
-            token = self.auth_token
-            if token.lower().startswith('basic '):
-                token = token[6:]
-            return f"Basic {token}"
-        if self.auth:
-            username, password = self.auth
-            credentials = f"{username}:{password}"
-            encoded = base64.b64encode(credentials.encode()).decode()
-            return f"Basic {encoded}"
-        return None
+        return make_basic_auth_header(auth=self.auth, auth_token=self.auth_token)
     
     def _fetch_pdf(self, url: str) -> Optional[bytes]:
         """Fetch PDF bytes from URL."""

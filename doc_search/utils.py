@@ -4,8 +4,10 @@ Utility functions for URL normalization and helpers.
 
 import re
 import sys
+import base64
 import hashlib
 import posixpath
+from typing import Optional, Tuple
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
 
 
@@ -383,3 +385,61 @@ def format_duration(seconds: float) -> str:
     else:
         hours = seconds / 3600
         return f"{hours:.1f}h"
+
+
+def make_basic_auth_header(
+    auth: Optional[Tuple[str, str]] = None,
+    auth_token: Optional[str] = None
+) -> Optional[str]:
+    """
+    Generate Basic Auth header from credentials or token.
+    
+    This function creates the value for an HTTP Authorization header using
+    Basic authentication. It supports two modes:
+    
+    1. Pre-encoded token: If ``auth_token`` is provided, it's used directly
+       (after stripping any "Basic " prefix the user may have included).
+    
+    2. Username/password: If ``auth`` tuple is provided, the credentials are
+       Base64-encoded in the standard "username:password" format.
+    
+    The token takes priority over username/password if both are provided.
+    
+    Args:
+        auth: Optional tuple of (username, password) for Basic authentication.
+        auth_token: Optional pre-encoded Base64 token. May optionally include
+                    the "Basic " prefix (it will be normalized).
+    
+    Returns:
+        The full Authorization header value (e.g., "Basic dXNlcjpwYXNz") or
+        None if no credentials are provided.
+    
+    Examples:
+        >>> make_basic_auth_header(auth=("user", "pass"))
+        'Basic dXNlcjpwYXNz'
+        
+        >>> make_basic_auth_header(auth_token="dXNlcjpwYXNz")
+        'Basic dXNlcjpwYXNz'
+        
+        >>> make_basic_auth_header(auth_token="Basic dXNlcjpwYXNz")
+        'Basic dXNlcjpwYXNz'
+        
+        >>> make_basic_auth_header()
+        None
+    """
+    # Pre-encoded token takes priority
+    if auth_token:
+        # Remove 'Basic ' prefix if user included it
+        token = auth_token
+        if token.lower().startswith('basic '):
+            token = token[6:]
+        return f"Basic {token}"
+    
+    # Otherwise encode from username/password
+    if auth:
+        username, password = auth
+        credentials = f"{username}:{password}"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return f"Basic {encoded}"
+    
+    return None
