@@ -517,7 +517,8 @@ def cmd_serve(args):
     stats = engine.get_stats()
     
     # Start server
-    server = run_server(engine, host=args.host, port=args.port, version=__version__)
+    log_requests = getattr(args, 'log_requests', False)
+    server = run_server(engine, host=args.host, port=args.port, version=__version__, log_requests=log_requests)
     
     url = f"http://{args.host}:{args.port}"
     
@@ -703,6 +704,8 @@ Examples:
                              help='Host to bind to (default: 127.0.0.1)')
     serve_parser.add_argument('--open', '-o', action='store_true',
                              help='Open browser automatically')
+    serve_parser.add_argument('--log-requests', action='store_true',
+                             help='Log HTTP requests to stdout')
     serve_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     serve_parser.set_defaults(func=cmd_serve)
