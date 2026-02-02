@@ -827,6 +827,75 @@ class TestCrawlError(CrawlerTestCase):
         # Should be valid JSON
         parsed = json.loads(json_str)
         self.assertEqual(parsed['url'], error.url)
+    
+    # -------------------------------------------------------------------------
+    # Performance tests for persistent set optimization
+    # -------------------------------------------------------------------------
+    
+    def test_add_urls_performance_with_large_queue(self):
+        """add_urls should maintain O(1) lookup even with large pending queue.
+        
+        This tests the optimization from Phase 4.1 (#88) - using a persistent
+        _pending_set instead of rebuilding the set on every add_urls call.
+        """
+        import time
+        state = self.create_crawl_state()
+        
+        # Pre-populate with 10K URLs
+        initial_urls = [(f'https://example.com/page{i}', 0) for i in range(10000)]
+        state.add_urls(initial_urls)
+        
+        # Now benchmark adding more URLs
+        # With O(n) set construction, this would be slow
+        # With O(1) persistent set, this should be fast
+        new_urls = [(f'https://example.com/new{i}', 0) for i in range(1000)]
+        
+        start = time.time()
+        for i in range(10):  # 10 batches
+            batch = [(f'https://example.com/batch{i}-{j}', 0) for j in range(100)]
+            state.add_urls(batch)
+        elapsed = time.time() - start
+        
+        # Should complete in under 100ms (with old O(n) impl would be slower)
+        self.assertLess(elapsed, 0.1, f"add_urls too slow: {elapsed:.3f}s")
+        
+        # Verify correctness - all URLs should be in pending
+        self.assertEqual(len(state.pending), 11000)  # 10K + 10*100
+    
+    def test_pending_set_consistency_with_pop(self):
+        """_pending_set should stay consistent when popping URLs."""
+        state = self.create_crawl_state()
+        
+        # Add some URLs
+        urls = [(f'https://example.com/page{i}', 0) for i in range(5)]
+        state.add_urls(urls)
+        
+        # Pop some URLs
+        state.pop_url()
+        state.pop_url()
+        
+        # Try to re-add the same URLs - only popped ones should be added
+        state.add_urls(urls)
+        
+        # Should have 5 (original 3 still pending) + 2 (re-added popped ones)
+        self.assertEqual(len(state.pending), 5)
+    
+    def test_pending_set_consistency_with_mark_failed(self):
+        """_pending_set should stay consistent when mark_failed re-adds URLs."""
+        state = self.create_crawl_state()
+        
+        # Add and pop a URL
+        state.add_urls([('https://example.com/fail', 0)])
+        url, depth = state.pop_url()
+        
+        # Mark it as failed (should re-add to pending)
+        state.mark_failed(url, depth)
+        
+        # Try to add the same URL again - should be skipped (already in pending)
+        state.add_urls([('https://example.com/fail', 0)])
+        
+        # Should only have 1 URL in pending
+        self.assertEqual(len(state.pending), 1)
 
 
 # ============================================================================

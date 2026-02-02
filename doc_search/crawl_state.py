@@ -51,6 +51,7 @@ class CrawlState:
         self.state_file = state_file
         self.visited: Set[str] = set()
         self.pending: deque = deque()  # (url, depth) tuples
+        self._pending_set: Set[str] = set()  # O(1) lookup for pending URLs
         self.failed: Dict[str, int] = {}  # url -> retry count
         self.errors: List[CrawlError] = []  # Structured error tracking
         self.stats = {
@@ -96,11 +97,14 @@ class CrawlState:
                 # Handle both old format (just urls) and new format (url, depth tuples)
                 pending = state.get('pending', [])
                 self.pending = deque()
+                self._pending_set = set()
                 for item in pending:
                     if isinstance(item, list) and len(item) == 2:
                         self.pending.append(tuple(item))
+                        self._pending_set.add(item[0])
                     else:
                         self.pending.append((item, 0))  # Assume depth 0 for old format
+                        self._pending_set.add(item)
                 self.failed = state.get('failed', {})
                 # Restore errors from state
                 self.errors = [
@@ -116,6 +120,7 @@ class CrawlState:
         with self._lock:
             self.visited.clear()
             self.pending.clear()
+            self._pending_set.clear()
             self.failed.clear()
             self.errors.clear()
             self.stats = {
@@ -137,19 +142,19 @@ class CrawlState:
             if self.pending:
                 item = self.pending.popleft()
                 if isinstance(item, tuple):
+                    self._pending_set.discard(item[0])
                     return item
+                self._pending_set.discard(item)
                 return (item, 0)
             return None
     
     def add_urls(self, urls: List[Tuple[str, int]]):
         """Add URLs to the queue (thread-safe), avoiding duplicates."""
         with self._lock:
-            # Build set of URLs already in pending for fast lookup
-            pending_urls = {url for url, _ in self.pending}
             for url, depth in urls:
-                if url not in self.visited and url not in pending_urls:
+                if url not in self.visited and url not in self._pending_set:
                     self.pending.append((url, depth))
-                    pending_urls.add(url)
+                    self._pending_set.add(url)
     
     def mark_visited(self, url: str):
         """Mark a URL as visited (thread-safe)."""
@@ -171,6 +176,7 @@ class CrawlState:
             if retry_count < 3:
                 self.failed[url] = retry_count + 1
                 self.pending.append((url, depth))
+                self._pending_set.add(url)
                 self.visited.discard(url)
                 return True
             else:
