@@ -1194,6 +1194,259 @@ class TestCrawlerURLFiltering(CrawlerTestCase):
 
 
 # ============================================================================
+# Incremental Crawl Tests
+# ============================================================================
+
+class TestIncrementalCrawl(CrawlerTestCase):
+    """Tests for incremental crawling functionality."""
+    
+    def test_content_hash_deterministic(self):
+        """_content_hash should produce consistent hashes."""
+        crawler = self.create_crawler()
+        
+        content = "Hello, World!"
+        hash1 = crawler._content_hash(content)
+        hash2 = crawler._content_hash(content)
+        
+        self.assertEqual(hash1, hash2)
+    
+    def test_content_hash_different_for_different_content(self):
+        """_content_hash should produce different hashes for different content."""
+        crawler = self.create_crawler()
+        
+        hash1 = crawler._content_hash("Content A")
+        hash2 = crawler._content_hash("Content B")
+        
+        self.assertNotEqual(hash1, hash2)
+    
+    def test_content_hash_is_sha256(self):
+        """_content_hash should return 64-character SHA256 hash."""
+        crawler = self.create_crawler()
+        
+        hash_value = crawler._content_hash("Test content")
+        
+        self.assertEqual(len(hash_value), 64)
+        # Should be valid hex
+        int(hash_value, 16)
+    
+    def test_get_page_metadata_returns_none_for_missing_file(self):
+        """_get_page_metadata should return None when page file doesn't exist."""
+        crawler = self.create_crawler()
+        
+        result = crawler._get_page_metadata('https://example.com/nonexistent')
+        
+        self.assertIsNone(result)
+    
+    def test_get_page_metadata_loads_existing_page(self):
+        """_get_page_metadata should load data from existing page file."""
+        crawler = self.create_crawler()
+        
+        # Create a page file
+        from doc_search.utils import url_to_filename
+        url = 'https://example.com/test'
+        filename = url_to_filename(url) + '.json'
+        page_data = {
+            'url': url,
+            'title': 'Test Page',
+            'etag': '"abc123"',
+            'last_modified': 'Wed, 01 Jan 2020 00:00:00 GMT',
+            'content_hash': 'somehash123',
+        }
+        
+        with open(crawler.pages_dir / filename, 'w') as f:
+            json.dump(page_data, f)
+        
+        result = crawler._get_page_metadata(url)
+        
+        self.assertEqual(result['title'], 'Test Page')
+        self.assertEqual(result['etag'], '"abc123"')
+        self.assertEqual(result['last_modified'], 'Wed, 01 Jan 2020 00:00:00 GMT')
+    
+    def test_get_page_metadata_handles_corrupted_json(self):
+        """_get_page_metadata should return None for corrupted JSON."""
+        crawler = self.create_crawler()
+        
+        from doc_search.utils import url_to_filename
+        url = 'https://example.com/corrupted'
+        filename = url_to_filename(url) + '.json'
+        
+        with open(crawler.pages_dir / filename, 'w') as f:
+            f.write('{ invalid json }}}')
+        
+        result = crawler._get_page_metadata(url)
+        
+        self.assertIsNone(result)
+    
+    def test_save_page_stores_incremental_metadata(self):
+        """_save_page should store etag, last_modified, and content_hash."""
+        crawler = self.create_crawler()
+        
+        url = 'https://example.com/testpage'
+        page_data = {
+            'url': url,
+            'title': 'Test Page',
+            'description': 'A test page',
+            'text': 'Page content here',
+            'headings': [],
+            'depth': 0,
+            'crawled_at': time.time(),
+            'etag': '"abc123"',
+            'last_modified': 'Wed, 01 Jan 2020 00:00:00 GMT',
+            'content_hash': 'hash123',
+        }
+        
+        crawler._save_page(url, page_data)
+        
+        # Verify the file was saved
+        from doc_search.utils import url_to_filename
+        filename = url_to_filename(url) + '.json'
+        filepath = crawler.pages_dir / filename
+        
+        self.assertTrue(filepath.exists())
+        
+        with open(filepath) as f:
+            saved_data = json.load(f)
+        
+        self.assertEqual(saved_data['etag'], '"abc123"')
+        self.assertEqual(saved_data['last_modified'], 'Wed, 01 Jan 2020 00:00:00 GMT')
+        self.assertEqual(saved_data['content_hash'], 'hash123')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_sends_etag_header(self, mock_urlopen):
+        """_fetch should send If-None-Match header when etag is provided."""
+        crawler = self.create_crawler()
+        
+        mock_response = create_mock_response('<html></html>')
+        mock_urlopen.return_value = mock_response
+        
+        crawler._fetch('https://example.com/', etag='"abc123"')
+        
+        # Check the request was made with If-None-Match header
+        call_args = mock_urlopen.call_args
+        request = call_args[0][0]
+        self.assertEqual(request.get_header('If-none-match'), '"abc123"')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_sends_last_modified_header(self, mock_urlopen):
+        """_fetch should send If-Modified-Since header when last_modified is provided."""
+        crawler = self.create_crawler()
+        
+        mock_response = create_mock_response('<html></html>')
+        mock_urlopen.return_value = mock_response
+        
+        last_mod = 'Wed, 01 Jan 2020 00:00:00 GMT'
+        crawler._fetch('https://example.com/', last_modified=last_mod)
+        
+        # Check the request was made with If-Modified-Since header
+        call_args = mock_urlopen.call_args
+        request = call_args[0][0]
+        self.assertEqual(request.get_header('If-modified-since'), last_mod)
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_handles_304_not_modified(self, mock_urlopen):
+        """_fetch should return not_modified=True on HTTP 304."""
+        crawler = self.create_crawler()
+        
+        # Simulate 304 response
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/', 304, 'Not Modified', {}, None
+        )
+        
+        content, content_type, metadata = crawler._fetch(
+            'https://example.com/', 
+            etag='"abc123"'
+        )
+        
+        self.assertIsNone(content)
+        self.assertIsNone(content_type)
+        self.assertTrue(metadata.get('not_modified'))
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_etag_from_response(self, mock_urlopen):
+        """_fetch should capture ETag from response headers."""
+        crawler = self.create_crawler()
+        
+        mock_response = create_mock_response(
+            '<html></html>',
+            etag='"newetag456"'
+        )
+        mock_urlopen.return_value = mock_response
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/')
+        
+        self.assertEqual(metadata.get('etag'), '"newetag456"')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_last_modified_from_response(self, mock_urlopen):
+        """_fetch should capture Last-Modified from response headers."""
+        crawler = self.create_crawler()
+        
+        mock_response = create_mock_response(
+            '<html></html>',
+            last_modified='Wed, 15 Jan 2025 12:00:00 GMT'
+        )
+        mock_urlopen.return_value = mock_response
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/')
+        
+        self.assertEqual(metadata.get('last_modified'), 'Wed, 15 Jan 2025 12:00:00 GMT')
+    
+    def test_unchanged_page_detection_via_content_hash(self):
+        """Should detect unchanged pages via content hash comparison."""
+        crawler = self.create_crawler(incremental=True)
+        
+        # Simulate previously crawled page
+        from doc_search.utils import url_to_filename
+        url = 'https://example.com/page'
+        content = '<html><head><title>Test</title></head><body>Content</body></html>'
+        content_hash = crawler._content_hash(content)
+        
+        page_data = {
+            'url': url,
+            'title': 'Test',
+            'description': '',
+            'text': 'Content',
+            'headings': [],
+            'depth': 0,
+            'crawled_at': time.time(),
+            'content_hash': content_hash,
+        }
+        
+        filename = url_to_filename(url) + '.json'
+        with open(crawler.pages_dir / filename, 'w') as f:
+            json.dump(page_data, f)
+        
+        # Load and verify
+        loaded = crawler._get_page_metadata(url)
+        self.assertEqual(loaded['content_hash'], content_hash)
+        
+        # New content with same hash would be detected as unchanged
+        new_content_hash = crawler._content_hash(content)
+        self.assertEqual(new_content_hash, loaded['content_hash'])
+    
+    def test_changed_page_detection_via_content_hash(self):
+        """Should detect changed pages via content hash comparison."""
+        crawler = self.create_crawler(incremental=True)
+        
+        original_content = '<html><body>Original</body></html>'
+        modified_content = '<html><body>Modified</body></html>'
+        
+        original_hash = crawler._content_hash(original_content)
+        modified_hash = crawler._content_hash(modified_content)
+        
+        # Hashes should be different
+        self.assertNotEqual(original_hash, modified_hash)
+    
+    def test_incremental_mode_flag(self):
+        """Crawler should have incremental mode flag."""
+        crawler_default = self.create_crawler()
+        crawler_incremental = self.create_crawler(incremental=True)
+        
+        self.assertFalse(crawler_default.incremental)
+        self.assertTrue(crawler_incremental.incremental)
+
+
+# ============================================================================
 # Placeholder for Additional Tests
 # ============================================================================
 
