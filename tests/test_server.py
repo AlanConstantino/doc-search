@@ -653,5 +653,112 @@ class TestServerResultRendering(ServerTestCase):
         self.assertIn('>highlight<', body)
 
 
+# ============================================================================
+# Phase 4.4: Health Check Endpoint Tests
+# ============================================================================
+
+class TestHealthEndpoint(ServerTestCase):
+    """Tests for /health endpoint."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with mock engine."""
+        cls.engine = MockSearchEngine(stats={
+            'total_documents': 500,
+            'unique_terms': 10000,
+        })
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_health_returns_200_when_healthy(self):
+        """GET /health should return 200 when documents are indexed."""
+        status, headers, body = self.make_request('/health')
+        self.assertEqual(status, 200)
+    
+    def test_health_returns_json(self):
+        """GET /health should return JSON content type."""
+        status, headers, body = self.make_request('/health')
+        content_type = headers.get('Content-Type', '')
+        self.assertIn('application/json', content_type)
+    
+    def test_health_contains_status_ok(self):
+        """Health response should contain status: ok."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertEqual(data['status'], 'ok')
+    
+    def test_health_contains_document_count(self):
+        """Health response should contain document count."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertEqual(data['documents'], 500)
+    
+    def test_health_contains_term_count(self):
+        """Health response should contain term count."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertEqual(data['terms'], 10000)
+    
+    def test_health_contains_uptime(self):
+        """Health response should contain uptime_seconds."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertIn('uptime_seconds', data)
+        self.assertGreaterEqual(data['uptime_seconds'], 0)
+    
+    def test_health_contains_version(self):
+        """Health response should contain version."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertIn('version', data)
+
+
+class TestHealthEndpointUnhealthy(ServerTestCase):
+    """Tests for /health endpoint when unhealthy."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with empty engine (no documents)."""
+        cls.engine = MockSearchEngine(stats={
+            'total_documents': 0,  # No documents = unhealthy
+            'unique_terms': 0,
+        })
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_health_returns_503_when_unhealthy(self):
+        """GET /health should return 503 when no documents indexed."""
+        status, headers, body = self.make_request('/health')
+        self.assertEqual(status, 503)
+    
+    def test_health_contains_status_unhealthy(self):
+        """Health response should contain status: unhealthy."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertEqual(data['status'], 'unhealthy')
+    
+    def test_health_contains_reason(self):
+        """Unhealthy response should contain reason."""
+        import json
+        status, headers, body = self.make_request('/health')
+        data = json.loads(body)
+        self.assertIn('reason', data)
+        self.assertIn('documents', data['reason'].lower())
+
+
 if __name__ == '__main__':
     unittest.main()
