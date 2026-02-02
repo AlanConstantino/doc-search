@@ -807,11 +807,17 @@ class Crawler:
             for future in active_futures:
                 future.cancel()
     
-    def get_crawled_pages(self):
-        """Generator that yields all crawled page data."""
+    def get_crawled_pages(self, warn_on_error: bool = True):
+        """Generator that yields all crawled page data.
+        
+        Args:
+            warn_on_error: If True, print a warning for skipped corrupted files.
+        """
         for page_file in self.pages_dir.glob('*.json'):
             try:
                 with open(page_file, 'r') as f:
                     yield json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                if warn_on_error:
+                    print(f"Warning: Skipping corrupted file {page_file}: {e}")
                 continue
