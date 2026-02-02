@@ -518,7 +518,10 @@ def cmd_serve(args):
     
     # Start server
     log_requests = getattr(args, 'log_requests', False)
-    server = run_server(engine, host=args.host, port=args.port, version=__version__, log_requests=log_requests)
+    per_page = getattr(args, 'per_page', 10)
+    max_results = getattr(args, 'max_results', 100)
+    server = run_server(engine, host=args.host, port=args.port, version=__version__, 
+                       log_requests=log_requests, per_page=per_page, max_results=max_results)
     
     url = f"http://{args.host}:{args.port}"
     
@@ -706,6 +709,10 @@ Examples:
                              help='Open browser automatically')
     serve_parser.add_argument('--log-requests', action='store_true',
                              help='Log HTTP requests to stdout')
+    serve_parser.add_argument('--per-page', type=int, default=10,
+                             help='Results per page (default: 10)')
+    serve_parser.add_argument('--max-results', type=int, default=100,
+                             help='Maximum total results for pagination (default: 100)')
     serve_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     serve_parser.set_defaults(func=cmd_serve)
