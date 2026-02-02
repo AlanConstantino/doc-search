@@ -64,8 +64,13 @@ class MockSearchEngine:
         self.search_calls: List[Dict[str, Any]] = []
         self.autocomplete_calls: List[Dict[str, Any]] = []
     
-    def search(self, query: str, top_k: int = 10, **kwargs) -> Dict[str, Any]:
-        """Return mock search results in enhanced format."""
+    def search(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
+        """Return mock search results as list (like SearchEngine.search)."""
+        self.search_calls.append({'query': query, 'top_k': top_k, **kwargs})
+        return self._results[:top_k]
+    
+    def search_enhanced(self, query: str, top_k: int = 10, **kwargs) -> Dict[str, Any]:
+        """Return mock search results in enhanced format (like EnhancedSearchEngine.search_enhanced)."""
         self.search_calls.append({'query': query, 'top_k': top_k, **kwargs})
         return {
             'results': self._results[:top_k],
@@ -325,7 +330,7 @@ class TestCLITestInfrastructure(CLITestCase):
         self.assertTrue(self.site_dir.exists())
     
     def test_mock_search_engine_search(self):
-        """MockSearchEngine.search should return expected format."""
+        """MockSearchEngine.search should return list (like base SearchEngine)."""
         results = [
             {'url': 'https://example.com/1', 'title': 'Page 1', 'score': 1.5},
             {'url': 'https://example.com/2', 'title': 'Page 2', 'score': 1.2},
@@ -334,9 +339,23 @@ class TestCLITestInfrastructure(CLITestCase):
         
         response = engine.search('test query', top_k=5)
         
+        # search() now returns list for LSP compliance
+        self.assertIsInstance(response, list)
+        self.assertEqual(len(response), 2)
+        self.assertEqual(engine.search_calls[0]['query'], 'test query')
+    
+    def test_mock_search_engine_search_enhanced(self):
+        """MockSearchEngine.search_enhanced should return expected dict format."""
+        results = [
+            {'url': 'https://example.com/1', 'title': 'Page 1', 'score': 1.5},
+            {'url': 'https://example.com/2', 'title': 'Page 2', 'score': 1.2},
+        ]
+        engine = MockSearchEngine(results=results)
+        
+        response = engine.search_enhanced('test query', top_k=5)
+        
         self.assertIn('results', response)
         self.assertEqual(len(response['results']), 2)
-        self.assertEqual(engine.search_calls[0]['query'], 'test query')
     
     def test_mock_search_engine_stats(self):
         """MockSearchEngine.get_stats should return stats dict."""
@@ -1573,17 +1592,17 @@ class TestCmdSearch(CLITestCase):
     def test_search_with_show_facets(self):
         """Should display facets when --show-facets flag is set."""
         mock_engine = MockSearchEngine()
-        # Override search to return facets
+        # Override search_enhanced to return facets
         facets = {
             'category': {'api': 5, 'guide': 3},
             'section': {'intro': 4, 'advanced': 4}
         }
-        original_search = mock_engine.search
-        def search_with_facets(query, top_k=10, **kwargs):
-            result = original_search(query, top_k, **kwargs)
+        original_search_enhanced = mock_engine.search_enhanced
+        def search_enhanced_with_facets(query, top_k=10, **kwargs):
+            result = original_search_enhanced(query, top_k, **kwargs)
             result['facets'] = facets
             return result
-        mock_engine.search = search_with_facets
+        mock_engine.search_enhanced = search_enhanced_with_facets
         
         self.create_mock_index()
         
@@ -1606,12 +1625,12 @@ class TestCmdSearch(CLITestCase):
         facets = {
             'category': {'api': 5, 'guide': 3}
         }
-        original_search = mock_engine.search
-        def search_with_facets(query, top_k=10, **kwargs):
-            result = original_search(query, top_k, **kwargs)
+        original_search_enhanced = mock_engine.search_enhanced
+        def search_enhanced_with_facets(query, top_k=10, **kwargs):
+            result = original_search_enhanced(query, top_k, **kwargs)
             result['facets'] = facets
             return result
-        mock_engine.search = search_with_facets
+        mock_engine.search_enhanced = search_enhanced_with_facets
         
         self.create_mock_index()
         
@@ -3165,15 +3184,15 @@ class TestCmdSearchIntegration(CLITestCase):
     def test_search_with_suggestion_in_response(self):
         """Should handle search response with spelling suggestion."""
         mock_engine = MockSearchEngine()
-        # Override search to return a suggestion
-        def search_with_suggestion(query, top_k=10, **kwargs):
+        # Override search_enhanced to return a suggestion
+        def search_enhanced_with_suggestion(query, top_k=10, **kwargs):
             return {
                 'results': [],
                 'suggestion': 'python',  # Did you mean?
                 'expanded_query': None,
                 'facets': {}
             }
-        mock_engine.search = search_with_suggestion
+        mock_engine.search_enhanced = search_enhanced_with_suggestion
         
         self.create_mock_index()
         
@@ -3193,14 +3212,14 @@ class TestCmdSearchIntegration(CLITestCase):
     def test_search_json_output_includes_suggestion(self):
         """Should include suggestion in JSON output when available."""
         mock_engine = MockSearchEngine()
-        def search_with_suggestion(query, top_k=10, **kwargs):
+        def search_enhanced_with_suggestion(query, top_k=10, **kwargs):
             return {
                 'results': [],
                 'suggestion': 'corrected_query',
                 'expanded_query': None,
                 'facets': {}
             }
-        mock_engine.search = search_with_suggestion
+        mock_engine.search_enhanced = search_enhanced_with_suggestion
         
         self.create_mock_index()
         
@@ -3221,14 +3240,14 @@ class TestCmdSearchIntegration(CLITestCase):
     def test_search_json_output_includes_expanded_query(self):
         """Should include expanded_query in JSON output when synonyms used."""
         mock_engine = MockSearchEngine()
-        def search_with_expansion(query, top_k=10, **kwargs):
+        def search_enhanced_with_expansion(query, top_k=10, **kwargs):
             return {
                 'results': [],
                 'suggestion': None,
                 'expanded_query': 'quick fast speedy',
                 'facets': {}
             }
-        mock_engine.search = search_with_expansion
+        mock_engine.search_enhanced = search_enhanced_with_expansion
         
         self.create_mock_index()
         

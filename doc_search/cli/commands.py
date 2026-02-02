@@ -237,7 +237,8 @@ def cmd_search(args):
         if hasattr(args, 'filter_section') and args.filter_section:
             facet_filters['section'] = args.filter_section
         
-        response = engine.search(
+        # Use search_enhanced() to get the dict response with metadata
+        response = engine.search_enhanced(
             args.query, 
             top_k=args.limit,
             facet_filters=facet_filters if facet_filters else None,
@@ -402,9 +403,9 @@ def cmd_interactive(args):
             print(style_info("\nGoodbye! 👋"))
             break
         
-        # Time the search
+        # Time the search (use search_enhanced for dict response with metadata)
         start_time = time.perf_counter()
-        response = engine.search(query, top_k=args.limit)
+        response = engine.search_enhanced(query, top_k=args.limit)
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         
         results = response['results']

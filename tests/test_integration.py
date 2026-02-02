@@ -330,9 +330,13 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
             enable_synonyms=False
         )
         
-        # Test enhanced search
-        response = engine.search('python programming', top_k=5)
+        # Test enhanced search (search returns list, search_enhanced returns dict)
+        results = engine.search('python programming', top_k=5)
+        self.assertIsInstance(results, list)
+        self.assertGreater(len(results), 0)
         
+        # Test search_enhanced for full response with metadata
+        response = engine.search_enhanced('python programming', top_k=5)
         self.assertIn('results', response)
         self.assertIn('suggestion', response)
         self.assertIn('facets', response)
