@@ -3,7 +3,8 @@ Tests for HTML parsing and link extraction.
 """
 
 import unittest
-from doc_search.parser import extract_text, extract_links
+from unittest.mock import patch, MagicMock
+from doc_search.parser import extract_text, extract_links, HTMLTextExtractor
 
 
 class TestExtractText(unittest.TestCase):
@@ -60,6 +61,39 @@ class TestExtractText(unittest.TestCase):
         result = extract_text(html)
         # Should not crash, and should extract some text
         self.assertIn('Unclosed paragraph', result['text'])
+    
+    def test_non_string_input_returns_empty(self):
+        """Should handle non-string input (TypeError) gracefully."""
+        # Passing None or other non-string types should not crash
+        result = extract_text(None)  # type: ignore
+        self.assertEqual(result['text'], '')
+        self.assertEqual(result['title'], '')
+        
+        result = extract_text(123)  # type: ignore
+        self.assertEqual(result['text'], '')
+        self.assertEqual(result['title'], '')
+        
+        result = extract_text(['<p>list</p>'])  # type: ignore
+        self.assertEqual(result['text'], '')
+        self.assertEqual(result['title'], '')
+    
+    def test_assertion_error_returns_partial(self):
+        """Should handle AssertionError gracefully and return partial results."""
+        with patch.object(HTMLTextExtractor, 'feed') as mock_feed:
+            mock_feed.side_effect = AssertionError("Internal assertion failure")
+            result = extract_text('<p>Content</p>')
+            # Should return empty/default structure without crashing
+            self.assertIn('text', result)
+            self.assertIn('title', result)
+            self.assertEqual(result['text'], '')
+    
+    def test_unhandled_exceptions_propagate(self):
+        """Verify that unexpected exceptions are not silently swallowed."""
+        with patch.object(HTMLTextExtractor, 'feed') as mock_feed:
+            # ValueError should NOT be caught - it should propagate
+            mock_feed.side_effect = ValueError("Unexpected error")
+            with self.assertRaises(ValueError):
+                extract_text('<p>Content</p>')
 
 
 class TestExtractLinks(unittest.TestCase):

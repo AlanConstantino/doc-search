@@ -260,9 +260,14 @@ def extract_text(html: str, include_nav: bool = False) -> Dict[str, object]:
     
     try:
         extractor.feed(html)
-    except Exception:
-        # Handle malformed HTML gracefully
-        pass
+    except (TypeError, AssertionError) as e:
+        # TypeError: html is not a string
+        # AssertionError: internal parser assertion failure
+        # Note: HTMLParser is lenient with malformed HTML and doesn't raise
+        # parsing errors - it calls error() method instead (which we override)
+        import logging
+        logging.getLogger(__name__).debug("HTML parsing failed: %s", e)
+        # Return partial results from whatever was parsed before the error
     
     return {
         'text': extractor.get_text(),
