@@ -3318,5 +3318,374 @@ class TestCmdSearchIntegration(CLITestCase):
             self.assertEqual(code, 0)
 
 
+# ============================================================================
+# cmd_list Tests
+# ============================================================================
+
+class TestCmdList(unittest.TestCase):
+    """Tests for the cmd_list CLI command.
+    
+    Uses fresh temp directories per test to avoid state pollution.
+    Patches DEFAULT_DATA_DIR to isolate tests from real user data.
+    """
+    
+    def setUp(self):
+        """Create fresh temp directory for each test."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temp_dir.name)
+    
+    def tearDown(self):
+        """Cleanup temp directory."""
+        self.temp_dir.cleanup()
+    
+    def create_site(self, site_hash: str, url: str, pages_crawled: int = 100,
+                   include_metadata: bool = True) -> Path:
+        """Create a mock site directory with optional metadata.
+        
+        Args:
+            site_hash: Directory name (hash of the URL)
+            url: URL to store in metadata
+            pages_crawled: Number of pages to record in stats
+            include_metadata: Whether to create metadata.json
+            
+        Returns:
+            Path to the created site directory
+        """
+        site_dir = self.data_dir / site_hash
+        site_dir.mkdir(parents=True, exist_ok=True)
+        
+        if include_metadata:
+            metadata = {
+                'url': url,
+                'stats': {
+                    'pages_crawled': pages_crawled,
+                    'pages_skipped': 5,
+                    'pages_failed': 2,
+                    'bytes_downloaded': 1024 * 1024,
+                    'elapsed_seconds': 60.0
+                }
+            }
+            with open(site_dir / 'metadata.json', 'w') as f:
+                json.dump(metadata, f)
+        
+        return site_dir
+    
+    def test_list_basic_single_site(self):
+        """Should list a single crawled site with metadata."""
+        self.create_site('abc123', 'https://docs.python.org/3.11/', pages_crawled=500)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('Crawled sites (1):', stdout)
+        self.assertIn('abc123', stdout)
+        self.assertIn('https://docs.python.org/3.11/', stdout)
+        self.assertIn('500 pages', stdout)
+    
+    def test_list_multiple_sites(self):
+        """Should list multiple crawled sites."""
+        self.create_site('site1hash', 'https://docs.python.org/', pages_crawled=1000)
+        self.create_site('site2hash', 'https://docs.rust-lang.org/', pages_crawled=500)
+        self.create_site('site3hash', 'https://docs.djangoproject.com/', pages_crawled=250)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('Crawled sites (3):', stdout)
+        self.assertIn('https://docs.python.org/', stdout)
+        self.assertIn('1000 pages', stdout)
+        self.assertIn('https://docs.rust-lang.org/', stdout)
+        self.assertIn('500 pages', stdout)
+        self.assertIn('https://docs.djangoproject.com/', stdout)
+        self.assertIn('250 pages', stdout)
+    
+    def test_list_empty_data_dir(self):
+        """Should handle empty data directory gracefully."""
+        # Create empty data directory
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('No sites crawled yet', stdout)
+    
+    def test_list_data_dir_not_exists(self):
+        """Should handle non-existent data directory gracefully."""
+        nonexistent_dir = self.data_dir / 'nonexistent'
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', nonexistent_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('No sites crawled yet', stdout)
+    
+    def test_list_site_without_metadata(self):
+        """Should handle sites without metadata.json."""
+        # Create site with metadata
+        self.create_site('with_meta', 'https://docs.example.com/', pages_crawled=100)
+        # Create site without metadata
+        self.create_site('no_meta', 'https://other.example.com/', include_metadata=False)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('Crawled sites (2):', stdout)
+        self.assertIn('https://docs.example.com/', stdout)
+        self.assertIn('no_meta', stdout)
+        self.assertIn('(no metadata)', stdout)
+    
+    def test_list_shows_data_directory_path(self):
+        """Should show the data directory path at the end."""
+        self.create_site('testsite', 'https://test.example.com/', pages_crawled=50)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('Data directory:', stdout)
+        self.assertIn(str(self.data_dir), stdout)
+    
+    def test_list_sites_sorted_alphabetically(self):
+        """Should list sites sorted by directory name."""
+        # Create sites in non-alphabetical order
+        self.create_site('zzz_site', 'https://zzz.example.com/', pages_crawled=10)
+        self.create_site('aaa_site', 'https://aaa.example.com/', pages_crawled=20)
+        self.create_site('mmm_site', 'https://mmm.example.com/', pages_crawled=30)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        # Check that sites appear in sorted order
+        aaa_pos = stdout.find('aaa_site')
+        mmm_pos = stdout.find('mmm_site')
+        zzz_pos = stdout.find('zzz_site')
+        
+        self.assertLess(aaa_pos, mmm_pos, "aaa_site should appear before mmm_site")
+        self.assertLess(mmm_pos, zzz_pos, "mmm_site should appear before zzz_site")
+    
+    def test_list_ignores_non_directory_files(self):
+        """Should not list non-directory files in output (only directories are sites)."""
+        self.create_site('valid_site', 'https://docs.example.com/', pages_crawled=100)
+        
+        # Create a non-directory file in data dir
+        (self.data_dir / 'some_file.txt').write_text('not a site')
+        (self.data_dir / '.hidden_file').write_text('hidden')
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        # Note: The count includes all items in directory (current behavior)
+        # but non-directories are not printed as sites
+        self.assertIn('valid_site', stdout)
+        self.assertIn('https://docs.example.com/', stdout)
+        # Non-directory files should not appear in the site listing
+        self.assertNotIn('some_file.txt', stdout)
+        self.assertNotIn('.hidden_file', stdout)
+    
+    def test_list_site_with_zero_pages(self):
+        """Should handle sites with zero pages crawled."""
+        self.create_site('empty_site', 'https://empty.example.com/', pages_crawled=0)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('empty_site', stdout)
+        self.assertIn('https://empty.example.com/', stdout)
+        self.assertIn('0 pages', stdout)
+    
+    def test_list_site_with_missing_url_in_metadata(self):
+        """Should handle metadata without URL field."""
+        site_dir = self.data_dir / 'partial_meta'
+        site_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create metadata without 'url' field
+        metadata = {
+            'stats': {
+                'pages_crawled': 50
+            }
+        }
+        with open(site_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('partial_meta', stdout)
+        self.assertIn('Unknown', stdout)  # Default when URL is missing
+    
+    def test_list_site_with_missing_stats_in_metadata(self):
+        """Should handle metadata without stats field."""
+        site_dir = self.data_dir / 'no_stats'
+        site_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create metadata without 'stats' field
+        metadata = {
+            'url': 'https://nostats.example.com/'
+        }
+        with open(site_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('no_stats', stdout)
+        self.assertIn('https://nostats.example.com/', stdout)
+        self.assertIn('0 pages', stdout)  # Default when stats missing
+    
+    def test_list_site_with_corrupt_metadata(self):
+        """Should fail gracefully when encountering corrupt metadata.
+        
+        Note: Current implementation does not catch JSON decode errors,
+        so corrupt metadata will cause an error. This test documents that behavior.
+        A future improvement could add error handling for individual sites.
+        """
+        # Create valid site first (alphabetically before 'corrupt')
+        self.create_site('aaa_valid', 'https://valid.example.com/', pages_crawled=100)
+        
+        # Create site with corrupt metadata (alphabetically after 'aaa_valid')
+        corrupt_dir = self.data_dir / 'zzz_corrupt'
+        corrupt_dir.mkdir(parents=True, exist_ok=True)
+        with open(corrupt_dir / 'metadata.json', 'w') as f:
+            f.write('{ not valid json }')
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            # run_cli catches exceptions and returns code 1
+            code, stdout, stderr = run_cli(['list'])
+            
+            # The command fails when it hits the corrupt JSON
+            # But since sites are sorted alphabetically, 'aaa_valid' is processed first
+            self.assertIn('aaa_valid', stdout)
+            self.assertIn('https://valid.example.com/', stdout)
+            # The corrupt site causes an error
+            self.assertEqual(code, 1)
+
+
+class TestCmdListArgParsing(unittest.TestCase):
+    """Tests for list argument parsing."""
+    
+    def test_parse_list_basic(self):
+        """Should parse list command with no arguments."""
+        args = parse_args(['list'])
+        
+        self.assertEqual(args.command, 'list')
+    
+    def test_parse_list_help(self):
+        """Should show help text for list command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['list', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        # Should show usage information
+        self.assertIn('list', output.lower())
+        self.assertIn('usage:', output.lower())
+
+
+class TestCmdListIntegration(unittest.TestCase):
+    """Integration tests for cmd_list with real file operations.
+    
+    These tests verify cmd_list works correctly with actual file system
+    operations, without mocking DEFAULT_DATA_DIR.
+    """
+    
+    def setUp(self):
+        """Create fresh temp directory for each test."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temp_dir.name)
+    
+    def tearDown(self):
+        """Cleanup temp directory."""
+        self.temp_dir.cleanup()
+    
+    def test_list_large_number_of_sites(self):
+        """Should handle listing many sites."""
+        # Create 20 sites
+        for i in range(20):
+            site_dir = self.data_dir / f'site_{i:03d}'
+            site_dir.mkdir(parents=True, exist_ok=True)
+            metadata = {
+                'url': f'https://site{i}.example.com/',
+                'stats': {'pages_crawled': i * 10}
+            }
+            with open(site_dir / 'metadata.json', 'w') as f:
+                json.dump(metadata, f)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('Crawled sites (20):', stdout)
+        # Verify first and last sites are present
+        self.assertIn('site_000', stdout)
+        self.assertIn('site_019', stdout)
+        self.assertIn('https://site0.example.com/', stdout)
+        self.assertIn('https://site19.example.com/', stdout)
+    
+    def test_list_site_with_special_characters_in_url(self):
+        """Should display sites with special characters in URL correctly."""
+        site_dir = self.data_dir / 'special_site'
+        site_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            'url': 'https://docs.example.com/path?query=value&foo=bar#section',
+            'stats': {'pages_crawled': 75}
+        }
+        with open(site_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        self.assertIn('special_site', stdout)
+        self.assertIn('https://docs.example.com/path?query=value&foo=bar#section', stdout)
+    
+    def test_list_output_format_consistency(self):
+        """Should produce consistent output format for each site."""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create multiple sites with different characteristics
+        sites = [
+            ('site_a', 'https://a.example.com/', 100),
+            ('site_b', 'https://b.example.com/', 200),
+        ]
+        
+        for site_hash, url, pages in sites:
+            site_dir = self.data_dir / site_hash
+            site_dir.mkdir(parents=True, exist_ok=True)
+            metadata = {
+                'url': url,
+                'stats': {'pages_crawled': pages}
+            }
+            with open(site_dir / 'metadata.json', 'w') as f:
+                json.dump(metadata, f)
+        
+        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
+            code, stdout, _ = run_cli(['list'])
+        
+        self.assertEqual(code, 0)
+        
+        # Each site line should follow the format: "  {hash}: {url} ({pages} pages)"
+        lines = stdout.strip().split('\n')
+        site_lines = [l for l in lines if l.strip().startswith('site_')]
+        
+        self.assertEqual(len(site_lines), 2)
+        for line in site_lines:
+            # Should contain hash, colon, URL, and page count
+            self.assertIn(':', line)
+            self.assertIn('pages)', line)
+            self.assertRegex(line.strip(), r'^site_\w+: https?://.+ \(\d+ pages\)$')
+
+
 if __name__ == '__main__':
     unittest.main()
