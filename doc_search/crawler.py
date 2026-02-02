@@ -25,6 +25,10 @@ from .utils import (
 )
 from .robots import RobotsChecker
 from .parser import extract_text, extract_links
+from .constants import (
+    DEFAULT_CRAWL_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_CRAWL_RETRIES,
+    CHECKPOINT_INTERVAL as CHECKPOINT_INTERVAL_CONST, DEFAULT_RATE_LIMIT_BACKOFF
+)
 
 
 # Extensions that should never be crawled (archives, media, binaries)
@@ -74,7 +78,7 @@ class RateLimiter:
     Thread-safe per-domain rate limiter.
     """
     
-    def __init__(self, default_delay: float = 1.0):
+    def __init__(self, default_delay: float = DEFAULT_CRAWL_DELAY):
         self.default_delay = default_delay
         self._domain_delays: Dict[str, float] = {}
         self._last_request: Dict[str, float] = defaultdict(float)
@@ -272,15 +276,15 @@ class Crawler:
     """
     
     USER_AGENT = "DocSearchBot/1.2 (+https://github.com/AlanConstantino/doc-search)"
-    MAX_RETRIES = 3
-    CHECKPOINT_INTERVAL = 100  # Save state every N pages
+    MAX_RETRIES = MAX_CRAWL_RETRIES
+    CHECKPOINT_INTERVAL = CHECKPOINT_INTERVAL_CONST
     
     def __init__(
         self,
         base_url: str,
         data_dir: Path,
-        delay: float = 1.0,
-        timeout: float = 30.0,
+        delay: float = DEFAULT_CRAWL_DELAY,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
         max_pages: Optional[int] = None,
         max_depth: Optional[int] = None,
         auth: Optional[Tuple[str, str]] = None,  # (username, password)
@@ -468,11 +472,11 @@ class Crawler:
                 return None, None, {'not_modified': True}
             elif e.code == 429:
                 # Rate limited - back off
-                retry_after = e.headers.get('Retry-After', '60')
+                retry_after = e.headers.get('Retry-After', str(DEFAULT_RATE_LIMIT_BACKOFF))
                 try:
                     wait_time = int(retry_after)
                 except ValueError:
-                    wait_time = 60
+                    wait_time = DEFAULT_RATE_LIMIT_BACKOFF
                 self.rate_limiter.set_backoff(domain, wait_time)
                 self._log(f"  Rate limited, backing off for {wait_time}s")
             elif e.code >= 500:

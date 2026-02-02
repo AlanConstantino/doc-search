@@ -17,6 +17,10 @@ from .spellcheck import SpellChecker
 from .autocomplete import Autocomplete
 from .facets import FacetIndex
 from .synonyms import SynonymExpander
+from .constants import (
+    DEFAULT_SNIPPET_LENGTH, MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH,
+    SNIPPET_WINDOW_WORDS, PHRASE_MATCH_BONUS, TERM_DIVERSITY_BONUS
+)
 
 
 def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
@@ -171,7 +175,7 @@ def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
 
 
 def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]], 
-                       snippet_length: int = 150) -> str:
+                       snippet_length: int = DEFAULT_SNIPPET_LENGTH) -> str:
     """
     Find the most relevant snippet from text.
     
@@ -206,7 +210,7 @@ def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
         return text[:snippet_length] + '...'
     
     # Score each position by term density in surrounding window
-    window_words = 20  # Number of words to consider
+    window_words = SNIPPET_WINDOW_WORDS
     best_score = -1
     best_start = 0
     
@@ -229,7 +233,7 @@ def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
                 found_terms.add(word_lower)
         
         # Bonus for having multiple different terms
-        score += len(found_terms) * 2
+        score += len(found_terms) * TERM_DIVERSITY_BONUS
         
         # Check for phrase matches in this window
         if phrases:
@@ -239,7 +243,7 @@ def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
             
             for phrase in phrases:
                 if check_phrase_match(window_text, phrase):
-                    score += 5  # Big bonus for phrase match
+                    score += PHRASE_MATCH_BONUS
         
         if score > best_score:
             best_score = score
@@ -476,12 +480,12 @@ def format_results(
         score = result.get('score', 0)
         
         # Truncate title if too long
-        if len(title) > 80:
-            title = title[:77] + '...'
+        if len(title) > MAX_TITLE_LENGTH:
+            title = title[:MAX_TITLE_LENGTH - 3] + '...'
         
         # Truncate snippet
-        if len(snippet) > 200:
-            snippet = snippet[:197] + '...'
+        if len(snippet) > MAX_SNIPPET_LENGTH:
+            snippet = snippet[:MAX_SNIPPET_LENGTH - 3] + '...'
         
         # Apply ANSI highlighting to snippet if we have query terms
         if colorize_output and query_terms and snippet:
