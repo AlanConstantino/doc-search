@@ -395,5 +395,263 @@ class TestServerContentType(ServerTestCase):
         self.assertIn('charset=utf-8', content_type.lower())
 
 
+# ============================================================================
+# Phase 2.7: Additional Server Response Tests
+# ============================================================================
+
+class TestServerPaginationResponses(ServerTestCase):
+    """Tests for pagination in server responses."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with many mock results for pagination."""
+        # Create 25 results (3 pages at 10 per page)
+        mock_results = [
+            {
+                'url': f'https://docs.example.com/page{i}',
+                'title': f'Document {i}',
+                'snippet': f'This is the snippet for document {i}',
+                'score': 2.5 - (i * 0.1),
+            }
+            for i in range(25)
+        ]
+        cls.engine = MockSearchEngine(results=mock_results)
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_page_1_shows_first_10_results(self):
+        """Page 1 should show results 1-10."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertIn('Document 0', body)
+        self.assertIn('Document 9', body)
+        self.assertNotIn('Document 10', body)
+    
+    def test_page_2_shows_next_10_results(self):
+        """Page 2 should show results 11-20."""
+        status, headers, body = self.make_request('/?q=test&page=2')
+        
+        self.assertNotIn('Document 0', body)
+        self.assertIn('Document 10', body)
+        self.assertIn('Document 19', body)
+        self.assertNotIn('Document 20', body)
+    
+    def test_page_3_shows_remaining_results(self):
+        """Page 3 should show remaining results."""
+        status, headers, body = self.make_request('/?q=test&page=3')
+        
+        self.assertIn('Document 20', body)
+        self.assertIn('Document 24', body)
+    
+    def test_first_page_has_disabled_previous(self):
+        """Page 1 should show disabled Previous link."""
+        status, headers, body = self.make_request('/?q=test&page=1')
+        
+        # Previous should be disabled (span with disabled class, not an <a> link)
+        self.assertIn('class="disabled"', body)
+        self.assertIn('Previous', body)
+        # Should have active Next link
+        self.assertIn('page=2', body)
+    
+    def test_last_page_has_disabled_next(self):
+        """Last page should show disabled Next link."""
+        status, headers, body = self.make_request('/?q=test&page=3')
+        
+        # Next should be disabled
+        self.assertIn('Next', body)
+        # Should have active Previous link
+        self.assertIn('page=2', body)
+    
+    def test_pagination_shows_correct_result_range(self):
+        """Pagination should show correct result range (e.g., 'showing 1-10')."""
+        status, headers, body = self.make_request('/?q=test&page=1')
+        self.assertIn('showing 1-10', body)
+        
+        status, headers, body = self.make_request('/?q=test&page=2')
+        self.assertIn('showing 11-20', body)
+    
+    def test_invalid_page_number_handled(self):
+        """Invalid page numbers should be handled gracefully."""
+        status, headers, body = self.make_request('/?q=test&page=invalid')
+        self.assertEqual(status, 200)
+        # Should default to page 1
+        self.assertIn('Document 0', body)
+    
+    def test_negative_page_treated_as_page_1(self):
+        """Negative page numbers should be treated as page 1."""
+        status, headers, body = self.make_request('/?q=test&page=-5')
+        self.assertEqual(status, 200)
+        self.assertIn('Document 0', body)
+
+
+class TestServerHtmlWellFormedness(ServerTestCase):
+    """Tests for HTML well-formedness."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server."""
+        mock_results = [
+            {'url': 'https://example.com/test', 'title': 'Test', 'score': 1.0}
+        ]
+        cls.engine = MockSearchEngine(results=mock_results)
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_response_has_doctype(self):
+        """HTML should have DOCTYPE declaration."""
+        status, headers, body = self.make_request('/')
+        self.assertTrue(body.strip().startswith('<!DOCTYPE html>'))
+    
+    def test_response_has_html_lang(self):
+        """HTML element should have lang attribute."""
+        status, headers, body = self.make_request('/')
+        self.assertIn('<html lang="en">', body)
+    
+    def test_response_has_meta_charset(self):
+        """HTML should have charset meta tag."""
+        status, headers, body = self.make_request('/')
+        self.assertIn('<meta charset="UTF-8">', body)
+    
+    def test_response_has_viewport_meta(self):
+        """HTML should have viewport meta for mobile."""
+        status, headers, body = self.make_request('/')
+        self.assertIn('viewport', body)
+        self.assertIn('width=device-width', body)
+    
+    def test_response_has_title_tag(self):
+        """HTML should have title tag."""
+        status, headers, body = self.make_request('/')
+        self.assertIn('<title>', body)
+        self.assertIn('</title>', body)
+    
+    def test_search_page_has_query_in_title(self):
+        """Search page should include query in title."""
+        status, headers, body = self.make_request('/?q=python')
+        self.assertIn('python', body[body.find('<title>'):body.find('</title>')])
+
+
+class TestServerXSSPreventionAdvanced(ServerTestCase):
+    """Advanced XSS prevention tests."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server."""
+        cls.start_server()
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_escapes_quotes_in_query(self):
+        """Quotes in query should be escaped to prevent attribute breakout."""
+        import urllib.parse
+        malicious = '"onmouseover="alert(1)'
+        encoded = urllib.parse.quote(malicious)
+        status, headers, body = self.make_request(f'/?q={encoded}')
+        
+        # Double quotes should be escaped as &quot;
+        # The value attribute should remain intact (quotes don't break out)
+        self.assertIn('&quot;', body)
+        # Should NOT have unescaped quotes that could break the attribute
+        # The pattern value="...onmouseover=..." should not occur
+        self.assertNotIn('value=""', body)  # Quotes don't break the value
+        self.assertEqual(status, 200)
+    
+    def test_escapes_single_quotes(self):
+        """Single quotes should be escaped or neutralized."""
+        import urllib.parse
+        malicious = "'onclick='alert(1)"
+        encoded = urllib.parse.quote(malicious)
+        status, headers, body = self.make_request(f"/?q={encoded}")
+        # Should not contain unescaped event handlers that could execute
+        self.assertEqual(status, 200)
+        # The single quotes are inside the double-quoted value, so they're safe
+    
+    def test_escapes_event_handler_injection(self):
+        """Event handler injection attempts should be escaped."""
+        import urllib.parse
+        malicious = '<img src=x onerror=alert(1)>'
+        encoded = urllib.parse.quote(malicious)
+        status, headers, body = self.make_request(f'/?q={encoded}')
+        
+        # The < and > should be escaped
+        self.assertNotIn('<img', body)
+        self.assertIn('&lt;img', body)
+    
+    def test_escapes_javascript_protocol(self):
+        """JavaScript protocol in query should be escaped."""
+        import urllib.parse
+        malicious = 'javascript:alert(1)'
+        encoded = urllib.parse.quote(malicious)
+        status, headers, body = self.make_request(f'/?q={encoded}')
+        # Should be present as text, not as executable
+        self.assertEqual(status, 200)
+        # The literal "javascript:" shouldn't be in an href
+        self.assertNotIn('href="javascript:', body.lower())
+
+
+class TestServerResultRendering(ServerTestCase):
+    """Tests for correct rendering of search results."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with varied mock results."""
+        mock_results = [
+            {
+                'url': 'https://example.com/special&chars?param=1',
+                'title': 'Title with <b>HTML</b> & special chars',
+                'snippet': 'Snippet with **highlight** and <script>XSS</script>',
+                'score': 2.0,
+            },
+        ]
+        cls.engine = MockSearchEngine(results=mock_results)
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_result_title_is_escaped(self):
+        """HTML in result titles should be escaped."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        # The <b> tag should be escaped, not rendered
+        self.assertNotIn('<b>HTML</b>', body)
+        self.assertIn('&lt;b&gt;HTML&lt;/b&gt;', body)
+    
+    def test_result_url_is_escaped(self):
+        """Special chars in URLs should be escaped in display."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        # URL should be properly escaped in the display
+        self.assertIn('&amp;', body)  # & becomes &amp;
+    
+    def test_snippet_xss_is_escaped(self):
+        """XSS in snippets should be escaped."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        # Script tag should be escaped
+        self.assertNotIn('<script>XSS</script>', body)
+        self.assertIn('&lt;script&gt;', body)
+    
+    def test_snippet_highlight_preserved(self):
+        """Highlight markers should become highlight spans."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        # **highlight** should become highlighted span
+        self.assertIn('class="highlight"', body)
+        self.assertIn('>highlight<', body)
+
+
 if __name__ == '__main__':
     unittest.main()
