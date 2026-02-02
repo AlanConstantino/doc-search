@@ -214,6 +214,10 @@ class CrawlerTestCase(unittest.TestCase):
 class TestCrawlState(CrawlerTestCase):
     """Tests for CrawlState persistence and thread safety."""
     
+    # -------------------------------------------------------------------------
+    # Basic operations tests
+    # -------------------------------------------------------------------------
+    
     def test_initial_state_empty(self):
         """New CrawlState should have empty collections."""
         state = self.create_crawl_state()
@@ -253,6 +257,377 @@ class TestCrawlState(CrawlerTestCase):
         """pop_url should return None when queue is empty."""
         state = self.create_crawl_state()
         self.assertIsNone(state.pop_url())
+    
+    def test_add_urls_skips_visited(self):
+        """add_urls should skip URLs that are already visited."""
+        state = self.create_crawl_state()
+        state.mark_visited('https://example.com/page1')
+        
+        state.add_urls([
+            ('https://example.com/page1', 0),  # Already visited
+            ('https://example.com/page2', 0),  # New
+        ])
+        
+        # Only page2 should be in the queue
+        item = state.pop_url()
+        self.assertEqual(item, ('https://example.com/page2', 0))
+        self.assertIsNone(state.pop_url())
+    
+    def test_add_urls_skips_duplicates_in_pending(self):
+        """add_urls should skip URLs already in the pending queue."""
+        state = self.create_crawl_state()
+        
+        state.add_urls([('https://example.com/page1', 0)])
+        state.add_urls([
+            ('https://example.com/page1', 1),  # Same URL, different depth
+            ('https://example.com/page2', 0),  # New URL
+        ])
+        
+        # Should have page1 at depth 0, then page2 at depth 0
+        self.assertEqual(state.pop_url(), ('https://example.com/page1', 0))
+        self.assertEqual(state.pop_url(), ('https://example.com/page2', 0))
+        self.assertIsNone(state.pop_url())
+    
+    def test_increment_stat(self):
+        """Should increment stat counters correctly."""
+        state = self.create_crawl_state()
+        
+        state.increment_stat('pages_crawled')
+        state.increment_stat('pages_crawled')
+        state.increment_stat('pages_crawled', 5)
+        
+        self.assertEqual(state.stats['pages_crawled'], 7)
+    
+    def test_mark_failed_increments_retry_count(self):
+        """mark_failed should increment retry count and re-queue URL."""
+        state = self.create_crawl_state()
+        
+        # First failure - should return True (will retry)
+        result = state.mark_failed('https://example.com/error', 1)
+        self.assertTrue(result)
+        self.assertEqual(state.failed['https://example.com/error'], 1)
+        
+        # Second failure
+        state.pop_url()  # Remove from queue
+        result = state.mark_failed('https://example.com/error', 1)
+        self.assertTrue(result)
+        self.assertEqual(state.failed['https://example.com/error'], 2)
+        
+        # Third failure
+        state.pop_url()
+        result = state.mark_failed('https://example.com/error', 1)
+        self.assertTrue(result)
+        self.assertEqual(state.failed['https://example.com/error'], 3)
+        
+        # Fourth failure - exceeded max retries, should return False
+        state.pop_url()
+        result = state.mark_failed('https://example.com/error', 1)
+        self.assertFalse(result)
+        self.assertEqual(state.stats['pages_failed'], 1)
+    
+    def test_clear_resets_all_state(self):
+        """clear() should reset all state."""
+        state = self.create_crawl_state()
+        
+        # Add some state
+        state.mark_visited('https://example.com/page1')
+        state.add_urls([('https://example.com/page2', 0)])
+        state.increment_stat('pages_crawled', 5)
+        state.save()
+        
+        # Clear
+        state.clear()
+        
+        self.assertEqual(len(state.visited), 0)
+        self.assertEqual(len(state.pending), 0)
+        self.assertEqual(state.stats['pages_crawled'], 0)
+        self.assertFalse(state.state_file.exists())
+    
+    def test_get_progress(self):
+        """get_progress should return formatted progress string."""
+        state = self.create_crawl_state()
+        
+        state.increment_stat('pages_crawled', 5)
+        # Add 10 unique URLs
+        state.add_urls([(f'https://example.com/page{i}', 0) for i in range(10)])
+        
+        progress = state.get_progress()
+        self.assertIn('[5/', progress)
+        self.assertIn('queue: 10', progress)
+        
+        # With max_pages
+        progress = state.get_progress(max_pages=100)
+        self.assertIn('[5/100]', progress)
+    
+    # -------------------------------------------------------------------------
+    # Persistence tests
+    # -------------------------------------------------------------------------
+    
+    def test_save_creates_json_file(self):
+        """save() should create a valid JSON file."""
+        state = self.create_crawl_state()
+        
+        state.mark_visited('https://example.com/page1')
+        state.add_urls([('https://example.com/page2', 1)])
+        state.increment_stat('pages_crawled', 3)
+        
+        state.save()
+        
+        # Verify file exists and is valid JSON
+        self.assertTrue(state.state_file.exists())
+        
+        with open(state.state_file) as f:
+            data = json.load(f)
+        
+        self.assertIn('visited', data)
+        self.assertIn('pending', data)
+        self.assertIn('stats', data)
+        self.assertIn('https://example.com/page1', data['visited'])
+        self.assertEqual(data['stats']['pages_crawled'], 3)
+    
+    def test_load_restores_state(self):
+        """load() should restore state correctly."""
+        state1 = self.create_crawl_state()
+        
+        # Set up state
+        state1.mark_visited('https://example.com/visited')
+        state1.add_urls([
+            ('https://example.com/pending1', 0),
+            ('https://example.com/pending2', 1),
+        ])
+        state1.increment_stat('pages_crawled', 5)
+        state1.increment_stat('bytes_downloaded', 1024)
+        state1.save()
+        
+        # Create new state instance and load
+        state2 = self.create_crawl_state()
+        result = state2.load()
+        
+        self.assertTrue(result)
+        self.assertTrue(state2.is_visited('https://example.com/visited'))
+        self.assertEqual(state2.stats['pages_crawled'], 5)
+        self.assertEqual(state2.stats['bytes_downloaded'], 1024)
+        
+        # Check pending queue
+        item = state2.pop_url()
+        self.assertEqual(item, ('https://example.com/pending1', 0))
+        item = state2.pop_url()
+        self.assertEqual(item, ('https://example.com/pending2', 1))
+    
+    def test_load_handles_missing_file(self):
+        """load() should handle missing state file gracefully."""
+        state = self.create_crawl_state()
+        
+        result = state.load()
+        
+        self.assertFalse(result)
+        # State should remain empty
+        self.assertEqual(len(state.visited), 0)
+        self.assertEqual(len(state.pending), 0)
+    
+    def test_load_handles_corrupted_json(self):
+        """load() should handle corrupted JSON gracefully."""
+        state = self.create_crawl_state()
+        
+        # Create corrupted JSON file
+        with open(state.state_file, 'w') as f:
+            f.write('{ invalid json content }}}')
+        
+        result = state.load()
+        
+        self.assertFalse(result)
+        # State should remain empty
+        self.assertEqual(len(state.visited), 0)
+    
+    def test_load_handles_empty_file(self):
+        """load() should handle empty file gracefully."""
+        state = self.create_crawl_state()
+        
+        # Create empty file
+        state.state_file.touch()
+        
+        result = state.load()
+        
+        self.assertFalse(result)
+    
+    def test_load_handles_partial_data(self):
+        """load() should handle partial/missing fields gracefully."""
+        state = self.create_crawl_state()
+        
+        # Create JSON with missing fields
+        with open(state.state_file, 'w') as f:
+            json.dump({'visited': ['https://example.com/']}, f)
+        
+        result = state.load()
+        
+        self.assertTrue(result)
+        self.assertTrue(state.is_visited('https://example.com/'))
+        # Other fields should have defaults
+        self.assertEqual(len(state.pending), 0)
+    
+    def test_save_is_atomic(self):
+        """save() should write atomically (via temp file)."""
+        state = self.create_crawl_state()
+        
+        state.mark_visited('https://example.com/')
+        state.save()
+        
+        # Verify no .tmp file remains
+        tmp_file = state.state_file.with_suffix('.tmp')
+        self.assertFalse(tmp_file.exists())
+        self.assertTrue(state.state_file.exists())
+    
+    def test_round_trip_preserves_all_data(self):
+        """Save → load should preserve all data exactly."""
+        state1 = self.create_crawl_state()
+        
+        # Set up complex state
+        visited_urls = [f'https://example.com/page{i}' for i in range(5)]
+        for url in visited_urls:
+            state1.mark_visited(url)
+        
+        pending_urls = [(f'https://example.com/new{i}', i % 3) for i in range(3)]
+        state1.add_urls(pending_urls)
+        
+        state1.failed['https://example.com/error'] = 2
+        state1.stats['pages_crawled'] = 10
+        state1.stats['pages_failed'] = 1
+        state1.stats['bytes_downloaded'] = 50000
+        
+        state1.save()
+        
+        # Load into new instance
+        state2 = self.create_crawl_state()
+        state2.load()
+        
+        # Verify all data matches
+        for url in visited_urls:
+            self.assertTrue(state2.is_visited(url))
+        
+        self.assertEqual(state2.stats['pages_crawled'], 10)
+        self.assertEqual(state2.stats['pages_failed'], 1)
+        self.assertEqual(state2.stats['bytes_downloaded'], 50000)
+        self.assertEqual(state2.failed.get('https://example.com/error'), 2)
+    
+    # -------------------------------------------------------------------------
+    # Thread safety tests
+    # -------------------------------------------------------------------------
+    
+    def test_mark_visited_is_thread_safe(self):
+        """mark_visited should be thread-safe under concurrent access."""
+        state = self.create_crawl_state()
+        errors = []
+        
+        def mark_many(start):
+            try:
+                for i in range(100):
+                    state.mark_visited(f'https://example.com/page{start}_{i}')
+            except Exception as e:
+                errors.append(e)
+        
+        threads = [threading.Thread(target=mark_many, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
+        # Should have 500 visited URLs (5 threads × 100 URLs each)
+        self.assertEqual(len(state.visited), 500)
+    
+    def test_pop_url_is_thread_safe(self):
+        """pop_url should be thread-safe under concurrent access."""
+        state = self.create_crawl_state()
+        
+        # Add 1000 URLs
+        urls = [(f'https://example.com/page{i}', 0) for i in range(1000)]
+        state.add_urls(urls)
+        
+        popped_urls = []
+        lock = threading.Lock()
+        errors = []
+        
+        def pop_many():
+            try:
+                while True:
+                    item = state.pop_url()
+                    if item is None:
+                        break
+                    with lock:
+                        popped_urls.append(item)
+            except Exception as e:
+                errors.append(e)
+        
+        threads = [threading.Thread(target=pop_many) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
+        # All 1000 URLs should have been popped exactly once
+        self.assertEqual(len(popped_urls), 1000)
+        # No duplicates
+        popped_set = set(url for url, _ in popped_urls)
+        self.assertEqual(len(popped_set), 1000)
+    
+    def test_concurrent_add_and_pop(self):
+        """Should handle concurrent add and pop operations safely."""
+        state = self.create_crawl_state()
+        errors = []
+        
+        # Seed with some URLs
+        initial_urls = [(f'https://example.com/seed{i}', 0) for i in range(100)]
+        state.add_urls(initial_urls)
+        
+        def add_urls(start):
+            try:
+                for i in range(50):
+                    state.add_urls([(f'https://example.com/added{start}_{i}', 0)])
+                    time.sleep(0.001)  # Small delay to interleave
+            except Exception as e:
+                errors.append(e)
+        
+        def pop_urls():
+            try:
+                for _ in range(50):
+                    state.pop_url()
+                    time.sleep(0.001)
+            except Exception as e:
+                errors.append(e)
+        
+        threads = []
+        for i in range(3):
+            threads.append(threading.Thread(target=add_urls, args=(i,)))
+            threads.append(threading.Thread(target=pop_urls))
+        
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
+    
+    def test_increment_stat_is_thread_safe(self):
+        """increment_stat should be thread-safe under concurrent access."""
+        state = self.create_crawl_state()
+        errors = []
+        
+        def increment_many():
+            try:
+                for _ in range(100):
+                    state.increment_stat('pages_crawled')
+            except Exception as e:
+                errors.append(e)
+        
+        threads = [threading.Thread(target=increment_many) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        self.assertEqual(len(errors), 0)
+        self.assertEqual(state.stats['pages_crawled'], 1000)
 
 
 # ============================================================================
