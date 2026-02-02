@@ -2456,6 +2456,709 @@ class TestCmdServeArgParsing(unittest.TestCase):
         self.assertIn('port', output)
 
 
+# ============================================================================
+# cmd_stats Tests
+# ============================================================================
+
+class MockCrawlState:
+    """Mock CrawlState for testing cmd_stats without real crawl state files.
+    
+    This mock provides the same interface as CrawlState to allow testing
+    the stats command without creating actual state files.
+    """
+    
+    def __init__(self, errors: Optional[List] = None, load_success: bool = True):
+        """
+        Create mock crawl state.
+        
+        Args:
+            errors: List of CrawlError objects (or dicts with url, error_type, message, timestamp)
+            load_success: Whether load() should return True (state exists)
+        """
+        from doc_search.crawl_state import CrawlError
+        
+        self._errors = []
+        if errors:
+            for e in errors:
+                if isinstance(e, dict):
+                    self._errors.append(CrawlError(
+                        url=e['url'],
+                        error_type=e['error_type'],
+                        message=e['message'],
+                        timestamp=e['timestamp']
+                    ))
+                else:
+                    self._errors.append(e)
+        self._load_success = load_success
+    
+    def load(self) -> bool:
+        """Return whether state was loaded successfully."""
+        return self._load_success
+    
+    def get_errors(self) -> List:
+        """Return mock errors."""
+        return self._errors
+    
+    def get_error_summary(self) -> Dict[str, int]:
+        """Return error counts grouped by type."""
+        summary: Dict[str, int] = {}
+        for error in self._errors:
+            summary[error.error_type] = summary.get(error.error_type, 0) + 1
+        return summary
+
+
+class TestCmdStats(unittest.TestCase):
+    """Tests for the cmd_stats CLI command.
+    
+    Uses fresh temp directories per test to avoid state pollution.
+    """
+    
+    def setUp(self):
+        """Create fresh temp directory for each test."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.site_dir = Path(self.temp_dir.name)
+        # Create pages subdirectory
+        (self.site_dir / 'pages').mkdir(parents=True, exist_ok=True)
+    
+    def tearDown(self):
+        """Cleanup temp directory."""
+        self.temp_dir.cleanup()
+    
+    def create_mock_metadata(self, url: str = 'https://docs.example.com/') -> Path:
+        """Create mock metadata.json file."""
+        metadata = {
+            'url': url,
+            'stats': {
+                'pages_crawled': 100,
+                'pages_skipped': 10,
+                'pages_failed': 5,
+                'bytes_downloaded': 5 * 1024 * 1024,
+                'elapsed_seconds': 120.5
+            }
+        }
+        metadata_path = self.site_dir / 'metadata.json'
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f)
+        return metadata_path
+    
+    def create_mock_page(self, filename: str, content: Dict[str, Any]) -> Path:
+        """Create a mock page file in the pages directory."""
+        pages_dir = self.site_dir / 'pages'
+        pages_dir.mkdir(exist_ok=True)
+        page_path = pages_dir / f'{filename}.json'
+        with open(page_path, 'w') as f:
+            json.dump(content, f)
+        return page_path
+    
+    def create_mock_index(self) -> Path:
+        """Create a minimal mock index file."""
+        index_data = {
+            'k1': 1.5,
+            'b': 0.75,
+            'avg_doc_length': 150,
+            'documents': {},
+            'index': {},
+            'doc_lengths': {}
+        }
+        index_path = self.site_dir / 'index.json'
+        with open(index_path, 'w') as f:
+            json.dump(index_data, f)
+        return index_path
+    
+    def test_stats_basic(self):
+        """Should display basic stats from metadata and index."""
+        # Create metadata
+        self.create_mock_metadata(url='https://docs.example.com/')
+        
+        # Create some page files
+        for i in range(5):
+            self.create_mock_page(f'page_{i}', {
+                'url': f'https://docs.example.com/page{i}',
+                'title': f'Page {i}',
+                'text': f'Content for page {i}'
+            })
+        
+        # Create mock index
+        mock_engine = MockSearchEngine(stats={
+            'total_documents': 5,
+            'unique_terms': 100,
+            'avg_document_length': 50,
+            'k1': 1.5,
+            'b': 0.75
+        })
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'stats', str(self.site_dir)
+            ])
+            
+            # Verify site URL is shown
+            self.assertIn('https://docs.example.com/', stdout)
+            
+            # Verify crawl stats are shown
+            self.assertIn('Pages crawled:', stdout)
+            self.assertIn('100', stdout)  # pages_crawled from metadata
+            
+            # Verify stored pages are shown
+            self.assertIn('Stored Pages:', stdout)
+            self.assertIn('5', stdout)  # 5 page files
+            
+            # Verify index stats are shown
+            self.assertIn('Index Statistics:', stdout)
+            self.assertIn('Documents:', stdout)
+            self.assertIn('Unique terms:', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_stats_shows_crawl_statistics(self):
+        """Should display detailed crawl statistics from metadata."""
+        metadata = {
+            'url': 'https://test.example.com/',
+            'stats': {
+                'pages_crawled': 250,
+                'pages_skipped': 25,
+                'pages_failed': 10,
+                'bytes_downloaded': 10 * 1024 * 1024,  # 10MB
+                'elapsed_seconds': 300.5
+            }
+        }
+        metadata_path = self.site_dir / 'metadata.json'
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Verify all crawl stats are shown
+        self.assertIn('Pages crawled: 250', stdout)
+        self.assertIn('Pages skipped: 25', stdout)
+        self.assertIn('Pages failed: 10', stdout)
+        self.assertIn('Data downloaded:', stdout)
+        self.assertIn('Time elapsed:', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_shows_index_statistics(self):
+        """Should display index statistics when index exists."""
+        self.create_mock_metadata()
+        
+        mock_engine = MockSearchEngine(stats={
+            'total_documents': 150,
+            'unique_terms': 5000,
+            'avg_document_length': 200,
+            'k1': 1.2,
+            'b': 0.8
+        })
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'stats', str(self.site_dir)
+            ])
+            
+            # Verify index stats are shown
+            self.assertIn('Index Statistics:', stdout)
+            self.assertIn('Documents: 150', stdout)
+            self.assertIn('Unique terms: 5000', stdout)
+            self.assertIn('Avg document length: 200', stdout)
+            self.assertIn('k1=1.2', stdout)
+            self.assertIn('b=0.8', stdout)
+            self.assertIn('Index size:', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_stats_shows_error_summary(self):
+        """Should display crawl error summary when errors exist."""
+        self.create_mock_metadata()
+        
+        # Create crawl_state.json file so the code path is triggered
+        import time
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': [
+                {'url': 'https://example.com/404', 'error_type': 'http_404', 'message': 'Not Found', 'timestamp': time.time()},
+                {'url': 'https://example.com/500', 'error_type': 'http_500', 'message': 'Server Error', 'timestamp': time.time()},
+                {'url': 'https://example.com/timeout', 'error_type': 'timeout', 'message': 'Request timed out', 'timestamp': time.time()},
+                {'url': 'https://example.com/another404', 'error_type': 'http_404', 'message': 'Not Found', 'timestamp': time.time()},
+            ],
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Verify error summary is shown
+        self.assertIn('Crawl Errors:', stdout)
+        self.assertIn('http_404:', stdout)
+        self.assertIn('http_500:', stdout)
+        self.assertIn('timeout:', stdout)
+        self.assertIn('Total: 4', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_show_errors_flag(self):
+        """Should display detailed errors when --show-errors flag is set."""
+        self.create_mock_metadata()
+        
+        # Create crawl_state.json file with errors
+        import time
+        now = time.time()
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': [
+                {'url': 'https://example.com/page1', 'error_type': 'http_404', 'message': 'Page not found', 'timestamp': now - 100},
+                {'url': 'https://example.com/page2', 'error_type': 'timeout', 'message': 'Connection timed out', 'timestamp': now - 50},
+                {'url': 'https://example.com/page3', 'error_type': 'parse', 'message': 'Invalid HTML', 'timestamp': now},
+            ],
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir),
+            '--show-errors'
+        ])
+        
+        # Verify detailed errors are shown
+        self.assertIn('Recent Errors', stdout)
+        self.assertIn('http_404', stdout)
+        self.assertIn('Page not found', stdout)
+        self.assertIn('timeout', stdout)
+        self.assertIn('Connection timed out', stdout)
+        self.assertIn('parse', stdout)
+        self.assertIn('Invalid HTML', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_show_errors_short_flag(self):
+        """Should accept -e as short form of --show-errors."""
+        self.create_mock_metadata()
+        
+        # Create crawl_state.json file with errors
+        import time
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': [
+                {'url': 'https://example.com/err', 'error_type': 'http_500', 'message': 'Server error', 'timestamp': time.time()},
+            ],
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir),
+            '-e'
+        ])
+        
+        # Verify detailed errors are shown (same as --show-errors)
+        self.assertIn('Recent Errors', stdout)
+        self.assertIn('http_500', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_limits_recent_errors_to_10(self):
+        """Should only show the 10 most recent errors with --show-errors."""
+        self.create_mock_metadata()
+        
+        # Create crawl_state.json file with 15 errors
+        import time
+        base_time = time.time()
+        errors = [
+            {'url': f'https://example.com/page{i}', 'error_type': 'http_404', 
+             'message': f'Error {i}', 'timestamp': base_time - (15 - i) * 60}
+            for i in range(15)
+        ]
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': errors,
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir),
+            '--show-errors'
+        ])
+        
+        # Should show "last 10" in output
+        self.assertIn('last 10', stdout)
+        
+        # Count how many error URLs are shown (rough check)
+        # The most recent 10 should be shown (pages 5-14)
+        self.assertIn('page14', stdout)
+        self.assertIn('page5', stdout)
+        # Earlier ones should not be shown
+        self.assertNotIn('page0', stdout)
+        self.assertNotIn('page4', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_no_errors_no_error_section(self):
+        """Should not show error section when no errors exist."""
+        self.create_mock_metadata()
+        
+        # Create crawl_state.json file with empty errors array
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': [],
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Should not show error section
+        self.assertNotIn('Crawl Errors:', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_without_metadata(self):
+        """Should work without metadata file (shows limited info)."""
+        # Don't create metadata file
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Should not crash, but won't show crawl stats
+        self.assertNotIn('Pages crawled:', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_without_index(self):
+        """Should work without index file (shows limited info)."""
+        self.create_mock_metadata()
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Should still show site info and crawl stats
+        self.assertIn('https://docs.example.com/', stdout)
+        self.assertIn('Pages crawled:', stdout)
+        
+        # But no index stats
+        self.assertNotIn('Index Statistics:', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_without_crawl_state(self):
+        """Should work without crawl state file."""
+        self.create_mock_metadata()
+        
+        # Don't create crawl_state.json - test that cmd_stats handles its absence
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Should not show error section (no crawl state file means no errors to show)
+        self.assertNotIn('Crawl Errors:', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_page_count_and_size(self):
+        """Should show correct page count and total size."""
+        self.create_mock_metadata()
+        
+        # Create pages with known content
+        for i in range(3):
+            self.create_mock_page(f'page_{i}', {
+                'url': f'https://example.com/{i}',
+                'title': f'Page {i}',
+                'text': 'X' * 100  # Some content
+            })
+        
+        code, stdout, _ = run_cli([
+            'stats', str(self.site_dir)
+        ])
+        
+        # Should show page count
+        self.assertIn('Stored Pages: 3', stdout)
+        
+        self.assertEqual(code, 0)
+    
+    def test_stats_loads_compressed_index(self):
+        """Should load compressed index when available."""
+        self.create_mock_metadata()
+        
+        # Create compressed index
+        import gzip
+        compressed_index = self.site_dir / 'index.json.gz'
+        with gzip.open(compressed_index, 'wt') as f:
+            json.dump({'k1': 1.5, 'b': 0.75, 'documents': {}, 'index': {}}, f)
+        
+        mock_engine = MockSearchEngine()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'stats', str(self.site_dir)
+            ])
+            
+            # Should have loaded the compressed index
+            MockEngineClass.load.assert_called_once()
+            load_args = MockEngineClass.load.call_args[0]
+            self.assertEqual(load_args[0], compressed_index)
+            
+            self.assertEqual(code, 0)
+
+
+class TestCmdStatsErrorHandling(unittest.TestCase):
+    """Tests for error handling in cmd_stats."""
+    
+    def test_stats_missing_site_dir(self):
+        """Should fail when site directory doesn't exist."""
+        code, stdout, _ = run_cli([
+            'stats', '/nonexistent/site/dir'
+        ])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Error:', stdout)
+        self.assertIn('not found', stdout.lower())
+    
+    def test_stats_missing_site_dir_argument(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['stats'])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code (argparse error)
+        self.assertNotEqual(code, 0)
+    
+    def test_stats_empty_site_dir(self):
+        """Should handle empty site directory gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            empty_site = Path(tmpdir) / 'empty'
+            empty_site.mkdir()
+            
+            code, stdout, _ = run_cli([
+                'stats', str(empty_site)
+            ])
+            
+            # Should not crash
+            self.assertEqual(code, 0)
+
+
+class TestCmdStatsArgParsing(unittest.TestCase):
+    """Tests for stats argument parsing."""
+    
+    def test_parse_stats_basic(self):
+        """Should parse stats command with site_dir."""
+        args = parse_args(['stats', '/path/to/site'])
+        
+        self.assertEqual(args.command, 'stats')
+        self.assertEqual(args.site_dir, '/path/to/site')
+    
+    def test_parse_stats_show_errors_flag(self):
+        """Should parse --show-errors flag."""
+        args = parse_args(['stats', '/path/to/site', '--show-errors'])
+        
+        self.assertTrue(args.show_errors)
+    
+    def test_parse_stats_show_errors_short_flag(self):
+        """Should parse -e short flag."""
+        args = parse_args(['stats', '/path/to/site', '-e'])
+        
+        self.assertTrue(args.show_errors)
+    
+    def test_parse_stats_separate_paths_flag(self):
+        """Should parse --separate-paths flag."""
+        args = parse_args(['stats', '/path/to/site', '--separate-paths'])
+        
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_stats_defaults(self):
+        """Should have correct default values."""
+        args = parse_args(['stats', '/path/to/site'])
+        
+        self.assertFalse(args.show_errors)
+        self.assertFalse(args.separate_paths)
+    
+    def test_parse_stats_help(self):
+        """Should show help text for stats command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['stats', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('stats', output.lower())
+        self.assertIn('site_dir', output)
+        self.assertIn('show-errors', output)
+
+
+class TestCmdStatsIntegration(unittest.TestCase):
+    """Integration tests for cmd_stats with real file operations."""
+    
+    def setUp(self):
+        """Create fresh temp directory for each test."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.site_dir = Path(self.temp_dir.name)
+        (self.site_dir / 'pages').mkdir(parents=True, exist_ok=True)
+    
+    def tearDown(self):
+        """Cleanup temp directory."""
+        self.temp_dir.cleanup()
+    
+    def create_mock_page(self, filename: str, content: Dict[str, Any]) -> Path:
+        """Create a mock page file in the pages directory."""
+        pages_dir = self.site_dir / 'pages'
+        page_path = pages_dir / f'{filename}.json'
+        with open(page_path, 'w') as f:
+            json.dump(content, f)
+        return page_path
+    
+    def create_mock_index(self) -> Path:
+        """Create a minimal mock index file."""
+        index_data = {
+            'k1': 1.5,
+            'b': 0.75,
+            'avg_doc_length': 150,
+            'documents': {},
+            'index': {},
+            'doc_lengths': {}
+        }
+        index_path = self.site_dir / 'index.json'
+        with open(index_path, 'w') as f:
+            json.dump(index_data, f)
+        return index_path
+    
+    def test_stats_full_site_structure(self):
+        """Should display complete stats for a fully populated site."""
+        # Create complete site structure
+        metadata = {
+            'url': 'https://integration-test.example.com/',
+            'stats': {
+                'pages_crawled': 50,
+                'pages_skipped': 5,
+                'pages_failed': 2,
+                'bytes_downloaded': 2 * 1024 * 1024,
+                'elapsed_seconds': 60.0
+            }
+        }
+        with open(self.site_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+        # Create pages
+        for i in range(10):
+            self.create_mock_page(f'doc_{i}', {
+                'url': f'https://integration-test.example.com/doc{i}',
+                'title': f'Document {i}',
+                'text': f'Content for document {i} with more text.'
+            })
+        
+        # Create index
+        mock_engine = MockSearchEngine(stats={
+            'total_documents': 10,
+            'unique_terms': 500,
+            'avg_document_length': 25,
+            'k1': 1.5,
+            'b': 0.75
+        })
+        self.create_mock_index()
+        
+        # Create crawl_state.json file with errors
+        import time
+        crawl_state_data = {
+            'visited': [],
+            'pending': [],
+            'failed': {},
+            'errors': [
+                {'url': 'https://integration-test.example.com/missing', 
+                 'error_type': 'http_404', 
+                 'message': 'Not Found', 
+                 'timestamp': time.time()},
+            ],
+            'stats': {}
+        }
+        crawl_state_file = self.site_dir / 'crawl_state.json'
+        with open(crawl_state_file, 'w') as f:
+            json.dump(crawl_state_data, f)
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'stats', str(self.site_dir)
+            ])
+            
+            # Verify all sections are present
+            self.assertIn('Site:', stdout)
+            self.assertIn('integration-test.example.com', stdout)
+            self.assertIn('Crawl Statistics:', stdout)
+            self.assertIn('Stored Pages:', stdout)
+            self.assertIn('Index Statistics:', stdout)
+            self.assertIn('Crawl Errors:', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_stats_with_url_instead_of_path(self):
+        """Should work when URL is provided instead of path (via site_hash)."""
+        # This tests the get_site_dir function behavior
+        # When a URL is provided, it should be converted to a path via site_hash
+        
+        # Create a site directory at the expected hash location
+        from doc_search.cli.commands import DEFAULT_DATA_DIR
+        from doc_search.utils import site_hash
+        
+        test_url = 'https://test-url-input.example.com/'
+        expected_dir = DEFAULT_DATA_DIR / site_hash(test_url)
+        expected_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Create minimal metadata
+            metadata = {'url': test_url, 'stats': {'pages_crawled': 1}}
+            with open(expected_dir / 'metadata.json', 'w') as f:
+                json.dump(metadata, f)
+            
+            code, stdout, _ = run_cli([
+                'stats', test_url
+            ])
+            
+            # Should find and display the site
+            self.assertIn(test_url, stdout)
+            self.assertEqual(code, 0)
+        finally:
+            # Cleanup
+            import shutil
+            if expected_dir.exists():
+                shutil.rmtree(expected_dir)
+
+
 class TestCmdSearchIntegration(CLITestCase):
     """Integration tests for cmd_search using real file structures."""
     
