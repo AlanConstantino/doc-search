@@ -140,6 +140,36 @@ All data is stored in `~/.doc_search/sites/`:
 └── metadata.json    # Site info
 ```
 
+## SSL Certificate Verification
+
+doc-search **disables SSL certificate verification by default** when crawling sites.
+
+### Why?
+
+Many documentation sites — especially internal company wikis, staging environments, or self-hosted tools — use self-signed certificates. Requiring valid certificates would make doc-search unusable for these common scenarios.
+
+### Security Implications
+
+With SSL verification disabled:
+- Connections are still encrypted (HTTPS)
+- The server's identity is **not verified**
+- Man-in-the-middle attacks become theoretically possible
+
+### When This Matters
+
+**Low risk scenarios (typical doc-search usage):**
+- Crawling public documentation sites
+- Crawling internal sites on trusted networks
+- One-time crawls for building a local index
+
+**Higher risk scenarios:**
+- Crawling over untrusted networks (public WiFi)
+- Sites requiring authentication (credentials could be intercepted)
+
+### Future Consideration
+
+A `--verify-ssl` flag may be added in the future for users who need strict certificate validation. See the issue tracker if this is important for your use case.
+
 ## Limitations
 
 - **English only** — Tokenization assumes space-separated words
