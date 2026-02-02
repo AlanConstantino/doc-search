@@ -1646,6 +1646,210 @@ class TestIncrementalCrawl(CrawlerTestCase):
 
 
 # ============================================================================
+# Crawl Error Recording Tests
+# ============================================================================
+
+class TestCrawlErrorRecording(CrawlerTestCase):
+    """Tests for error recording during crawling."""
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_http_error_metadata_for_404(self, mock_urlopen):
+        """_fetch should return error metadata for HTTP 404."""
+        crawler = self.create_crawler()
+        
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/notfound', 404, 'Not Found', {}, None
+        )
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/notfound')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'http')
+        self.assertIn('404', metadata.get('error_message', ''))
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_http_error_metadata_for_500(self, mock_urlopen):
+        """_fetch should return error metadata for HTTP 500."""
+        crawler = self.create_crawler()
+        
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/error', 500, 'Internal Server Error', {}, None
+        )
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/error')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'http')
+        self.assertIn('500', metadata.get('error_message', ''))
+        self.assertIn('Server error', metadata.get('error_message', ''))
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_http_error_metadata_for_429(self, mock_urlopen):
+        """_fetch should return error metadata for HTTP 429 (rate limited)."""
+        crawler = self.create_crawler()
+        
+        error = HTTPError(
+            'https://example.com/ratelimited', 429, 'Too Many Requests', {}, None
+        )
+        error.headers = MagicMock()
+        error.headers.get = lambda key, default: '60' if key == 'Retry-After' else default
+        mock_urlopen.side_effect = error
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/ratelimited')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'http')
+        self.assertIn('429', metadata.get('error_message', ''))
+        self.assertIn('Rate limited', metadata.get('error_message', ''))
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_timeout_error_metadata(self, mock_urlopen):
+        """_fetch should return timeout error metadata."""
+        crawler = self.create_crawler()
+        
+        mock_urlopen.side_effect = URLError('timed out')
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/slow')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'timeout')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_ssl_error_metadata(self, mock_urlopen):
+        """_fetch should return SSL error metadata."""
+        crawler = self.create_crawler()
+        
+        mock_urlopen.side_effect = URLError('SSL: CERTIFICATE_VERIFY_FAILED')
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/badcert')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'ssl')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_fetch_returns_network_error_metadata(self, mock_urlopen):
+        """_fetch should return network error metadata for connection errors."""
+        crawler = self.create_crawler()
+        
+        mock_urlopen.side_effect = URLError('Connection refused')
+        
+        content, content_type, metadata = crawler._fetch('https://example.com/down')
+        
+        self.assertIsNone(content)
+        self.assertEqual(metadata.get('error_type'), 'network')
+        self.assertIn('Connection refused', metadata.get('error_message', ''))
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_process_page_records_http_error(self, mock_urlopen):
+        """_process_page should record HTTP errors in crawl state."""
+        crawler = self.create_crawler()
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/notfound', 404, 'Not Found', {}, None
+        )
+        
+        # Process page should record the error
+        result = crawler._process_page('https://example.com/notfound', depth=0)
+        
+        self.assertIsNone(result)
+        
+        # Check error was recorded
+        errors = crawler.state.get_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].url, 'https://example.com/notfound')
+        self.assertEqual(errors[0].error_type, 'http')
+        self.assertIn('404', errors[0].message)
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_process_page_records_timeout_error(self, mock_urlopen):
+        """_process_page should record timeout errors in crawl state."""
+        crawler = self.create_crawler()
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        mock_urlopen.side_effect = URLError('Connection timed out')
+        
+        result = crawler._process_page('https://example.com/slow', depth=0)
+        
+        self.assertIsNone(result)
+        
+        errors = crawler.state.get_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].error_type, 'timeout')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_process_page_records_ssl_error(self, mock_urlopen):
+        """_process_page should record SSL errors in crawl state."""
+        crawler = self.create_crawler()
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        mock_urlopen.side_effect = URLError('SSL certificate verification failed')
+        
+        result = crawler._process_page('https://example.com/badcert', depth=0)
+        
+        self.assertIsNone(result)
+        
+        errors = crawler.state.get_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].error_type, 'ssl')
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_multiple_errors_recorded(self, mock_urlopen):
+        """Should record multiple errors for multiple failed pages."""
+        crawler = self.create_crawler()
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        # First page - 404
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/page1', 404, 'Not Found', {}, None
+        )
+        crawler._process_page('https://example.com/page1', depth=0)
+        
+        # Second page - 500
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/page2', 500, 'Server Error', {}, None
+        )
+        crawler._process_page('https://example.com/page2', depth=0)
+        
+        # Third page - timeout
+        mock_urlopen.side_effect = URLError('Connection timed out')
+        crawler._process_page('https://example.com/page3', depth=0)
+        
+        errors = crawler.state.get_errors()
+        self.assertEqual(len(errors), 3)
+        
+        # Check error summary
+        summary = crawler.state.get_error_summary()
+        self.assertEqual(summary['http'], 2)
+        self.assertEqual(summary['timeout'], 1)
+    
+    @patch('doc_search.crawler.urlopen')
+    def test_errors_persist_through_checkpoint(self, mock_urlopen):
+        """Errors should be saved and restored through checkpoints."""
+        crawler = self.create_crawler()
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        mock_urlopen.side_effect = HTTPError(
+            'https://example.com/error', 404, 'Not Found', {}, None
+        )
+        
+        crawler._process_page('https://example.com/error', depth=0)
+        
+        # Save state
+        crawler.state.save()
+        
+        # Create new crawler instance and load state
+        crawler2 = self.create_crawler()
+        crawler2.state.load()
+        
+        # Errors should be restored
+        errors = crawler2.state.get_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].url, 'https://example.com/error')
+        self.assertEqual(errors[0].error_type, 'http')
+
+
+# ============================================================================
 # Placeholder for Additional Tests
 # ============================================================================
 
