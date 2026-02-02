@@ -8,6 +8,7 @@ This is a complete implementation with all 5 steps.
 """
 
 import re
+from functools import lru_cache
 
 
 def _is_consonant(word: str, i: int) -> bool:
@@ -298,9 +299,12 @@ def _step5b(word: str) -> str:
     return word
 
 
+@lru_cache(maxsize=10000)
 def stem(word: str) -> str:
     """
     Apply the Porter Stemming algorithm to a word.
+    
+    Results are cached using LRU cache for improved performance on repeated words.
     
     Args:
         word: The word to stem.
