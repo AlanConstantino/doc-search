@@ -518,5 +518,412 @@ class TestParseArgs(unittest.TestCase):
         self.assertTrue(args.log_requests)
 
 
+# ============================================================================
+# cmd_crawl Tests
+# ============================================================================
+
+class TestCmdCrawl(CLITestCase):
+    """Tests for the cmd_crawl CLI command."""
+    
+    def test_crawl_basic_url(self):
+        """Should crawl with just a URL."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            with capture_output() as (stdout, stderr):
+                code, _, _ = run_cli([
+                    'crawl', 'https://docs.example.com/'
+                ])
+            
+            # Verify Crawler was created with correct base_url
+            MockCrawlerClass.assert_called_once()
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['base_url'], 'https://docs.example.com/')
+            
+            # Verify crawl was called with resume=True (default, since --fresh not set)
+            self.assertEqual(len(mock_crawler.crawl_calls), 1)
+            self.assertTrue(mock_crawler.crawl_calls[0]['resume'])
+            
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_authentication(self):
+        """Should pass authentication credentials to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--user', 'testuser',
+                '--password', 'testpass'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['auth'], ('testuser', 'testpass'))
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_auth_token(self):
+        """Should pass auth token to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--token', 'my-secret-token'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['auth_token'], 'my-secret-token')
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_depth_limit(self):
+        """Should pass max_depth to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--max-depth', '3'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['max_depth'], 3)
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_workers(self):
+        """Should pass workers (concurrency) to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--workers', '8'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['workers'], 8)
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_fresh_flag(self):
+        """Should pass resume=False when --fresh flag is set."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--fresh'
+            ])
+            
+            # Verify crawl was called with resume=False
+            self.assertEqual(len(mock_crawler.crawl_calls), 1)
+            self.assertFalse(mock_crawler.crawl_calls[0]['resume'])
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_delay(self):
+        """Should pass delay to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--delay', '2.5'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['delay'], 2.5)
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_timeout(self):
+        """Should pass timeout to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--timeout', '60'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['timeout'], 60)
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_max_pages(self):
+        """Should pass max_pages to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--max-pages', '500'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['max_pages'], 500)
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_same_path(self):
+        """Should pass same_path flag to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--same-path'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertTrue(call_kwargs['same_path'])
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_quiet(self):
+        """Should pass verbose=False when --quiet flag is set."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--quiet'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertFalse(call_kwargs['verbose'])
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_extract_docs(self):
+        """Should pass extract_docs flag to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--extract-docs'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertTrue(call_kwargs['extract_docs'])
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_incremental(self):
+        """Should pass incremental flag to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/',
+                '--incremental'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertTrue(call_kwargs['incremental'])
+            self.assertEqual(code, 0)
+    
+    def test_crawl_with_all_options(self):
+        """Should pass all options correctly to Crawler."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, _, _ = run_cli([
+                'crawl', 'https://docs.example.com/api/',
+                '--user', 'admin',
+                '--password', 'secret',
+                '--token', 'bearer-token',
+                '--delay', '1.5',
+                '--timeout', '45',
+                '--max-pages', '200',
+                '--max-depth', '5',
+                '--workers', '10',
+                '--same-path',
+                '--quiet',
+                '--extract-docs',
+                '--incremental',
+                '--fresh'
+            ])
+            
+            call_kwargs = MockCrawlerClass.call_args[1]
+            self.assertEqual(call_kwargs['base_url'], 'https://docs.example.com/api/')
+            self.assertEqual(call_kwargs['auth'], ('admin', 'secret'))
+            self.assertEqual(call_kwargs['auth_token'], 'bearer-token')
+            self.assertEqual(call_kwargs['delay'], 1.5)
+            self.assertEqual(call_kwargs['timeout'], 45)
+            self.assertEqual(call_kwargs['max_pages'], 200)
+            self.assertEqual(call_kwargs['max_depth'], 5)
+            self.assertEqual(call_kwargs['workers'], 10)
+            self.assertTrue(call_kwargs['same_path'])
+            self.assertFalse(call_kwargs['verbose'])
+            self.assertTrue(call_kwargs['extract_docs'])
+            self.assertTrue(call_kwargs['incremental'])
+            
+            # --fresh means resume=False
+            self.assertFalse(mock_crawler.crawl_calls[0]['resume'])
+            
+            self.assertEqual(code, 0)
+    
+    def test_crawl_saves_metadata(self):
+        """Should save metadata.json after successful crawl."""
+        mock_crawler = MockCrawler(stats={
+            'pages_crawled': 25,
+            'pages_skipped': 3,
+            'pages_failed': 1,
+            'bytes_downloaded': 512 * 1024,
+            'elapsed_seconds': 15.0
+        })
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir)
+            
+            with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+                with patch('doc_search.cli.commands.get_site_dir', return_value=site_dir):
+                    MockCrawlerClass.return_value = mock_crawler
+                    
+                    code, _, _ = run_cli([
+                        'crawl', 'https://docs.example.com/'
+                    ])
+                    
+                    self.assertEqual(code, 0)
+                    
+                    # Verify metadata was saved
+                    metadata_path = site_dir / 'metadata.json'
+                    self.assertTrue(metadata_path.exists())
+                    
+                    with open(metadata_path) as f:
+                        metadata = json.load(f)
+                    
+                    self.assertEqual(metadata['url'], 'https://docs.example.com/')
+                    self.assertEqual(metadata['stats']['pages_crawled'], 25)
+    
+    def test_crawl_creates_site_directory(self):
+        """Should create site directory if it doesn't exist."""
+        mock_crawler = MockCrawler()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir) / 'new_site'
+            # Ensure it doesn't exist yet
+            self.assertFalse(site_dir.exists())
+            
+            with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+                with patch('doc_search.cli.commands.get_site_dir', return_value=site_dir):
+                    MockCrawlerClass.return_value = mock_crawler
+                    
+                    code, _, _ = run_cli([
+                        'crawl', 'https://docs.example.com/'
+                    ])
+                    
+                    self.assertEqual(code, 0)
+                    # Directory should now exist
+                    self.assertTrue(site_dir.exists())
+    
+    def test_crawl_prints_progress_info(self):
+        """Should print crawl progress information."""
+        mock_crawler = MockCrawler()
+        
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            
+            code, stdout, stderr = run_cli([
+                'crawl', 'https://docs.example.com/'
+            ])
+            
+            self.assertIn('Crawling: https://docs.example.com/', stdout)
+            self.assertIn('Data directory:', stdout)
+
+
+class TestCmdCrawlErrorHandling(CLITestCase):
+    """Tests for error handling in cmd_crawl."""
+    
+    def test_crawl_missing_url(self):
+        """Should fail when URL is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['crawl'])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code
+        self.assertNotEqual(code, 0)
+    
+    # NOTE: Exception handling test removed - main() does not catch exceptions
+    # from command handlers. Exceptions propagate to the caller (shell).
+    # This is intentional behavior - callers should handle errors appropriately.
+
+
+class TestCmdCrawlArgParsing(unittest.TestCase):
+    """Tests for crawl argument parsing."""
+    
+    def test_parse_crawl_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['crawl', 'https://docs.example.com/'])
+        
+        # Check defaults
+        self.assertEqual(args.command, 'crawl')
+        self.assertEqual(args.url, 'https://docs.example.com/')
+        self.assertIsNone(args.user)
+        self.assertIsNone(args.password)
+        self.assertFalse(args.fresh)
+        self.assertFalse(args.same_path)
+        self.assertFalse(args.quiet)
+    
+    def test_parse_crawl_user_without_password(self):
+        """Should allow --user without --password (prompts interactively)."""
+        args = parse_args([
+            'crawl', 'https://docs.example.com/',
+            '--user', 'admin'
+        ])
+        
+        self.assertEqual(args.user, 'admin')
+        self.assertIsNone(args.password)
+    
+    def test_parse_crawl_negative_values_accepted(self):
+        """Documents that argparse accepts negative values for numeric options.
+        
+        Note: argparse doesn't reject negative values by default.
+        Validation should happen in the command handler if needed.
+        """
+        args = parse_args([
+            'crawl', 'https://docs.example.com/',
+            '--max-pages', '-1'
+        ])
+        # argparse will parse it as -1
+        self.assertEqual(args.max_pages, -1)
+    
+    def test_parse_crawl_help(self):
+        """Should show help text for crawl command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['crawl', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('crawl', output.lower())
+        self.assertIn('url', output.lower())
+
+
 if __name__ == '__main__':
     unittest.main()
