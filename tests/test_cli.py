@@ -1374,5 +1374,717 @@ class TestCmdIndexIntegration(CLITestCase):
             self.assertEqual(code, 0)
 
 
+# ============================================================================
+# cmd_search Tests
+# ============================================================================
+
+class TestCmdSearch(CLITestCase):
+    """Tests for the cmd_search CLI command."""
+    
+    def test_search_basic_query(self):
+        """Should perform basic search with query."""
+        results = [
+            {'url': 'https://example.com/page1', 'title': 'Python Tutorial', 'score': 2.5, 'snippet': 'Learn Python basics...'},
+            {'url': 'https://example.com/page2', 'title': 'Python Guide', 'score': 2.0, 'snippet': 'Advanced Python...'},
+        ]
+        mock_engine = MockSearchEngine(results=results)
+        
+        # Create mock index file
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'python tutorial'
+            ])
+            
+            # Verify EnhancedSearchEngine.load was called with correct path
+            MockEngineClass.load.assert_called_once()
+            load_args = MockEngineClass.load.call_args
+            self.assertEqual(load_args[0][0], self.site_dir / 'index.json')
+            
+            # Verify search was called with correct query
+            self.assertEqual(len(mock_engine.search_calls), 1)
+            self.assertEqual(mock_engine.search_calls[0]['query'], 'python tutorial')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_limit(self):
+        """Should pass correct limit (top_k) to search engine."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--limit', '5'
+            ])
+            
+            # Verify search was called with correct top_k
+            self.assertEqual(mock_engine.search_calls[0]['top_k'], 5)
+            self.assertEqual(code, 0)
+    
+    def test_search_default_limit(self):
+        """Should use default limit of 10 when not specified."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query'
+            ])
+            
+            # Default limit is 10
+            self.assertEqual(mock_engine.search_calls[0]['top_k'], 10)
+            self.assertEqual(code, 0)
+    
+    def test_search_json_output(self):
+        """Should output JSON format when --json flag is set."""
+        results = [
+            {'url': 'https://example.com/page1', 'title': 'Result 1', 'score': 1.5, 'snippet': 'Test snippet'},
+        ]
+        mock_engine = MockSearchEngine(results=results)
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'test query',
+                '--json', '--quiet'
+            ])
+            
+            # Verify output is valid JSON
+            output_data = json.loads(stdout.strip())
+            
+            # Verify JSON structure
+            self.assertIn('query', output_data)
+            self.assertEqual(output_data['query'], 'test query')
+            self.assertIn('results', output_data)
+            self.assertIn('count', output_data)
+            self.assertIn('elapsed_ms', output_data)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_json_output_includes_results(self):
+        """Should include search results in JSON output."""
+        results = [
+            {'url': 'https://example.com/doc1', 'title': 'Doc 1', 'score': 2.0, 'snippet': 'Snippet 1'},
+            {'url': 'https://example.com/doc2', 'title': 'Doc 2', 'score': 1.5, 'snippet': 'Snippet 2'},
+        ]
+        mock_engine = MockSearchEngine(results=results)
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--json', '--quiet'
+            ])
+            
+            output_data = json.loads(stdout.strip())
+            self.assertEqual(output_data['count'], 2)
+            self.assertEqual(len(output_data['results']), 2)
+            self.assertEqual(output_data['results'][0]['url'], 'https://example.com/doc1')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_synonyms(self):
+        """Should enable synonym expansion when --synonyms flag is set."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--synonyms'
+            ])
+            
+            # Verify EnhancedSearchEngine.load was called with enable_synonyms=True
+            load_kwargs = MockEngineClass.load.call_args[1]
+            self.assertTrue(load_kwargs['enable_synonyms'])
+            
+            # Verify search was called with expand_synonyms=True
+            self.assertTrue(mock_engine.search_calls[0]['expand_synonyms'])
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_custom_synonyms_file(self):
+        """Should load custom synonyms from file."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        # Create a custom synonyms file
+        synonyms_data = {
+            'groups': [
+                ['quick', 'fast', 'speedy'],
+                ['big', 'large', 'huge']
+            ]
+        }
+        synonyms_file = self.site_dir / 'synonyms.json'
+        with open(synonyms_file, 'w') as f:
+            json.dump(synonyms_data, f)
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--synonyms-file', str(synonyms_file)
+            ])
+            
+            # Verify EnhancedSearchEngine.load was called with synonym_groups
+            load_kwargs = MockEngineClass.load.call_args[1]
+            self.assertTrue(load_kwargs['enable_synonyms'])
+            self.assertIsNotNone(load_kwargs['synonym_groups'])
+            self.assertEqual(len(load_kwargs['synonym_groups']), 2)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_basic_engine(self):
+        """Should use basic SearchEngine when --basic flag is set."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.SearchEngine') as MockBasicEngineClass:
+            # Basic engine returns list, not dict
+            mock_basic = MagicMock()
+            mock_basic.search.return_value = []
+            MockBasicEngineClass.load.return_value = mock_basic
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--basic'
+            ])
+            
+            # Verify SearchEngine.load was called (not EnhancedSearchEngine)
+            MockBasicEngineClass.load.assert_called_once()
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_show_facets(self):
+        """Should display facets when --show-facets flag is set."""
+        mock_engine = MockSearchEngine()
+        # Override search to return facets
+        facets = {
+            'category': {'api': 5, 'guide': 3},
+            'section': {'intro': 4, 'advanced': 4}
+        }
+        original_search = mock_engine.search
+        def search_with_facets(query, top_k=10, **kwargs):
+            result = original_search(query, top_k, **kwargs)
+            result['facets'] = facets
+            return result
+        mock_engine.search = search_with_facets
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--show-facets'
+            ])
+            
+            # Facets should be displayed in output
+            self.assertIn('Facets', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_json_output_includes_facets(self):
+        """Should include facets in JSON output when available."""
+        mock_engine = MockSearchEngine()
+        facets = {
+            'category': {'api': 5, 'guide': 3}
+        }
+        original_search = mock_engine.search
+        def search_with_facets(query, top_k=10, **kwargs):
+            result = original_search(query, top_k, **kwargs)
+            result['facets'] = facets
+            return result
+        mock_engine.search = search_with_facets
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--json', '--quiet'
+            ])
+            
+            output_data = json.loads(stdout.strip())
+            self.assertIn('facets', output_data)
+            self.assertEqual(output_data['facets']['category']['api'], 5)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_filter_category(self):
+        """Should pass category filter to search engine."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--filter-category', 'api'
+            ])
+            
+            # Verify search was called with facet_filters
+            search_kwargs = mock_engine.search_calls[0]
+            self.assertIn('facet_filters', search_kwargs)
+            self.assertEqual(search_kwargs['facet_filters']['category'], 'api')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_filter_section(self):
+        """Should pass section filter to search engine."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--filter-section', 'getting-started'
+            ])
+            
+            # Verify search was called with facet_filters
+            search_kwargs = mock_engine.search_calls[0]
+            self.assertIn('facet_filters', search_kwargs)
+            self.assertEqual(search_kwargs['facet_filters']['section'], 'getting-started')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_quiet_mode(self):
+        """Should suppress info messages in quiet mode."""
+        mock_engine = MockSearchEngine()
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--quiet'
+            ])
+            
+            # Should not contain "Loading index from" message
+            self.assertNotIn('Loading index from', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_scores(self):
+        """Should show scores when --scores flag is set."""
+        results = [
+            {'url': 'https://example.com/page1', 'title': 'Test', 'score': 2.5, 'snippet': 'Test content'},
+        ]
+        mock_engine = MockSearchEngine(results=results)
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            # Note: --scores affects format_results, which is called internally
+            # We just verify the command runs successfully
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--scores'
+            ])
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_loads_compressed_index(self):
+        """Should load compressed index (index.json.gz) when available."""
+        mock_engine = MockSearchEngine()
+        
+        # Create compressed index file (takes priority over uncompressed)
+        compressed_index = self.site_dir / 'index.json.gz'
+        import gzip
+        with gzip.open(compressed_index, 'wt') as f:
+            json.dump({'k1': 1.5, 'b': 0.75, 'documents': {}, 'index': {}}, f)
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query'
+            ])
+            
+            # Verify it loaded the compressed index
+            load_args = MockEngineClass.load.call_args[0]
+            self.assertEqual(load_args[0], compressed_index)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_prefers_compressed_index(self):
+        """Should prefer compressed index over uncompressed when both exist."""
+        mock_engine = MockSearchEngine()
+        
+        # Create both compressed and uncompressed index files
+        uncompressed = self.create_mock_index()
+        compressed = self.site_dir / 'index.json.gz'
+        import gzip
+        with gzip.open(compressed, 'wt') as f:
+            json.dump({'k1': 1.5, 'b': 0.75, 'documents': {}, 'index': {}}, f)
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, _, _ = run_cli([
+                'search', str(self.site_dir), 'query'
+            ])
+            
+            # Should use compressed version
+            load_args = MockEngineClass.load.call_args[0]
+            self.assertEqual(load_args[0], compressed)
+            
+            self.assertEqual(code, 0)
+
+
+class TestCmdSearchErrorHandling(CLITestCase):
+    """Tests for error handling in cmd_search."""
+    
+    def test_search_missing_index(self):
+        """Should fail when no index file exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            site_dir = Path(tmpdir)
+            # No index file
+            
+            code, stdout, _ = run_cli([
+                'search', str(site_dir), 'query'
+            ])
+            
+            self.assertEqual(code, 1)
+            self.assertIn('Error:', stdout)
+            self.assertIn('No index found', stdout)
+    
+    def test_search_missing_query_argument(self):
+        """Should fail when query is not provided."""
+        self.create_mock_index()
+        
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['search', str(self.site_dir)])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code (argparse error)
+        self.assertNotEqual(code, 0)
+    
+    def test_search_invalid_synonyms_file(self):
+        """Should fail when synonyms file is invalid JSON."""
+        self.create_mock_index()
+        
+        # Create an invalid JSON file
+        invalid_file = self.site_dir / 'bad_synonyms.json'
+        with open(invalid_file, 'w') as f:
+            f.write('{ this is not valid json }')
+        
+        code, stdout, _ = run_cli([
+            'search', str(self.site_dir), 'query',
+            '--synonyms-file', str(invalid_file)
+        ])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Error', stdout)
+    
+    def test_search_missing_synonyms_file(self):
+        """Should fail when synonyms file doesn't exist."""
+        self.create_mock_index()
+        
+        code, stdout, _ = run_cli([
+            'search', str(self.site_dir), 'query',
+            '--synonyms-file', '/nonexistent/synonyms.json'
+        ])
+        
+        self.assertEqual(code, 1)
+        self.assertIn('Error', stdout)
+    
+    def test_search_missing_site_dir_argument(self):
+        """Should fail when site_dir is not provided."""
+        with capture_output() as (stdout, stderr):
+            try:
+                code, _, _ = run_cli(['search'])
+            except SystemExit as e:
+                code = e.code
+        
+        # Should fail with non-zero exit code
+        self.assertNotEqual(code, 0)
+
+
+class TestCmdSearchArgParsing(unittest.TestCase):
+    """Tests for search argument parsing."""
+    
+    def test_parse_search_defaults(self):
+        """Should have sensible defaults for optional arguments."""
+        args = parse_args(['search', '/path/to/site', 'test query'])
+        
+        self.assertEqual(args.command, 'search')
+        self.assertEqual(args.site_dir, '/path/to/site')
+        self.assertEqual(args.query, 'test query')
+        self.assertEqual(args.limit, 10)  # Default limit
+        self.assertFalse(args.json)
+        self.assertFalse(args.scores)
+        self.assertFalse(args.synonyms)
+        self.assertFalse(args.quiet)
+    
+    def test_parse_search_limit(self):
+        """Should parse --limit option."""
+        args = parse_args(['search', '/path/to/site', 'query', '--limit', '20'])
+        
+        self.assertEqual(args.limit, 20)
+    
+    def test_parse_search_json_flag(self):
+        """Should parse --json flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--json'])
+        
+        self.assertTrue(args.json)
+    
+    def test_parse_search_scores_flag(self):
+        """Should parse --scores flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--scores'])
+        
+        self.assertTrue(args.scores)
+    
+    def test_parse_search_synonyms_flag(self):
+        """Should parse --synonyms flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--synonyms'])
+        
+        self.assertTrue(args.synonyms)
+    
+    def test_parse_search_basic_flag(self):
+        """Should parse --basic flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--basic'])
+        
+        self.assertTrue(args.basic)
+    
+    def test_parse_search_no_color_flag(self):
+        """Should parse --no-color flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--no-color'])
+        
+        self.assertTrue(args.no_color)
+    
+    def test_parse_search_show_facets_flag(self):
+        """Should parse --show-facets flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--show-facets'])
+        
+        self.assertTrue(args.show_facets)
+    
+    def test_parse_search_filter_category(self):
+        """Should parse --filter-category option."""
+        args = parse_args(['search', '/path/to/site', 'query', '--filter-category', 'api'])
+        
+        self.assertEqual(args.filter_category, 'api')
+    
+    def test_parse_search_filter_section(self):
+        """Should parse --filter-section option."""
+        args = parse_args(['search', '/path/to/site', 'query', '--filter-section', 'intro'])
+        
+        self.assertEqual(args.filter_section, 'intro')
+    
+    def test_parse_search_synonyms_file(self):
+        """Should parse --synonyms-file option."""
+        args = parse_args(['search', '/path/to/site', 'query', '--synonyms-file', '/path/to/syn.json'])
+        
+        self.assertEqual(args.synonyms_file, '/path/to/syn.json')
+    
+    def test_parse_search_quiet_flag(self):
+        """Should parse --quiet flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--quiet'])
+        
+        self.assertTrue(args.quiet)
+    
+    def test_parse_search_separate_paths_flag(self):
+        """Should parse --separate-paths flag."""
+        args = parse_args(['search', '/path/to/site', 'query', '--separate-paths'])
+        
+        self.assertTrue(args.separate_paths)
+    
+    def test_parse_search_help(self):
+        """Should show help text for search command."""
+        with capture_output() as (stdout, stderr):
+            try:
+                parse_args(['search', '--help'])
+            except SystemExit:
+                pass
+        
+        output = stdout.getvalue()
+        self.assertIn('search', output.lower())
+        self.assertIn('query', output.lower())
+
+
+class TestCmdSearchIntegration(CLITestCase):
+    """Integration tests for cmd_search using real file structures."""
+    
+    def test_search_with_suggestion_in_response(self):
+        """Should handle search response with spelling suggestion."""
+        mock_engine = MockSearchEngine()
+        # Override search to return a suggestion
+        def search_with_suggestion(query, top_k=10, **kwargs):
+            return {
+                'results': [],
+                'suggestion': 'python',  # Did you mean?
+                'expanded_query': None,
+                'facets': {}
+            }
+        mock_engine.search = search_with_suggestion
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'pyhton'  # Typo
+            ])
+            
+            # Should show suggestion in output
+            self.assertIn('Did you mean', stdout)
+            self.assertIn('python', stdout)
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_json_output_includes_suggestion(self):
+        """Should include suggestion in JSON output when available."""
+        mock_engine = MockSearchEngine()
+        def search_with_suggestion(query, top_k=10, **kwargs):
+            return {
+                'results': [],
+                'suggestion': 'corrected_query',
+                'expanded_query': None,
+                'facets': {}
+            }
+        mock_engine.search = search_with_suggestion
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'query',
+                '--json', '--quiet'
+            ])
+            
+            output_data = json.loads(stdout.strip())
+            self.assertIn('suggestion', output_data)
+            self.assertEqual(output_data['suggestion'], 'corrected_query')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_json_output_includes_expanded_query(self):
+        """Should include expanded_query in JSON output when synonyms used."""
+        mock_engine = MockSearchEngine()
+        def search_with_expansion(query, top_k=10, **kwargs):
+            return {
+                'results': [],
+                'suggestion': None,
+                'expanded_query': 'quick fast speedy',
+                'facets': {}
+            }
+        mock_engine.search = search_with_expansion
+        
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'quick',
+                '--synonyms', '--json', '--quiet'
+            ])
+            
+            output_data = json.loads(stdout.strip())
+            self.assertIn('expanded_query', output_data)
+            self.assertEqual(output_data['expanded_query'], 'quick fast speedy')
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_with_all_options(self):
+        """Should handle all options together correctly."""
+        mock_engine = MockSearchEngine(results=[
+            {'url': 'https://example.com/doc', 'title': 'Doc', 'score': 1.0, 'snippet': 'Test'}
+        ])
+        self.create_mock_index()
+        
+        # Create synonyms file
+        synonyms_file = self.site_dir / 'syn.json'
+        with open(synonyms_file, 'w') as f:
+            json.dump({'groups': [['test', 'check']]}, f)
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'test query',
+                '--limit', '5',
+                '--json',
+                '--synonyms-file', str(synonyms_file),
+                '--filter-category', 'docs',
+                '--quiet'
+            ])
+            
+            # Verify JSON output
+            output_data = json.loads(stdout.strip())
+            self.assertEqual(output_data['query'], 'test query')
+            self.assertEqual(output_data['count'], 1)
+            
+            # Verify correct options passed
+            search_kwargs = mock_engine.search_calls[0]
+            self.assertEqual(search_kwargs['top_k'], 5)
+            self.assertEqual(search_kwargs['facet_filters']['category'], 'docs')
+            self.assertTrue(search_kwargs['expand_synonyms'])
+            
+            self.assertEqual(code, 0)
+    
+    def test_search_no_results(self):
+        """Should handle empty search results gracefully."""
+        mock_engine = MockSearchEngine(results=[])
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'nonexistent term'
+            ])
+            
+            # Should return 0 (success) even with no results
+            self.assertEqual(code, 0)
+    
+    def test_search_no_results_json(self):
+        """Should output valid JSON with empty results."""
+        mock_engine = MockSearchEngine(results=[])
+        self.create_mock_index()
+        
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
+            MockEngineClass.load.return_value = mock_engine
+            
+            code, stdout, _ = run_cli([
+                'search', str(self.site_dir), 'nonexistent',
+                '--json', '--quiet'
+            ])
+            
+            output_data = json.loads(stdout.strip())
+            self.assertEqual(output_data['count'], 0)
+            self.assertEqual(output_data['results'], [])
+            
+            self.assertEqual(code, 0)
+
+
 if __name__ == '__main__':
     unittest.main()
