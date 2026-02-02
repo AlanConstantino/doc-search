@@ -114,7 +114,7 @@ class TestTokenizeWithStemming(unittest.TestCase):
         from doc_search.utils import tokenize
         
         text = "Running files and connecting processes"
-        tokens = tokenize(text, stem=True)
+        tokens = tokenize(text, apply_stemming=True)
         
         # Should contain stemmed versions
         self.assertIn('run', tokens)
@@ -127,7 +127,7 @@ class TestTokenizeWithStemming(unittest.TestCase):
         from doc_search.utils import tokenize
         
         text = "Running files and connecting processes"
-        tokens = tokenize(text, stem=False)
+        tokens = tokenize(text, apply_stemming=False)
         
         # Should contain original forms
         self.assertIn('running', tokens)
