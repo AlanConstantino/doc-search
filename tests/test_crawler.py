@@ -283,21 +283,320 @@ class TestRateLimiter(CrawlerTestCase):
 class TestCrawlerURLFiltering(CrawlerTestCase):
     """Tests for Crawler._should_crawl() URL filtering logic."""
     
+    def setUp(self):
+        """Set up test fixtures."""
+        super().setUp()
+        # Create a crawler and mock robots.txt to allow all by default
+        self.crawler = self.create_crawler()
+        self.crawler.robots.can_fetch = Mock(return_value=True)
+    
+    # -------------------------------------------------------------------------
+    # Already-visited URL tests
+    # -------------------------------------------------------------------------
+    
     def test_skips_visited_urls(self):
         """Should skip already visited URLs."""
-        crawler = self.create_crawler()
-        crawler.state.mark_visited('https://example.com/page1')
-        
-        self.assertFalse(crawler._should_crawl('https://example.com/page1'))
+        self.crawler.state.mark_visited('https://example.com/page1')
+        self.assertFalse(self.crawler._should_crawl('https://example.com/page1'))
     
     def test_allows_unvisited_urls(self):
         """Should allow unvisited URLs."""
-        crawler = self.create_crawler()
-        
-        # Mock robots.txt to allow all
+        self.assertTrue(self.crawler._should_crawl('https://example.com/page1'))
+    
+    # -------------------------------------------------------------------------
+    # Non-HTML extension tests
+    # -------------------------------------------------------------------------
+    
+    def test_skips_zip_extension(self):
+        """Should skip .zip files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/file.zip'))
+    
+    def test_skips_tar_gz_extension(self):
+        """Should skip .tar.gz files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/file.tar.gz'))
+    
+    def test_skips_png_extension(self):
+        """Should skip .png image files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/image.png'))
+    
+    def test_skips_jpg_extension(self):
+        """Should skip .jpg image files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/photo.jpg'))
+    
+    def test_skips_jpeg_extension(self):
+        """Should skip .jpeg image files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/photo.jpeg'))
+    
+    def test_skips_gif_extension(self):
+        """Should skip .gif image files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/animation.gif'))
+    
+    def test_skips_mp4_extension(self):
+        """Should skip .mp4 video files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/video.mp4'))
+    
+    def test_skips_css_extension(self):
+        """Should skip .css files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/styles.css'))
+    
+    def test_skips_js_extension(self):
+        """Should skip .js files."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/script.js'))
+    
+    def test_skips_pdf_without_extract_docs(self):
+        """Should skip .pdf files when extract_docs is disabled."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/document.pdf'))
+    
+    def test_allows_pdf_with_extract_docs(self):
+        """Should allow .pdf files when extract_docs is enabled."""
+        crawler = self.create_crawler(extract_docs=True)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        self.assertTrue(crawler._should_crawl('https://example.com/document.pdf'))
+    
+    def test_allows_html_extension(self):
+        """Should allow .html files."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/page.html'))
+    
+    def test_allows_htm_extension(self):
+        """Should allow .htm files."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/page.htm'))
+    
+    def test_allows_no_extension(self):
+        """Should allow URLs without file extensions."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/page'))
+    
+    def test_allows_trailing_slash(self):
+        """Should allow URLs with trailing slash (directories)."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/docs/'))
+    
+    # -------------------------------------------------------------------------
+    # Max depth tests
+    # -------------------------------------------------------------------------
+    
+    def test_allows_within_max_depth(self):
+        """Should allow URLs within max_depth limit."""
+        crawler = self.create_crawler(max_depth=2)
         crawler.robots.can_fetch = Mock(return_value=True)
         
-        self.assertTrue(crawler._should_crawl('https://example.com/page1'))
+        self.assertTrue(crawler._should_crawl('https://example.com/page', depth=0))
+        self.assertTrue(crawler._should_crawl('https://example.com/page', depth=1))
+        self.assertTrue(crawler._should_crawl('https://example.com/page', depth=2))
+    
+    def test_skips_beyond_max_depth(self):
+        """Should skip URLs beyond max_depth limit."""
+        crawler = self.create_crawler(max_depth=2)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertFalse(crawler._should_crawl('https://example.com/page', depth=3))
+        self.assertFalse(crawler._should_crawl('https://example.com/page', depth=10))
+    
+    def test_no_max_depth_allows_any_depth(self):
+        """Should allow any depth when max_depth is None."""
+        crawler = self.create_crawler(max_depth=None)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/page', depth=100))
+    
+    def test_max_depth_zero_only_allows_start(self):
+        """max_depth=0 should only allow the starting page."""
+        crawler = self.create_crawler(max_depth=0)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/page', depth=0))
+        self.assertFalse(crawler._should_crawl('https://example.com/page', depth=1))
+    
+    # -------------------------------------------------------------------------
+    # Same path restriction tests
+    # -------------------------------------------------------------------------
+    
+    def test_same_path_allows_under_base_path(self):
+        """Should allow URLs under the base path when same_path=True."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/docs/',
+            same_path=True
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/'))
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/api'))
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/guide/intro'))
+    
+    def test_same_path_skips_outside_base_path(self):
+        """Should skip URLs outside the base path when same_path=True."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/docs/',
+            same_path=True
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertFalse(crawler._should_crawl('https://example.com/other'))
+        self.assertFalse(crawler._should_crawl('https://example.com/'))
+        self.assertFalse(crawler._should_crawl('https://example.com/blog/post'))
+    
+    def test_same_path_false_allows_any_path(self):
+        """Should allow any path when same_path=False."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/docs/',
+            same_path=False
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/other'))
+        self.assertTrue(crawler._should_crawl('https://example.com/'))
+    
+    def test_same_path_handles_trailing_slashes(self):
+        """Should handle trailing slashes correctly in path matching."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/docs',  # No trailing slash
+            same_path=True
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        # Both with and without trailing slash should work
+        self.assertTrue(crawler._should_crawl('https://example.com/docs'))
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/'))
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/api'))
+    
+    def test_same_path_root_allows_all(self):
+        """Root path with same_path should allow entire domain."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/',
+            same_path=True
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        # Root path should disable same_path restriction
+        self.assertTrue(crawler._should_crawl('https://example.com/anything'))
+        self.assertTrue(crawler._should_crawl('https://example.com/deep/nested/path'))
+    
+    # -------------------------------------------------------------------------
+    # Stay on domain tests
+    # -------------------------------------------------------------------------
+    
+    def test_stay_on_domain_allows_same_domain(self):
+        """Should allow URLs on the same domain when stay_on_domain=True."""
+        crawler = self.create_crawler(stay_on_domain=True)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/page'))
+        self.assertTrue(crawler._should_crawl('https://example.com/other/path'))
+    
+    def test_stay_on_domain_skips_external_domain(self):
+        """Should skip URLs on external domains when stay_on_domain=True."""
+        crawler = self.create_crawler(stay_on_domain=True)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertFalse(crawler._should_crawl('https://other.com/page'))
+        self.assertFalse(crawler._should_crawl('https://external.example.org/'))
+    
+    def test_stay_on_domain_skips_subdomain(self):
+        """Should skip URLs on different subdomains when stay_on_domain=True."""
+        crawler = self.create_crawler(
+            base_url='https://example.com/',
+            stay_on_domain=True
+        )
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        # Subdomains are different domains
+        self.assertFalse(crawler._should_crawl('https://sub.example.com/page'))
+        self.assertFalse(crawler._should_crawl('https://blog.example.com/'))
+    
+    def test_stay_on_domain_false_allows_external(self):
+        """Should allow external domains when stay_on_domain=False."""
+        crawler = self.create_crawler(stay_on_domain=False)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://other.com/page'))
+    
+    # -------------------------------------------------------------------------
+    # Download/archive path tests
+    # -------------------------------------------------------------------------
+    
+    def test_skips_download_path(self):
+        """Should skip URLs with /download/ in path."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/download/file'))
+        self.assertFalse(self.crawler._should_crawl('https://example.com/downloads/archive'))
+    
+    def test_skips_archive_path(self):
+        """Should skip URLs with /archive/ in path."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/archive/old'))
+        self.assertFalse(self.crawler._should_crawl('https://example.com/archives/2020'))
+    
+    def test_skips_releases_path(self):
+        """Should skip URLs with /releases/ in path."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/releases/v1.0'))
+        self.assertFalse(self.crawler._should_crawl('https://example.com/release/latest'))
+    
+    def test_skips_dist_path(self):
+        """Should skip URLs with /dist/ in path."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/dist/package.tar.gz'))
+    
+    def test_skips_packages_path(self):
+        """Should skip URLs with /packages/ in path."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/packages/mylib'))
+    
+    def test_allows_normal_doc_paths(self):
+        """Should allow normal documentation paths."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/docs/api'))
+        self.assertTrue(self.crawler._should_crawl('https://example.com/guide/intro'))
+        self.assertTrue(self.crawler._should_crawl('https://example.com/reference/classes'))
+    
+    # -------------------------------------------------------------------------
+    # Robots.txt compliance tests
+    # -------------------------------------------------------------------------
+    
+    def test_respects_robots_disallow(self):
+        """Should skip URLs disallowed by robots.txt."""
+        self.crawler.robots.can_fetch = Mock(return_value=False)
+        self.assertFalse(self.crawler._should_crawl('https://example.com/private'))
+    
+    def test_allows_robots_allow(self):
+        """Should allow URLs allowed by robots.txt."""
+        self.crawler.robots.can_fetch = Mock(return_value=True)
+        self.assertTrue(self.crawler._should_crawl('https://example.com/public'))
+    
+    # -------------------------------------------------------------------------
+    # Custom URL filter tests
+    # -------------------------------------------------------------------------
+    
+    def test_custom_filter_blocks_url(self):
+        """Should respect custom url_filter returning False."""
+        def block_admin(url):
+            return '/admin/' not in url
+        
+        crawler = self.create_crawler(url_filter=block_admin)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertFalse(crawler._should_crawl('https://example.com/admin/panel'))
+        self.assertTrue(crawler._should_crawl('https://example.com/docs/'))
+    
+    def test_custom_filter_allows_url(self):
+        """Should respect custom url_filter returning True."""
+        def allow_all(url):
+            return True
+        
+        crawler = self.create_crawler(url_filter=allow_all)
+        crawler.robots.can_fetch = Mock(return_value=True)
+        
+        self.assertTrue(crawler._should_crawl('https://example.com/anything'))
+    
+    # -------------------------------------------------------------------------
+    # Edge cases
+    # -------------------------------------------------------------------------
+    
+    def test_empty_path(self):
+        """Should handle URLs with empty path."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com'))
+    
+    def test_root_path(self):
+        """Should handle root path URL."""
+        self.assertTrue(self.crawler._should_crawl('https://example.com/'))
+    
+    def test_case_insensitive_extension(self):
+        """Should handle extensions case-insensitively."""
+        self.assertFalse(self.crawler._should_crawl('https://example.com/image.PNG'))
+        self.assertFalse(self.crawler._should_crawl('https://example.com/file.ZIP'))
+        self.assertFalse(self.crawler._should_crawl('https://example.com/video.MP4'))
 
 
 # ============================================================================
