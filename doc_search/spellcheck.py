@@ -49,7 +49,7 @@ def levenshtein_distance(s1: str, s2: str) -> int:
     return prev_row[m]
 
 
-def damerau_levenshtein_distance(s1: str, s2: str) -> int:
+def damerau_levenshtein_distance(s1: str, s2: str, max_distance: int = -1) -> int:
     """
     Calculate Damerau-Levenshtein distance (allows transpositions).
     
@@ -59,11 +59,17 @@ def damerau_levenshtein_distance(s1: str, s2: str) -> int:
     Args:
         s1: First string
         s2: Second string
+        max_distance: If positive, return early if distance exceeds this value
         
     Returns:
         Minimum number of edits including transpositions.
+        If max_distance is set and exceeded, returns max_distance + 1.
     """
     m, n = len(s1), len(s2)
+    
+    # Early termination: if length difference exceeds max_distance, no need to compute
+    if max_distance >= 0 and abs(m - n) > max_distance:
+        return max_distance + 1
     
     # Create distance matrix
     d = [[0] * (n + 1) for _ in range(m + 1)]
@@ -75,6 +81,9 @@ def damerau_levenshtein_distance(s1: str, s2: str) -> int:
         d[0][j] = j
     
     for i in range(1, m + 1):
+        # Early termination: track row minimum
+        row_min = m + n  # Initialize to max possible
+        
         for j in range(1, n + 1):
             cost = 0 if s1[i - 1] == s2[j - 1] else 1
             
@@ -89,6 +98,12 @@ def damerau_levenshtein_distance(s1: str, s2: str) -> int:
                 s1[i - 1] == s2[j - 2] and 
                 s1[i - 2] == s2[j - 1]):
                 d[i][j] = min(d[i][j], d[i - 2][j - 2] + cost)
+            
+            row_min = min(row_min, d[i][j])
+        
+        # Early termination: if entire row exceeds max_distance, bail out
+        if max_distance >= 0 and row_min > max_distance:
+            return max_distance + 1
     
     return d[m][n]
 
@@ -177,10 +192,12 @@ class SpellChecker:
         
         suggestions = []
         candidates = self._get_candidates(word)
+        max_dist = self.max_distance
         
         for candidate in candidates:
-            distance = damerau_levenshtein_distance(word, candidate)
-            if distance <= self.max_distance:
+            # Use early termination to skip candidates that are too far
+            distance = damerau_levenshtein_distance(word, candidate, max_distance=max_dist)
+            if distance <= max_dist:
                 suggestions.append((candidate, distance))
         
         # Sort by distance, then alphabetically

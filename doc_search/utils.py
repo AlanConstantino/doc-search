@@ -322,6 +322,10 @@ STOP_WORDS = frozenset([
 ])
 
 
+# Pre-compiled regex pattern for tokenization (avoids repeated compilation)
+_WORD_PATTERN = re.compile(r'\b[a-z][a-z0-9_]*\b')
+
+
 def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
@@ -377,12 +381,12 @@ def tokenize(text: str, apply_stemming: bool = False) -> list:
         - Email addresses and URLs are split at punctuation
         - Non-ASCII characters are ignored (English-only tokenization)
     """
-    # Convert to lowercase and extract words
-    # Pattern: start with letter, followed by letters/digits/underscores
-    words = re.findall(r'\b[a-z][a-z0-9_]*\b', text.lower())
+    # Convert to lowercase and extract words using pre-compiled pattern
+    words = _WORD_PATTERN.findall(text.lower())
     
     # Filter out stop words and single-character words
-    tokens = [w for w in words if w not in STOP_WORDS and len(w) > 1]
+    # Using set membership check (STOP_WORDS is already a frozenset)
+    tokens = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
     
     # Apply stemming if requested
     if apply_stemming:

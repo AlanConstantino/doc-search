@@ -9,13 +9,33 @@ This module contains:
 """
 
 import re
-from typing import List, Dict, Any, Optional, Set
+from functools import lru_cache
+from typing import List, Dict, Any, Optional, Set, FrozenSet, Pattern
 
 from .utils import highlight_match, style_title, style_url, style_score, style_number, style_info, style_success
 from .constants import (
     DEFAULT_SNIPPET_LENGTH, MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH,
     SNIPPET_WINDOW_WORDS, PHRASE_MATCH_BONUS, TERM_DIVERSITY_BONUS
 )
+
+
+@lru_cache(maxsize=256)
+def _compile_terms_pattern(terms: FrozenSet[str]) -> Pattern:
+    """
+    Compile a regex pattern for a set of terms.
+    
+    Uses LRU cache to avoid recompiling the same pattern repeatedly.
+    
+    Args:
+        terms: Frozen set of terms to match
+        
+    Returns:
+        Compiled regex pattern
+    """
+    # Sort by length (longest first) to match longer terms before shorter ones
+    sorted_terms = sorted(terms, key=len, reverse=True)
+    pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted_terms) + r')\b'
+    return re.compile(pattern, re.IGNORECASE)
 
 
 def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
@@ -33,8 +53,9 @@ def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
     if not terms or not text:
         return text
     
-    # Build pattern for all terms
-    term_pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted(terms, key=len, reverse=True)) + r')\b'
+    # Convert to frozenset for caching
+    terms_frozen = frozenset(terms)
+    pattern = _compile_terms_pattern(terms_frozen)
     
     def replacer(match):
         word = match.group(0)
@@ -42,7 +63,7 @@ def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
             return f"{marker}{word}{marker}"
         return word
     
-    return re.sub(term_pattern, replacer, text, flags=re.IGNORECASE)
+    return pattern.sub(replacer, text)
 
 
 def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
@@ -59,8 +80,9 @@ def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
     if not terms or not text:
         return text
     
-    # Build pattern for all terms
-    term_pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted(terms, key=len, reverse=True)) + r')\b'
+    # Use cached pattern compilation
+    terms_frozen = frozenset(terms)
+    pattern = _compile_terms_pattern(terms_frozen)
     
     def replacer(match):
         word = match.group(0)
@@ -68,7 +90,23 @@ def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
             return highlight_match(word)
         return word
     
-    return re.sub(term_pattern, replacer, text, flags=re.IGNORECASE)
+    return pattern.sub(replacer, text)
+
+
+@lru_cache(maxsize=128)
+def _compile_phrase_pattern(phrase_words: tuple) -> Pattern:
+    """
+    Compile a regex pattern for phrase matching.
+    
+    Args:
+        phrase_words: Tuple of words to match in order
+        
+    Returns:
+        Compiled regex pattern
+    """
+    pattern_parts = [re.escape(word) for word in phrase_words]
+    pattern = r'\b' + r'\s+'.join(pattern_parts) + r'\b'
+    return re.compile(pattern, re.IGNORECASE)
 
 
 def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
@@ -92,11 +130,13 @@ def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
     if not text:
         return False
     
-    # Build regex pattern: words separated by whitespace only
-    pattern_parts = [re.escape(word) for word in phrase_words]
-    pattern = r'\b' + r'\s+'.join(pattern_parts) + r'\b'
-    
-    return bool(re.search(pattern, text.lower()))
+    # Use cached pattern compilation
+    pattern = _compile_phrase_pattern(tuple(phrase_words))
+    return bool(pattern.search(text.lower()))
+
+
+# Pre-compiled pattern for snippet word matching
+_SNIPPET_WORD_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]*\b')
 
 
 def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]], 
@@ -127,9 +167,8 @@ def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
     if len(text) <= snippet_length:
         return text
     
-    # Tokenize text with positions
-    word_pattern = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]*\b')
-    matches = list(word_pattern.finditer(text))
+    # Tokenize text with positions using pre-compiled pattern
+    matches = list(_SNIPPET_WORD_PATTERN.finditer(text))
     
     if not matches:
         return text[:snippet_length] + '...'

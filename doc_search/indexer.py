@@ -5,6 +5,7 @@ Search index building with BM25 scoring.
 import json
 import gzip
 import math
+from operator import itemgetter
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Any, Optional, Iterator
@@ -197,29 +198,41 @@ class BM25Index:
         # Guard against zero avg_doc_length
         avg_dl = self.avg_doc_length if self.avg_doc_length > 0 else 1.0
         
+        # Pre-compute constants for BM25 formula
+        k1 = self.k1
+        b = self.b
+        k1_plus_1 = k1 + 1
+        one_minus_b = 1 - b
+        b_div_avg_dl = b / avg_dl
+        
+        # Cache doc_lengths for faster lookup
+        doc_lengths = self.doc_lengths
+        index = self.index
+        
         for term in query_terms:
-            if term not in self.index:
+            postings = index.get(term)
+            if postings is None:
                 continue
             
             idf = self._idf(term)
             
-            for doc_id, term_freq in self.index[term]:
-                doc_length = self.doc_lengths[doc_id]
+            for doc_id, term_freq in postings:
+                doc_length = doc_lengths[doc_id]
                 
-                # BM25 scoring formula
-                numerator = term_freq * (self.k1 + 1)
-                denominator = term_freq + self.k1 * (
-                    1 - self.b + self.b * (doc_length / avg_dl)
-                )
+                # BM25 scoring formula (optimized)
+                numerator = term_freq * k1_plus_1
+                denominator = term_freq + k1 * (one_minus_b + b_div_avg_dl * doc_length)
                 
                 scores[doc_id] += idf * (numerator / denominator)
         
-        # Sort by score and get top results
-        sorted_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        # Sort by score and get top results using itemgetter (faster than lambda)
+        sorted_docs = sorted(scores.items(), key=itemgetter(1), reverse=True)[:top_k]
         
+        # Build results with cached document lookups
+        documents = self.documents
         results = []
         for doc_id, score in sorted_docs:
-            doc = self.documents[doc_id]
+            doc = documents[doc_id]
             results.append({
                 'url': doc['url'],
                 'title': doc['title'],
