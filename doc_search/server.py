@@ -1108,6 +1108,13 @@ class SearchHandler(BaseHTTPRequestHandler):
         if query:
             # Perform search - fetch enough for pagination
             search_start = time.perf_counter()
+            
+            # For exact match, wrap query in quotes for phrase matching
+            # (unless it's already quoted)
+            search_query = query
+            if exact_match and not (query.startswith('"') and query.endswith('"')):
+                search_query = f'"{query}"'
+            
             # Pass expand_synonyms if enabled and engine supports it
             # Exact match disables synonym expansion
             use_synonyms = self.enable_synonyms and not exact_match
@@ -1115,11 +1122,11 @@ class SearchHandler(BaseHTTPRequestHandler):
                 import inspect
                 sig = inspect.signature(self.engine.search)
                 if 'expand_synonyms' in sig.parameters:
-                    all_results = self.engine.search(query, top_k=max_results, expand_synonyms=True)
+                    all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
                 else:
-                    all_results = self.engine.search(query, top_k=max_results)
+                    all_results = self.engine.search(search_query, top_k=max_results)
             else:
-                all_results = self.engine.search(query, top_k=max_results)
+                all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
             
             # Get facet counts before filtering (for accurate counts)
