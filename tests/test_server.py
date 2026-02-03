@@ -51,12 +51,13 @@ class MockSearchEngine:
 
 
 class MockEnhancedSearchEngine(MockSearchEngine):
-    """Mock EnhancedSearchEngine with autocomplete and spell check support."""
+    """Mock EnhancedSearchEngine with autocomplete, spell check, and facet support."""
     
     def __init__(self, results: Optional[List[Dict[str, Any]]] = None,
                  stats: Optional[Dict[str, Any]] = None,
                  autocomplete_suggestions: Optional[List[str]] = None,
-                 spelling_suggestion: Optional[str] = None):
+                 spelling_suggestion: Optional[str] = None,
+                 facet_counts: Optional[Dict[str, Dict[str, int]]] = None):
         """
         Create mock enhanced search engine.
         
@@ -65,10 +66,12 @@ class MockEnhancedSearchEngine(MockSearchEngine):
             stats: Stats dict to return from get_stats()
             autocomplete_suggestions: List of suggestions to return
             spelling_suggestion: Spelling suggestion to return (or None)
+            facet_counts: Facet counts to return from get_facet_counts()
         """
         super().__init__(results, stats)
         self._autocomplete_suggestions = autocomplete_suggestions or []
         self._spelling_suggestion = spelling_suggestion
+        self._facet_counts = facet_counts or {}
     
     def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
         """Return mock autocomplete suggestions."""
@@ -78,6 +81,10 @@ class MockEnhancedSearchEngine(MockSearchEngine):
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
         """Return mock spelling suggestion."""
         return self._spelling_suggestion
+    
+    def get_facet_counts(self, results: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+        """Return mock facet counts."""
+        return self._facet_counts
 
 
 def get_free_port() -> int:
@@ -1139,6 +1146,230 @@ class TestSuggestEndpointNoSupport(ServerTestCase):
         
         self.assertIn('error', data)
         self.assertIn('not available', data['error'].lower())
+
+
+# ============================================================================
+# Issue #151: Faceted Search Tests
+# ============================================================================
+
+class TestRenderPageFacets(unittest.TestCase):
+    """Tests for facet filter rendering."""
+    
+    def test_renders_facets_when_provided(self):
+        """Should render facet filter bar when facets provided."""
+        facets = {'category': {'api': 10, 'tutorial': 5, 'guide': 3}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            total_results=18
+        )
+        
+        self.assertIn('facet-filters', html)
+        self.assertIn('api', html)
+        self.assertIn('tutorial', html)
+        self.assertIn('guide', html)
+    
+    def test_facet_buttons_are_links(self):
+        """Facet buttons should be clickable links."""
+        facets = {'category': {'api': 10, 'tutorial': 5}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            total_results=15
+        )
+        
+        self.assertIn('href="/?q=python&category=api"', html)
+        self.assertIn('href="/?q=python&category=tutorial"', html)
+    
+    def test_active_facet_highlighted(self):
+        """Active facet should have active class."""
+        facets = {'category': {'api': 10, 'tutorial': 5}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            active_facet='api',
+            total_results=10
+        )
+        
+        # The api button should have active class
+        self.assertIn('class="facet-btn active"', html)
+    
+    def test_all_button_clears_filter(self):
+        """All button should link to query without facet."""
+        facets = {'category': {'api': 10, 'tutorial': 5}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            active_facet='api',
+            total_results=10,
+            total_unfiltered=15
+        )
+        
+        # Should have "All" button without category param
+        self.assertIn('href="/?q=python"', html)
+        self.assertIn('>All <', html)
+    
+    def test_facet_counts_shown(self):
+        """Facet counts should be displayed."""
+        facets = {'category': {'api': 10, 'tutorial': 5}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            total_results=15
+        )
+        
+        self.assertIn('10', html)
+        self.assertIn('5', html)
+    
+    def test_no_facets_when_single_category(self):
+        """Should not show facets when only one category."""
+        facets = {'category': {'api': 10}}
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=facets,
+            total_results=10
+        )
+        
+        # Shouldn't show facet bar div with only one category
+        self.assertNotIn('<div class="facet-filters">', html)
+    
+    def test_no_facets_when_none(self):
+        """Should not show facets when None."""
+        html = render_page(
+            query='python',
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}],
+            facets=None,
+            total_results=1
+        )
+        
+        self.assertNotIn('<div class="facet-filters">', html)
+    
+    def test_pagination_preserves_facet(self):
+        """Pagination links should preserve active facet."""
+        facets = {'category': {'api': 25, 'tutorial': 15}}
+        html = render_page(
+            query='python',
+            results=[{'url': f'http://test{i}', 'title': f'Test {i}', 'score': 1.0} for i in range(10)],
+            facets=facets,
+            active_facet='api',
+            total_results=25,
+            page=1,
+            per_page=10
+        )
+        
+        # Pagination link should include category parameter
+        self.assertIn('page=2&category=api', html)
+
+
+class TestServerFacetedSearch(ServerTestCase):
+    """Tests for faceted search in server responses."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with facet-enabled engine."""
+        # Results with facets
+        mock_results = [
+            {'url': 'http://test1', 'title': 'API Doc 1', 'score': 2.0, 'facets': {'category': 'api'}},
+            {'url': 'http://test2', 'title': 'API Doc 2', 'score': 1.8, 'facets': {'category': 'api'}},
+            {'url': 'http://test3', 'title': 'Tutorial 1', 'score': 1.5, 'facets': {'category': 'tutorial'}},
+        ]
+        cls.engine = MockEnhancedSearchEngine(
+            results=mock_results,
+            facet_counts={'category': {'api': 2, 'tutorial': 1}}
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_facets_shown_in_results(self):
+        """Should show facet filter bar with results."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('facet-filters', body)
+        self.assertIn('api', body)
+        self.assertIn('tutorial', body)
+    
+    def test_facet_filter_applied(self):
+        """Clicking facet should filter results."""
+        status, headers, body = self.make_request('/?q=test&category=api')
+        
+        self.assertEqual(status, 200)
+        # Should show API docs
+        self.assertIn('API Doc', body)
+        # Should show 2 results (filtered)
+        self.assertIn('Found 2 result', body)
+
+
+class TestServerFacetsDisabled(ServerTestCase):
+    """Tests when facets are disabled."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with facets disabled."""
+        mock_results = [
+            {'url': 'http://test1', 'title': 'Test 1', 'score': 1.0, 'facets': {'category': 'api'}},
+        ]
+        cls.engine = MockEnhancedSearchEngine(
+            results=mock_results,
+            facet_counts={'category': {'api': 1}}
+        )
+        cls.start_server(engine=cls.engine, enable_facets=False)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_no_facets_when_disabled(self):
+        """Should not show facets when disabled."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertNotIn('<div class="facet-filters">', body)
+    
+    def test_facet_param_ignored_when_disabled(self):
+        """Facet parameter should be ignored when disabled."""
+        status, headers, body = self.make_request('/?q=test&category=api')
+        
+        self.assertEqual(status, 200)
+        # Should still show results without filtering
+        self.assertIn('Test 1', body)
+
+
+class TestServerFacetsNoSupport(ServerTestCase):
+    """Tests with basic engine (no facet support)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with basic engine."""
+        mock_results = [
+            {'url': 'http://test1', 'title': 'Test 1', 'score': 1.0},
+        ]
+        cls.engine = MockSearchEngine(results=mock_results)
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_works_without_facet_method(self):
+        """Server should work when engine lacks get_facet_counts."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('Test 1', body)
+        self.assertNotIn('<div class="facet-filters">', body)
 
 
 if __name__ == '__main__':
