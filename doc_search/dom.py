@@ -316,10 +316,10 @@ BOILERPLATE_ROLES: Set[str] = {
     'navigation', 'banner', 'contentinfo', 'complementary', 'search'
 }
 
-# Common boilerplate class/id patterns
+# Common boilerplate class/id patterns (generic, not framework-specific)
 BOILERPLATE_PATTERNS: Set[str] = {
     'nav', 'navbar', 'navigation', 'sidebar', 'menu', 'footer',
-    'header', 'related', 'breadcrumb', 'toc', 'sphinxsidebar'
+    'header', 'breadcrumb'
 }
 
 # Tags that indicate main content
