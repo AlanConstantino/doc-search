@@ -26,48 +26,12 @@ from ..constants import (
 from ..crawl_state import CrawlState
 from ..rate_limiter import RateLimiter
 from .fetcher import Fetcher
-
-
-# Extensions that should never be crawled (archives, media, binaries)
-SKIP_EXTENSIONS = frozenset([
-    # Archives
-    '.tar', '.gz', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz',
-    '.zip', '.rar', '.7z', '.bz2', '.xz', '.lz', '.lzma',
-    # Documents (excluded by default, can be enabled with extract_docs=True)
-    '.epub', '.mobi', '.ppt', '.pptx', '.odt', '.ods', '.odp',
-    # Images
-    '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico', '.webp',
-    '.bmp', '.tiff', '.tif', '.psd', '.ai', '.eps',
-    # Media
-    '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
-    '.wav', '.ogg', '.webm', '.m4a', '.m4v',
-    # Code/data files (usually not documentation)
-    '.css', '.js', '.json', '.xml', '.rss', '.atom',
-    '.woff', '.woff2', '.ttf', '.eot', '.otf',
-    # Executables and packages
-    '.exe', '.msi', '.dmg', '.pkg', '.deb', '.rpm',
-    '.whl', '.egg', '.jar', '.war', '.apk', '.ipa',
-    # Source archives
-    '.asc', '.sig', '.sha256', '.md5',
-])
-
-# Document extensions that can be extracted (when extract_docs=True)
-EXTRACTABLE_DOC_EXTENSIONS = frozenset([
-    '.pdf',
-    '.doc', '.docx',
-    '.xls', '.xlsx',
-])
-
-# URL path patterns that indicate non-documentation content
-SKIP_PATH_PATTERNS = [
-    '/download/', '/downloads/',
-    '/archive/', '/archives/',
-    '/releases/', '/release/',
-    '/dist/', '/ftp/',
-    '/source/', '/sources/',
-    '/packages/', '/pkg/',
-    '/binaries/', '/bin/',
-]
+from .url_filter import (
+    SKIP_EXTENSIONS,
+    EXTRACTABLE_DOC_EXTENSIONS,
+    SKIP_PATH_PATTERNS,
+    UrlFilter,
+)
 
 
 class Crawler:
@@ -168,6 +132,20 @@ class Crawler:
             log_func=self._log,
             stats_callback=self._update_stat
         )
+        
+        # Initialize URL filter
+        self._url_filter = UrlFilter(
+            base_url=base_url,
+            robots_checker=self.robots,
+            stay_on_domain=stay_on_domain,
+            same_path=same_path,
+            extract_docs=extract_docs,
+            max_depth=max_depth,
+            url_filter=url_filter,
+        )
+        # Sync base_path and same_path from UrlFilter (it may adjust for root paths)
+        self.base_path = self._url_filter.base_path
+        self.same_path = self._url_filter.same_path
     
     def _log(self, message: str):
         """Print message if verbose mode is enabled (thread-safe)."""
@@ -215,102 +193,28 @@ class Crawler:
     
     def _is_skippable_extension(self, url: str) -> bool:
         """Check if URL has an extension that should be skipped."""
-        parsed = urlparse(url)
-        path = parsed.path.lower()
-        
-        # Check each skip extension
-        for ext in SKIP_EXTENSIONS:
-            if path.endswith(ext):
-                return True
-        
-        # Check extractable document extensions
-        # Skip them unless extract_docs is enabled
-        if not self.extract_docs:
-            for ext in EXTRACTABLE_DOC_EXTENSIONS:
-                if path.endswith(ext):
-                    return True
-        
-        # Handle compound extensions like .tar.gz
-        if '.tar.' in path:
-            return True
-        
-        return False
+        return self._url_filter.is_skippable_extension(url)
     
     def _is_extractable_doc(self, url: str) -> bool:
         """Check if URL is an extractable document (PDF, DOCX, etc.)."""
-        parsed = urlparse(url)
-        path = parsed.path.lower()
-        for ext in EXTRACTABLE_DOC_EXTENSIONS:
-            if path.endswith(ext):
-                return True
-        return False
+        return self._url_filter.is_extractable_doc(url)
     
     def _is_skippable_path(self, url: str) -> bool:
         """Check if URL path indicates non-documentation content."""
-        parsed = urlparse(url)
-        path = parsed.path.lower()
-        
-        for pattern in SKIP_PATH_PATTERNS:
-            if pattern in path:
-                return True
-        
-        return False
+        return self._url_filter.is_skippable_path(url)
     
     def _is_under_base_path(self, url: str) -> bool:
         """Check if URL is under the base path."""
-        if not self.same_path:
-            return True
-        
-        if not self.base_path:
-            return True
-        
-        parsed = urlparse(url)
-        url_path = parsed.path.rstrip('/')
-        
-        # URL must start with base_path
-        # e.g., base_path="/3.11" should match "/3.11", "/3.11/", "/3.11/library/", etc.
-        if url_path == self.base_path:
-            return True
-        if url_path.startswith(self.base_path + '/'):
-            return True
-        
-        return False
+        return self._url_filter.is_under_base_path(url)
     
     def _should_crawl(self, url: str, depth: int = 0, force: bool = False) -> bool:
         """Check if URL should be crawled."""
-        # Already visited (skip in incremental mode with force=True)
-        if not force and self.state.is_visited(url):
-            return False
-        
-        # Depth check
-        if self.max_depth is not None and depth > self.max_depth:
-            return False
-        
-        # Skip non-HTML extensions
-        if self._is_skippable_extension(url):
-            return False
-        
-        # Skip obvious non-doc paths
-        if self._is_skippable_path(url):
-            return False
-        
-        # Domain check
-        if self.stay_on_domain and not is_same_domain(url, self.base_url):
-            return False
-        
-        # Path prefix check (the critical bug fix!)
-        if not self._is_under_base_path(url):
-            return False
-        
-        # Robots.txt check
-        if not self.robots.can_fetch(url):
-            return False
-        
-        # Custom filter
-        if self.url_filter and not self.url_filter(url):
-            return False
-        
-        return True
+        return self._url_filter.should_follow(
+            url,
+            depth=depth,
+            is_visited_func=self.state.is_visited,
+            force=force,
+        )
     
     def _save_page(self, url: str, data: dict):
         """Save page data to disk."""
