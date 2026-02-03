@@ -352,13 +352,26 @@ a:hover {
 }
 
 .result-score {
-    background: var(--bg-tertiary);
-    color: var(--warning);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    font-family: monospace;
+    color: var(--text-muted);
+}
+
+.result-score-bar {
+    width: 40px;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.result-score-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.2s ease;
 }
 
 .result-url {
@@ -738,7 +751,11 @@ def render_page(
                 snippet = highlight_snippet(r.get('snippet', '') or r.get('description', ''))
                 score = r.get('score', 0)
                 
-                score_html = f'<span class="result-score">{score:.2f}</span>' if show_scores else ''
+                # Visual score bar (normalize to percentage, cap at 100%)
+                score_pct = min(100, int(score * 100))
+                score_html = f'''<span class="result-score" title="Score: {score:.2f}">
+                    <span class="result-score-bar"><span class="result-score-fill" style="width: {score_pct}%"></span></span>
+                </span>''' if show_scores else ''
                 
                 snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
                 
@@ -762,11 +779,17 @@ def render_page(
                 facet_param = f'&category={urllib.parse.quote(active_facet)}' if active_facet else ''
                 results_html += '<div class="pagination">'
                 
+                # First link
+                if page > 1:
+                    results_html += f'<a href="/?q={encoded_query}&page=1{facet_param}">« First</a>'
+                else:
+                    results_html += '<span class="disabled">« First</span>'
+                
                 # Previous link
                 if page > 1:
-                    results_html += f'<a href="/?q={encoded_query}&page={page-1}{facet_param}">← Previous</a>'
+                    results_html += f'<a href="/?q={encoded_query}&page={page-1}{facet_param}">← Prev</a>'
                 else:
-                    results_html += '<span class="disabled">← Previous</span>'
+                    results_html += '<span class="disabled">← Prev</span>'
                 
                 # Page numbers (show up to 7 pages centered on current)
                 start_page = max(1, page - 3)
@@ -793,6 +816,12 @@ def render_page(
                     results_html += f'<a href="/?q={encoded_query}&page={page+1}{facet_param}">Next →</a>'
                 else:
                     results_html += '<span class="disabled">Next →</span>'
+                
+                # Last link
+                if page < total_pages:
+                    results_html += f'<a href="/?q={encoded_query}&page={total_pages}{facet_param}">Last »</a>'
+                else:
+                    results_html += '<span class="disabled">Last »</span>'
                 
                 results_html += '</div>'
         else:
@@ -910,6 +939,7 @@ def render_page(
                     autocomplete="off"
                     minlength="1"
                     maxlength="200"
+                    accesskey="s"
                     autofocus
                 >
                 <button type="submit" class="search-button">Search</button>
