@@ -6,6 +6,7 @@ Uses only Python standard library (http.server).
 """
 
 import html
+import os
 import time
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -14,6 +15,27 @@ from typing import Optional, List, Dict, Any
 
 from .searcher import SearchEngine, parse_query
 from . import __version__
+
+# Emoji fallbacks for systems without emoji support
+# Set DOC_SEARCH_NO_EMOJI=1 to use ASCII alternatives
+_NO_EMOJI = os.environ.get('DOC_SEARCH_NO_EMOJI', '').lower() in ('1', 'true', 'yes')
+
+_EMOJI_MAP = {
+    'search': ('🔍', '[*]'),
+    'docs': ('📄', '[-]'),
+    'terms': ('🔤', '[#]'),
+    'check': ('✓', '>'),
+    'bulb': ('💡', '*'),
+    'moon': ('🌙', '[D]'),
+    'sun': ('☀️', '[L]'),
+    'palette': ('🎨', ''),
+    'books': ('📚', '[=]'),
+}
+
+def _e(name: str) -> str:
+    """Get emoji or ASCII fallback based on DOC_SEARCH_NO_EMOJI env var."""
+    emoji, fallback = _EMOJI_MAP.get(name, ('', ''))
+    return fallback if _NO_EMOJI else emoji
 
 
 # ============================================================================
@@ -676,7 +698,7 @@ def render_page(
         encoded_suggestion = urllib.parse.quote(suggestion)
         suggestion_html = f'''
         <div class="spell-suggestion">
-            <span class="spell-suggestion-icon">💡</span>
+            <span class="spell-suggestion-icon">{_e('bulb')}</span>
             <span class="spell-suggestion-text">Did you mean:</span>
             <a href="/?q={encoded_suggestion}" class="spell-suggestion-link">{escape(suggestion)}</a>?
         </div>
@@ -692,7 +714,7 @@ def render_page(
             
             results_html = f'''
             <div class="results-info">
-                <span class="results-count">✓ Found {total_results} result{"s" if total_results != 1 else ""}</span>
+                <span class="results-count">{_e('check')} Found {total_results} result{"s" if total_results != 1 else ""}</span>
                 <span class="results-time">in {elapsed_ms:.1f}ms</span>
                 <span class="results-query">showing {start_num}-{end_num} for "{escape(query)}"</span>
             </div>
@@ -761,24 +783,24 @@ def render_page(
                 
                 results_html += '</div>'
         else:
-            results_html = suggestion_html + '''
+            results_html = suggestion_html + f'''
             <div class="no-results">
-                <div class="no-results-icon">🔍</div>
+                <div class="no-results-icon">{_e('search')}</div>
                 <div>No results found. Try different keywords.</div>
             </div>
             '''
     else:
         # Welcome state
-        results_html = '''
+        results_html = f'''
         <div class="welcome">
-            <div class="welcome-icon">📚</div>
+            <div class="welcome-icon">{_e('books')}</div>
             <div class="welcome-title">Search Documentation</div>
             <div class="welcome-description">
                 Enter your search query above to find relevant documentation pages.
             </div>
         </div>
         <div class="tips">
-            <div class="tips-title">💡 Search tips</div>
+            <div class="tips-title">{_e('bulb')} Search tips</div>
             <div class="tips-list">
                 <div class="tip">Use quotes for exact phrases: <code>"list comprehension"</code></div>
                 <div class="tip">Combine terms: <code>async await python</code></div>
@@ -837,8 +859,8 @@ def render_page(
                     </label>
                 </div>
                 <div class="theme-toggle">
-                    <a href="{dark_url}" class="{dark_class}" title="Dark theme">🌙</a>
-                    <a href="{light_url}" class="{light_class}" title="Light theme">☀️</a>
+                    <a href="{dark_url}" class="{dark_class}" title="Dark theme">{_e('moon')}</a>
+                    <a href="{light_url}" class="{light_class}" title="Light theme">{_e('sun')}</a>
                 </div>
             </div>
     '''
@@ -855,7 +877,7 @@ def render_page(
     <header class="header">
         <div class="header-content">
             <a href="/" class="logo">
-                <span class="logo-icon">🔍</span>
+                <span class="logo-icon">{_e('search')}</span>
                 <span>doc-search</span>
             </a>
             <span class="version">v{__version__}</span>
@@ -884,12 +906,12 @@ def render_page(
     <footer class="footer">
         <div class="footer-stats">
             <div class="stat">
-                <span>📄</span>
+                <span>{_e('docs')}</span>
                 <span class="stat-value">{total_docs:,}</span>
                 <span>documents</span>
             </div>
             <div class="stat">
-                <span>🔤</span>
+                <span>{_e('terms')}</span>
                 <span class="stat-value">{unique_terms:,}</span>
                 <span>terms</span>
             </div>

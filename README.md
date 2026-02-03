@@ -117,6 +117,18 @@ Press `Ctrl+C` to stop the server.
 --synonyms           # Enable synonym expansion
 ```
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DOC_SEARCH_NO_EMOJI` | Set to `1`, `true`, or `yes` to use ASCII fallbacks instead of emoji (for systems without emoji fonts) |
+
+Example:
+```bash
+export DOC_SEARCH_NO_EMOJI=1
+python -m doc_search serve ~/.doc_search/sites/*/
+```
+
 ## PDF Extraction
 
 Extract and index text from PDF documents alongside HTML pages:

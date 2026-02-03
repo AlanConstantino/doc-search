@@ -17,6 +17,7 @@ API Usage:
 
 import getpass
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple
@@ -29,6 +30,30 @@ from ..utils import (
     Colors, style_success, style_error, style_info, style_title, style_url
 )
 from .. import __version__
+
+
+# Emoji fallbacks for systems without emoji support
+# Set DOC_SEARCH_NO_EMOJI=1 to use ASCII alternatives
+_NO_EMOJI = os.environ.get('DOC_SEARCH_NO_EMOJI', '').lower() in ('1', 'true', 'yes')
+
+_EMOJI_MAP = {
+    'bulb': ('💡', '*'),
+    'chart': ('📊', '#'),
+    'terms': ('🔤', 'T:'),
+    'globe': ('🌐', '@'),
+    'folder': ('📁', '>'),
+    'check': ('✓', '+'),
+    'cross': ('✗', 'x'),
+    'docs': ('📄', '-'),
+    'books': ('📚', 'D:'),
+    'ruler': ('📏', 'A:'),
+    'sparkles': ('✨', '*'),
+}
+
+def _e(name: str) -> str:
+    """Get emoji or ASCII fallback based on DOC_SEARCH_NO_EMOJI env var."""
+    emoji, fallback = _EMOJI_MAP.get(name, ('', ''))
+    return fallback if _NO_EMOJI else emoji
 
 
 # Default data directory
@@ -292,7 +317,7 @@ def cmd_search(args):
         
         # Show "Did you mean..." suggestion
         if suggestion and not args.quiet:
-            print(style_info(f'💡 Did you mean: "{suggestion}"?'))
+            print(style_info(f'{_e("bulb")} Did you mean: "{suggestion}"?'))
             print()
         
         print(format_results(
@@ -305,7 +330,7 @@ def cmd_search(args):
         
         # Show facet counts if available
         if facets and not args.quiet and getattr(args, 'show_facets', False):
-            print(style_info("📊 Facets:"))
+            print(style_info(f"{_e('chart')} Facets:"))
             for ftype, values in facets.items():
                 print(f"  {ftype}:")
                 for value, count in sorted(values.items(), key=lambda x: -x[1])[:5]:
@@ -384,15 +409,15 @@ def cmd_interactive(args):
     print(style_title("║") + "              " + style_success("doc-search") + " — Interactive Mode              " + style_title("║"))
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
-    print(f"  📚 {style_info(str(stats['total_documents']))} documents indexed")
-    print(f"  🔤 {style_info(str(stats['unique_terms']))} unique terms")
-    print(f"  📏 {style_info(str(stats['avg_document_length']))} avg terms per document")
+    print(f"  {_e('books')} {style_info(str(stats['total_documents']))} documents indexed")
+    print(f"  {_e('terms')} {style_info(str(stats['unique_terms']))} unique terms")
+    print(f"  {_e('ruler')} {style_info(str(stats['avg_document_length']))} avg terms per document")
     
     # Show enabled features
     features = stats.get('features', {})
     enabled = [k for k, v in features.items() if v]
     if enabled:
-        print(f"  ✨ Features: {', '.join(enabled)}")
+        print(f"  {_e('sparkles')} Features: {', '.join(enabled)}")
     
     print()
     print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
@@ -431,7 +456,7 @@ def cmd_interactive(args):
         
         # Show "Did you mean..." suggestion
         if suggestion:
-            print(style_info(f'💡 Did you mean: "{suggestion}"?'))
+            print(style_info(f'{_e("bulb")} Did you mean: "{suggestion}"?'))
             print()
         
         print(format_results(
@@ -626,9 +651,9 @@ def cmd_serve(args):
     print(style_title("║") + "              " + style_success("doc-search") + " — Web UI Server                 " + style_title("║"))
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
-    print(f"  🌐 Server running at: {style_url(url)}")
-    print(f"  📚 {style_info(str(stats['total_documents']))} documents indexed")
-    print(f"  🔤 {style_info(str(stats['unique_terms']))} unique terms")
+    print(f"  {_e('globe')} Server running at: {style_url(url)}")
+    print(f"  {_e('books')} {style_info(str(stats['total_documents']))} documents indexed")
+    print(f"  {_e('terms')} {style_info(str(stats['unique_terms']))} unique terms")
     print()
     print(style_info("  Press Ctrl+C to stop the server"))
     print()
