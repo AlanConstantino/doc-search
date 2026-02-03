@@ -50,6 +50,30 @@ class MockSearchEngine:
         return self._stats
 
 
+class MockEnhancedSearchEngine(MockSearchEngine):
+    """Mock EnhancedSearchEngine with autocomplete and spell check support."""
+    
+    def __init__(self, results: Optional[List[Dict[str, Any]]] = None,
+                 stats: Optional[Dict[str, Any]] = None,
+                 autocomplete_suggestions: Optional[List[str]] = None):
+        """
+        Create mock enhanced search engine.
+        
+        Args:
+            results: List of result dicts to return from search()
+            stats: Stats dict to return from get_stats()
+            autocomplete_suggestions: List of suggestions to return
+        """
+        super().__init__(results, stats)
+        self._autocomplete_suggestions = autocomplete_suggestions or []
+    
+    def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
+        """Return mock autocomplete suggestions."""
+        # Filter suggestions that start with prefix and limit
+        matching = [s for s in self._autocomplete_suggestions if s.startswith(prefix)]
+        return matching[:max_suggestions]
+
+
 def get_free_port() -> int:
     """Find an available port for testing."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -758,6 +782,172 @@ class TestHealthEndpointUnhealthy(ServerTestCase):
         data = json.loads(body)
         self.assertIn('reason', data)
         self.assertIn('documents', data['reason'].lower())
+
+
+# ============================================================================
+# Issue #150: Autocomplete / Suggest Endpoint Tests
+# ============================================================================
+
+class TestSuggestEndpoint(ServerTestCase):
+    """Tests for /suggest endpoint."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with mock autocomplete engine."""
+        cls.engine = MockEnhancedSearchEngine(
+            autocomplete_suggestions=[
+                'python', 'python async', 'python await', 'python class',
+                'python function', 'pytest', 'pypi'
+            ]
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_suggest_returns_200(self):
+        """GET /suggest should return 200 OK."""
+        status, headers, body = self.make_request('/suggest?q=py')
+        self.assertEqual(status, 200)
+    
+    def test_suggest_returns_json(self):
+        """GET /suggest should return JSON content type."""
+        status, headers, body = self.make_request('/suggest?q=py')
+        content_type = headers.get('Content-Type', '')
+        self.assertIn('application/json', content_type)
+    
+    def test_suggest_returns_suggestions(self):
+        """GET /suggest should return suggestions array."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py')
+        data = json.loads(body)
+        
+        self.assertIn('suggestions', data)
+        self.assertIsInstance(data['suggestions'], list)
+        self.assertTrue(len(data['suggestions']) > 0)
+    
+    def test_suggest_filters_by_prefix(self):
+        """Suggestions should match the prefix."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=python')
+        data = json.loads(body)
+        
+        # All suggestions should start with 'python'
+        for suggestion in data['suggestions']:
+            self.assertTrue(suggestion.startswith('python'))
+    
+    def test_suggest_respects_limit(self):
+        """GET /suggest should respect limit parameter."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py&limit=2')
+        data = json.loads(body)
+        
+        self.assertLessEqual(len(data['suggestions']), 2)
+    
+    def test_suggest_default_limit_is_5(self):
+        """Default limit should be 5."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py')
+        data = json.loads(body)
+        
+        # We have 7 suggestions starting with 'py', should get max 5
+        self.assertLessEqual(len(data['suggestions']), 5)
+    
+    def test_suggest_max_limit_is_20(self):
+        """Limit should be capped at 20."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py&limit=100')
+        data = json.loads(body)
+        
+        # Even with limit=100, should not exceed 20
+        self.assertLessEqual(len(data['suggestions']), 20)
+    
+    def test_suggest_empty_query_returns_empty(self):
+        """Empty query should return empty suggestions."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=')
+        data = json.loads(body)
+        
+        self.assertEqual(data['suggestions'], [])
+    
+    def test_suggest_no_match_returns_empty(self):
+        """Query with no matches should return empty suggestions."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=xyz123')
+        data = json.loads(body)
+        
+        self.assertEqual(data['suggestions'], [])
+    
+    def test_suggest_invalid_limit_uses_default(self):
+        """Invalid limit parameter should use default."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py&limit=invalid')
+        data = json.loads(body)
+        
+        self.assertEqual(status, 200)
+        self.assertIn('suggestions', data)
+
+
+class TestSuggestEndpointDisabled(ServerTestCase):
+    """Tests for /suggest endpoint when disabled."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with autocomplete disabled."""
+        cls.engine = MockEnhancedSearchEngine(
+            autocomplete_suggestions=['python', 'pytest']
+        )
+        cls.start_server(engine=cls.engine, enable_autocomplete=False)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_suggest_returns_403_when_disabled(self):
+        """GET /suggest should return 403 when autocomplete is disabled."""
+        status, headers, body = self.make_request('/suggest?q=py')
+        self.assertEqual(status, 403)
+    
+    def test_suggest_error_message_when_disabled(self):
+        """Should return error message when disabled."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py')
+        data = json.loads(body)
+        
+        self.assertIn('error', data)
+        self.assertIn('disabled', data['error'].lower())
+
+
+class TestSuggestEndpointNoSupport(ServerTestCase):
+    """Tests for /suggest endpoint with basic engine (no autocomplete)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with basic engine."""
+        cls.engine = MockSearchEngine()  # Basic engine, no autocomplete method
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_suggest_returns_501_when_not_supported(self):
+        """GET /suggest should return 501 when engine lacks autocomplete."""
+        status, headers, body = self.make_request('/suggest?q=py')
+        self.assertEqual(status, 501)
+    
+    def test_suggest_error_message_when_not_supported(self):
+        """Should return error message when not supported."""
+        import json
+        status, headers, body = self.make_request('/suggest?q=py')
+        data = json.loads(body)
+        
+        self.assertIn('error', data)
+        self.assertIn('not available', data['error'].lower())
 
 
 if __name__ == '__main__':
