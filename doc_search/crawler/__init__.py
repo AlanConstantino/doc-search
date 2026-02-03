@@ -16,6 +16,12 @@ from .url_filter import (
     is_skippable_path,
     is_under_base_path,
 )
+from .processor import (
+    PageProcessor,
+    content_hash,
+    build_page_data,
+    build_document_data,
+)
 from ..rate_limiter import RateLimiter
 
 __all__ = [
@@ -24,6 +30,7 @@ __all__ = [
     'FetchResult',
     'RateLimiter',
     'UrlFilter',
+    'PageProcessor',
     'SKIP_EXTENSIONS',
     'EXTRACTABLE_DOC_EXTENSIONS',
     'SKIP_PATH_PATTERNS',
@@ -31,4 +38,7 @@ __all__ = [
     'is_extractable_doc',
     'is_skippable_path',
     'is_under_base_path',
+    'content_hash',
+    'build_page_data',
+    'build_document_data',
 ]

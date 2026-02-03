@@ -5,7 +5,6 @@ Supports parallel crawling with per-domain rate limiting.
 
 import json
 import time
-import hashlib
 import threading
 from pathlib import Path
 from typing import Optional, Set, Dict, Any, Callable, Tuple, List
@@ -18,7 +17,6 @@ from ..utils import (
     create_permissive_ssl_context
 )
 from ..robots import RobotsChecker
-from ..parser import extract_text, extract_links
 from ..constants import (
     DEFAULT_CRAWL_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_CRAWL_RETRIES,
     CHECKPOINT_INTERVAL as CHECKPOINT_INTERVAL_CONST
@@ -32,6 +30,7 @@ from .url_filter import (
     SKIP_PATH_PATTERNS,
     UrlFilter,
 )
+from .processor import PageProcessor, build_document_data
 
 
 class Crawler:
@@ -146,6 +145,9 @@ class Crawler:
         # Sync base_path and same_path from UrlFilter (it may adjust for root paths)
         self.base_path = self._url_filter.base_path
         self.same_path = self._url_filter.same_path
+        
+        # Initialize page processor
+        self._processor = PageProcessor(self.pages_dir)
     
     def _log(self, message: str):
         """Print message if verbose mode is enabled (thread-safe)."""
@@ -163,21 +165,7 @@ class Crawler:
     
     def _get_page_metadata(self, url: str) -> Optional[Dict[str, Any]]:
         """Load existing page metadata for incremental crawling."""
-        filename = url_to_filename(url) + '.json'
-        filepath = self.pages_dir / filename
-        
-        if not filepath.exists():
-            return None
-        
-        try:
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return None
-    
-    def _content_hash(self, content: str) -> str:
-        """Generate SHA256 hash of content."""
-        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+        return self._processor.load_page_metadata(url)
     
     def _fetch(self, url: str, etag: Optional[str] = None, 
                last_modified: Optional[str] = None) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
@@ -218,11 +206,7 @@ class Crawler:
     
     def _save_page(self, url: str, data: dict):
         """Save page data to disk."""
-        filename = url_to_filename(url) + '.json'
-        filepath = self.pages_dir / filename
-        
-        with open(filepath, 'w') as f:
-            json.dump(data, f)
+        self._processor.save_page(url, data)
     
     def _process_page(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
@@ -280,44 +264,30 @@ class Crawler:
             return []
         
         # For incremental: check content hash to detect changes even without 304
-        content_hash = self._content_hash(content)
         if self.incremental and existing_meta:
-            if existing_meta.get('content_hash') == content_hash:
+            changed, _ = self._processor.is_content_changed(content, existing_meta)
+            if not changed:
                 self._log(f"  ⏭️  Unchanged (same hash): {url}")
                 self.state.increment_stat('pages_unchanged')
                 return []
         
-        # Extract content
-        extracted = extract_text(content)
+        # Process HTML: extract text, links, and build page data
+        result = self._processor.process_html(
+            url=url,
+            html=content,
+            depth=depth,
+            etag=fetch_meta.get('etag'),
+            last_modified=fetch_meta.get('last_modified'),
+            link_filter=self._should_crawl,
+        )
         
-        # Extract and queue links (at depth + 1)
-        links = extract_links(content, url)
-        new_depth = depth + 1
-        new_urls = []
-        for link in links:
-            if self._should_crawl(link, new_depth):
-                new_urls.append((link, new_depth))
-        
-        # Save page data with incremental metadata
-        page_data = {
-            'url': url,
-            'title': extracted['title'],
-            'description': extracted['description'],
-            'text': extracted['text'],
-            'headings': extracted['headings'],
-            'depth': depth,
-            'crawled_at': time.time(),
-            # Incremental crawling metadata
-            'etag': fetch_meta.get('etag'),
-            'last_modified': fetch_meta.get('last_modified'),
-            'content_hash': content_hash,
-        }
-        self._save_page(url, page_data)
+        # Save page data
+        self._save_page(url, result['page_data'])
         
         # Update stats
         self.state.increment_stat('pages_crawled')
         
-        return new_urls
+        return result['links']
     
     def _process_document(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
@@ -339,19 +309,16 @@ class Crawler:
                 self.state.mark_failed(url, depth)
                 return None
             
-            # Save document data
-            page_data = {
-                'url': url,
-                'title': result['title'] or Path(parsed.path).stem,
-                'description': f"PDF document, {result['pages']} pages",
-                'text': result['text'],
-                'headings': [],  # PDFs don't have structured headings
-                'depth': depth,
-                'crawled_at': time.time(),
-                'doc_type': 'pdf',
-                'doc_pages': result['pages'],
-                'doc_metadata': result['metadata']
-            }
+            # Build and save document data
+            page_data = build_document_data(
+                url=url,
+                title=result['title'] or Path(parsed.path).stem,
+                text=result['text'],
+                depth=depth,
+                doc_type='pdf',
+                doc_pages=result['pages'],
+                doc_metadata=result['metadata'],
+            )
             self._save_page(url, page_data)
             
             # Update stats
@@ -602,11 +569,4 @@ class Crawler:
         Args:
             warn_on_error: If True, print a warning for skipped corrupted files.
         """
-        for page_file in self.pages_dir.glob('*.json'):
-            try:
-                with open(page_file, 'r') as f:
-                    yield json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                if warn_on_error:
-                    print(f"Warning: Skipping corrupted file {page_file}: {e}")
-                continue
+        yield from self._processor.iter_saved_pages(warn_on_error=warn_on_error)
