@@ -1469,29 +1469,29 @@ class TestIncrementalCrawl(CrawlerTestCase):
     """Tests for incremental crawling functionality."""
     
     def test_content_hash_deterministic(self):
-        """_content_hash should produce consistent hashes."""
-        crawler = self.create_crawler()
+        """content_hash should produce consistent hashes."""
+        from doc_search.crawler.processor import content_hash
         
         content = "Hello, World!"
-        hash1 = crawler._content_hash(content)
-        hash2 = crawler._content_hash(content)
+        hash1 = content_hash(content)
+        hash2 = content_hash(content)
         
         self.assertEqual(hash1, hash2)
     
     def test_content_hash_different_for_different_content(self):
-        """_content_hash should produce different hashes for different content."""
-        crawler = self.create_crawler()
+        """content_hash should produce different hashes for different content."""
+        from doc_search.crawler.processor import content_hash
         
-        hash1 = crawler._content_hash("Content A")
-        hash2 = crawler._content_hash("Content B")
+        hash1 = content_hash("Content A")
+        hash2 = content_hash("Content B")
         
         self.assertNotEqual(hash1, hash2)
     
     def test_content_hash_is_sha256(self):
-        """_content_hash should return 64-character SHA256 hash."""
-        crawler = self.create_crawler()
+        """content_hash should return 64-character SHA256 hash."""
+        from doc_search.crawler.processor import content_hash
         
-        hash_value = crawler._content_hash("Test content")
+        hash_value = content_hash("Test content")
         
         self.assertEqual(len(hash_value), 64)
         # Should be valid hex
@@ -1661,13 +1661,15 @@ class TestIncrementalCrawl(CrawlerTestCase):
     
     def test_unchanged_page_detection_via_content_hash(self):
         """Should detect unchanged pages via content hash comparison."""
+        from doc_search.crawler.processor import content_hash
+        
         crawler = self.create_crawler(incremental=True)
         
         # Simulate previously crawled page
         from doc_search.utils import url_to_filename
         url = 'https://example.com/page'
         content = '<html><head><title>Test</title></head><body>Content</body></html>'
-        content_hash = crawler._content_hash(content)
+        hash_value = content_hash(content)
         
         page_data = {
             'url': url,
@@ -1677,7 +1679,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
             'headings': [],
             'depth': 0,
             'crawled_at': time.time(),
-            'content_hash': content_hash,
+            'content_hash': hash_value,
         }
         
         filename = url_to_filename(url) + '.json'
@@ -1686,21 +1688,21 @@ class TestIncrementalCrawl(CrawlerTestCase):
         
         # Load and verify
         loaded = crawler._get_page_metadata(url)
-        self.assertEqual(loaded['content_hash'], content_hash)
+        self.assertEqual(loaded['content_hash'], hash_value)
         
         # New content with same hash would be detected as unchanged
-        new_content_hash = crawler._content_hash(content)
+        new_content_hash = content_hash(content)
         self.assertEqual(new_content_hash, loaded['content_hash'])
     
     def test_changed_page_detection_via_content_hash(self):
         """Should detect changed pages via content hash comparison."""
-        crawler = self.create_crawler(incremental=True)
+        from doc_search.crawler.processor import content_hash
         
         original_content = '<html><body>Original</body></html>'
         modified_content = '<html><body>Modified</body></html>'
         
-        original_hash = crawler._content_hash(original_content)
-        modified_hash = crawler._content_hash(modified_content)
+        original_hash = content_hash(original_content)
+        modified_hash = content_hash(modified_content)
         
         # Hashes should be different
         self.assertNotEqual(original_hash, modified_hash)
