@@ -150,7 +150,8 @@ def cmd_crawl(args):
         verbose=not args.quiet,
         workers=args.workers,
         extract_docs=args.extract_docs,
-        incremental=getattr(args, 'incremental', False)
+        incremental=getattr(args, 'incremental', False),
+        save_html=not getattr(args, 'no_save_html', False)
     )
     
     # Start crawling

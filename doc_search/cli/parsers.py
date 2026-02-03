@@ -85,6 +85,8 @@ def _add_crawl_parser(subparsers):
                              help='Number of parallel workers (default: 1 for politeness)')
     crawl_parser.add_argument('--extract-docs', action='store_true',
                              help='Extract text from PDFs and Office documents')
+    crawl_parser.add_argument('--no-save-html', action='store_true',
+                             help='Do not save raw HTML (saves disk space but prevents re-parsing)')
     crawl_parser.add_argument('--separate-paths', action='store_true',
                              help='Store different URL paths separately (e.g., /3.11/ and /3.12/ get their own folders)')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
