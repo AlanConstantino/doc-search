@@ -18,16 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/health` endpoint for server monitoring
 - Structured error tracking with `CrawlError` dataclass
 - Error summary in `stats` command (`--show-errors` for details)
-- Comprehensive test coverage (743 tests)
+- Comprehensive test coverage (955 tests)
   - CLI command tests for all commands
   - CLI parser tests
   - Integration tests (crawl → index → search workflow)
+  - Full crawler package test coverage
 
 ### Changed
 - Extracted `CrawlState` to `crawl_state.py`
 - Extracted `RateLimiter` to `rate_limiter.py`
 - Extracted formatting functions to `searcher_utils.py`
 - CLI refactored into `cli/` package structure
+- **Crawler refactored into `crawler/` package** (Phases 1-6.5):
+  - `Fetcher` class for HTTP fetching with retry logic
+  - `UrlFilter` class for URL validation and filtering
+  - `PageProcessor` class for content processing
+  - All public APIs preserved for backward compatibility
+  - `from doc_search.crawler import Crawler, RateLimiter` still works
 
 ## [1.8.2] - 2024-02-02
 
