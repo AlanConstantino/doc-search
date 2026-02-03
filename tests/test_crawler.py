@@ -1919,6 +1919,160 @@ class TestCrawlErrorRecording(CrawlerTestCase):
 
 
 # ============================================================================
+# get_crawled_pages Tests
+# ============================================================================
+
+class TestCrawlerGetCrawledPages(CrawlerTestCase):
+    """Tests for Crawler.get_crawled_pages() method."""
+    
+    def test_yields_valid_json_files(self):
+        """get_crawled_pages should yield data from valid JSON files."""
+        crawler = self.create_crawler()
+        
+        # Create valid page files
+        page1 = {'url': 'https://example.com/page1', 'title': 'Page 1', 'text': 'Content 1'}
+        page2 = {'url': 'https://example.com/page2', 'title': 'Page 2', 'text': 'Content 2'}
+        
+        with open(crawler.pages_dir / 'page1.json', 'w') as f:
+            json.dump(page1, f)
+        with open(crawler.pages_dir / 'page2.json', 'w') as f:
+            json.dump(page2, f)
+        
+        # Get pages
+        pages = list(crawler.get_crawled_pages())
+        
+        self.assertEqual(len(pages), 2)
+        urls = {p['url'] for p in pages}
+        self.assertIn('https://example.com/page1', urls)
+        self.assertIn('https://example.com/page2', urls)
+    
+    def test_skips_corrupted_json_with_warning(self):
+        """get_crawled_pages should skip corrupted JSON and print warning by default."""
+        crawler = self.create_crawler()
+        
+        # Create one valid and one corrupted file
+        valid_page = {'url': 'https://example.com/valid', 'title': 'Valid', 'text': 'Content'}
+        with open(crawler.pages_dir / 'valid.json', 'w') as f:
+            json.dump(valid_page, f)
+        with open(crawler.pages_dir / 'corrupted.json', 'w') as f:
+            f.write('{ invalid json content }}}')
+        
+        # Capture stdout to check warning
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        
+        try:
+            pages = list(crawler.get_crawled_pages(warn_on_error=True))
+        finally:
+            sys.stdout = sys.__stdout__
+        
+        # Should only get the valid page
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0]['url'], 'https://example.com/valid')
+        
+        # Should have printed a warning
+        output = captured_output.getvalue()
+        self.assertIn('Warning', output)
+        self.assertIn('corrupted.json', output)
+    
+    def test_skips_corrupted_json_silently_when_warn_disabled(self):
+        """get_crawled_pages should skip corrupted JSON silently when warn_on_error=False."""
+        crawler = self.create_crawler()
+        
+        # Create one valid and one corrupted file
+        valid_page = {'url': 'https://example.com/valid', 'title': 'Valid', 'text': 'Content'}
+        with open(crawler.pages_dir / 'valid.json', 'w') as f:
+            json.dump(valid_page, f)
+        with open(crawler.pages_dir / 'corrupted.json', 'w') as f:
+            f.write('{ invalid json content }}}')
+        
+        # Capture stdout to verify no warning
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        
+        try:
+            pages = list(crawler.get_crawled_pages(warn_on_error=False))
+        finally:
+            sys.stdout = sys.__stdout__
+        
+        # Should only get the valid page
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0]['url'], 'https://example.com/valid')
+        
+        # Should NOT have printed a warning
+        output = captured_output.getvalue()
+        self.assertEqual(output, '')
+    
+    def test_warn_on_error_defaults_to_true(self):
+        """get_crawled_pages should warn by default (warn_on_error=True)."""
+        crawler = self.create_crawler()
+        
+        # Create a corrupted file
+        with open(crawler.pages_dir / 'corrupted.json', 'w') as f:
+            f.write('not valid json')
+        
+        # Capture stdout to check warning (calling without argument)
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        
+        try:
+            pages = list(crawler.get_crawled_pages())  # No argument = default
+        finally:
+            sys.stdout = sys.__stdout__
+        
+        # Should have printed a warning (default is warn_on_error=True)
+        output = captured_output.getvalue()
+        self.assertIn('Warning', output)
+    
+    def test_handles_io_error_with_warning(self):
+        """get_crawled_pages should handle IOError and warn."""
+        crawler = self.create_crawler()
+        
+        # Create a valid file
+        valid_page = {'url': 'https://example.com/valid', 'title': 'Valid', 'text': 'Content'}
+        with open(crawler.pages_dir / 'valid.json', 'w') as f:
+            json.dump(valid_page, f)
+        
+        # Create a file that will cause IOError (a directory with .json extension)
+        bad_dir = crawler.pages_dir / 'bad_file.json'
+        bad_dir.mkdir()
+        
+        # Capture stdout to check warning
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        
+        try:
+            pages = list(crawler.get_crawled_pages(warn_on_error=True))
+        finally:
+            sys.stdout = sys.__stdout__
+        
+        # Should only get the valid page
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0]['url'], 'https://example.com/valid')
+        
+        # Should have printed a warning
+        output = captured_output.getvalue()
+        self.assertIn('Warning', output)
+        self.assertIn('bad_file.json', output)
+    
+    def test_empty_pages_dir_yields_nothing(self):
+        """get_crawled_pages should yield nothing when pages_dir is empty."""
+        crawler = self.create_crawler()
+        
+        pages = list(crawler.get_crawled_pages())
+        
+        self.assertEqual(len(pages), 0)
+
+
+# ============================================================================
 # Placeholder for Additional Tests
 # ============================================================================
 
