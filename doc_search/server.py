@@ -874,17 +874,6 @@ def render_page(
         </div>
         <div>doc-search v{__version__}</div>
     </footer>
-    <script>
-        // Theme toggle - instant + persist
-        document.getElementById('theme').addEventListener('change', function() {{
-            const theme = this.value;
-            document.body.className = theme === 'light' ? 'light' : '';
-            // Update URL to persist theme
-            const url = new URL(window.location);
-            url.searchParams.set('theme', theme);
-            window.history.replaceState({{}}, '', url);
-        }});
-    </script>
 </body>
 </html>'''
 
