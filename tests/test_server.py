@@ -1388,62 +1388,16 @@ class TestServerFacetsNoSupport(ServerTestCase):
 # Issue #152: Synonym Toggle Tests
 # ============================================================================
 
-class TestRenderPageSynonymToggle(unittest.TestCase):
-    """Tests for synonym toggle rendering."""
-    
-    def test_renders_toggle_when_enabled(self):
-        """Should render synonym checkbox when show_synonym_toggle=True."""
-        html = render_page(
-            query='test',
-            results=[],
-            show_synonym_toggle=True
-        )
-        
-        self.assertIn('Expand synonyms', html)
-        self.assertIn('type="checkbox"', html)
-        self.assertIn('name="synonyms"', html)
-    
-    def test_no_toggle_when_disabled(self):
-        """Should not render synonym checkbox when show_synonym_toggle=False."""
-        html = render_page(
-            query='test',
-            results=[],
-            show_synonym_toggle=False
-        )
-        
-        self.assertNotIn('Expand synonyms', html)
-    
-    def test_checkbox_checked_when_active(self):
-        """Checkbox should be checked when synonyms_active=True."""
-        html = render_page(
-            query='test',
-            results=[],
-            show_synonym_toggle=True,
-            synonyms_active=True
-        )
-        
-        self.assertIn('checked', html)
-    
-    def test_checkbox_unchecked_when_inactive(self):
-        """Checkbox should not be checked when synonyms_active=False."""
-        html = render_page(
-            query='test',
-            results=[],
-            show_synonym_toggle=True,
-            synonyms_active=False
-        )
-        
-        # Count that 'checked' doesn't appear in checkbox element
-        checkbox_section = html.split('name="synonyms"')[1].split('>')[0]
-        self.assertNotIn('checked', checkbox_section)
+# ============================================================================
+# Issue #152: Synonym Expansion Tests (CLI flag, no UI toggle)
+# ============================================================================
 
-
-class TestServerSynonymToggle(ServerTestCase):
-    """Tests for synonym toggle in server responses."""
+class TestServerSynonymsEnabled(ServerTestCase):
+    """Tests for server with synonyms enabled via CLI flag."""
     
     @classmethod
     def setUpClass(cls):
-        """Start test server with enhanced engine."""
+        """Start test server with synonyms enabled."""
         normal_results = [
             {'url': 'http://normal', 'title': 'Normal Result', 'score': 1.0}
         ]
@@ -1462,38 +1416,24 @@ class TestServerSynonymToggle(ServerTestCase):
         """Stop test server."""
         cls.stop_server()
     
-    def test_shows_synonym_toggle(self):
-        """Should show synonym toggle checkbox."""
+    def test_no_checkbox_in_ui(self):
+        """Should NOT show synonym checkbox in UI (CLI flag only)."""
         status, headers, body = self.make_request('/?q=test')
         
         self.assertEqual(status, 200)
-        self.assertIn('Expand synonyms', body)
-        self.assertIn('type="checkbox"', body)
+        self.assertNotIn('Expand synonyms', body)
+        self.assertNotIn('name="synonyms"', body)
     
-    def test_synonyms_not_expanded_by_default(self):
-        """Synonyms should not be expanded without parameter."""
+    def test_synonyms_always_expanded_when_enabled(self):
+        """Synonyms should always be expanded when enable_synonyms=True."""
         status, headers, body = self.make_request('/?q=test')
-        
-        self.assertEqual(status, 200)
-        self.assertEqual(self.engine._last_expand_synonyms, False)
-    
-    def test_synonyms_expanded_with_parameter(self):
-        """Synonyms should be expanded with ?synonyms=1."""
-        status, headers, body = self.make_request('/?q=test&synonyms=1')
         
         self.assertEqual(status, 200)
         self.assertEqual(self.engine._last_expand_synonyms, True)
-    
-    def test_checkbox_preserves_state(self):
-        """Checkbox should be checked when synonyms=1."""
-        status, headers, body = self.make_request('/?q=test&synonyms=1')
-        
-        self.assertEqual(status, 200)
-        self.assertIn('checked', body)
 
 
-class TestServerSynonymToggleDisabled(ServerTestCase):
-    """Tests for server when synonym toggle is disabled."""
+class TestServerSynonymsDisabled(ServerTestCase):
+    """Tests for server with synonyms disabled."""
     
     @classmethod
     def setUpClass(cls):
@@ -1508,22 +1448,15 @@ class TestServerSynonymToggleDisabled(ServerTestCase):
         """Stop test server."""
         cls.stop_server()
     
-    def test_no_toggle_when_disabled(self):
-        """Should not show synonym toggle when enable_synonyms=False."""
+    def test_synonyms_not_expanded_when_disabled(self):
+        """Synonyms should NOT be expanded when enable_synonyms=False."""
         status, headers, body = self.make_request('/?q=test')
-        
-        self.assertEqual(status, 200)
-        self.assertNotIn('Expand synonyms', body)
-    
-    def test_parameter_ignored_when_disabled(self):
-        """?synonyms=1 should be ignored when toggle is disabled."""
-        status, headers, body = self.make_request('/?q=test&synonyms=1')
         
         self.assertEqual(status, 200)
         self.assertEqual(self.engine._last_expand_synonyms, False)
 
 
-class TestServerSynonymBasicEngine(ServerTestCase):
+class TestServerSynonymsBasicEngine(ServerTestCase):
     """Tests with basic engine (no synonym support in search method)."""
     
     @classmethod
@@ -1539,9 +1472,9 @@ class TestServerSynonymBasicEngine(ServerTestCase):
         """Stop test server."""
         cls.stop_server()
     
-    def test_works_without_expand_synonyms_param(self):
+    def test_works_without_expand_synonyms_support(self):
         """Server should work when engine search() lacks expand_synonyms."""
-        status, headers, body = self.make_request('/?q=test&synonyms=1')
+        status, headers, body = self.make_request('/?q=test')
         
         self.assertEqual(status, 200)
         self.assertIn('Test', body)
