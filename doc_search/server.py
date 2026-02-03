@@ -164,6 +164,34 @@ a:hover {
     transform: scale(0.98);
 }
 
+/* Search options (synonym toggle) */
+.search-options {
+    margin-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.synonym-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.synonym-toggle input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.synonym-toggle:hover {
+    color: var(--text-primary);
+}
+
 /* Results info */
 .results-info {
     display: flex;
@@ -547,13 +575,28 @@ def render_page(
     suggestion: Optional[str] = None,
     facets: Optional[Dict[str, Dict[str, int]]] = None,
     active_facet: Optional[str] = None,
-    total_unfiltered: int = 0
+    total_unfiltered: int = 0,
+    synonyms_active: bool = False,
+    show_synonym_toggle: bool = False
 ) -> str:
     """Render the full HTML page."""
     
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
     unique_terms = stats.get('unique_terms', 0)
+    
+    # Build synonym toggle HTML
+    synonym_toggle_html = ""
+    if show_synonym_toggle:
+        checked = 'checked' if synonyms_active else ''
+        synonym_toggle_html = f'''
+            <div class="search-options">
+                <label class="synonym-toggle">
+                    <input type="checkbox" name="synonyms" value="1" {checked}>
+                    <span>Expand synonyms</span>
+                </label>
+            </div>
+        '''
     
     # Build facet filter HTML
     facets_html = ""
@@ -723,6 +766,7 @@ def render_page(
                 >
                 <button type="submit" class="search-button">Search</button>
             </div>
+            {synonym_toggle_html}
         </form>
         
         {results_html}
@@ -758,6 +802,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     start_time: float = None  # Server start time for uptime calculation
     enable_autocomplete: bool = True  # Enable /suggest endpoint
     enable_facets: bool = True  # Enable faceted search filtering
+    enable_synonyms: bool = True  # Enable synonym expansion toggle
     
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -813,6 +858,12 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Get facet filter (category)
         category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
         
+        # Get synonym toggle state (synonyms=1 enables expansion)
+        synonyms_active = False
+        if self.enable_synonyms:
+            synonyms_param = query_params.get('synonyms', [''])[0].strip()
+            synonyms_active = synonyms_param == '1'
+        
         per_page = self.per_page
         max_results = self.max_results
         
@@ -822,7 +873,16 @@ class SearchHandler(BaseHTTPRequestHandler):
         if query:
             # Perform search - fetch enough for pagination
             search_start = time.perf_counter()
-            all_results = self.engine.search(query, top_k=max_results)
+            # Pass expand_synonyms if engine supports it (EnhancedSearchEngine)
+            if synonyms_active and hasattr(self.engine, 'search'):
+                import inspect
+                sig = inspect.signature(self.engine.search)
+                if 'expand_synonyms' in sig.parameters:
+                    all_results = self.engine.search(query, top_k=max_results, expand_synonyms=True)
+                else:
+                    all_results = self.engine.search(query, top_k=max_results)
+            else:
+                all_results = self.engine.search(query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
             
             # Get facet counts before filtering (for accurate counts)
@@ -870,11 +930,13 @@ class SearchHandler(BaseHTTPRequestHandler):
                 suggestion=suggestion,
                 facets=facets,
                 active_facet=category_filter if category_filter else None,
-                total_unfiltered=total_unfiltered
+                total_unfiltered=total_unfiltered,
+                synonyms_active=synonyms_active,
+                show_synonym_toggle=self.enable_synonyms
             )
         else:
             # Welcome page
-            html_content = render_page(stats=stats)
+            html_content = render_page(stats=stats, show_synonym_toggle=self.enable_synonyms)
         
         self.send_html(html_content)
     
@@ -964,7 +1026,8 @@ def run_server(
     per_page: int = 10,
     max_results: int = 100,
     enable_autocomplete: bool = True,
-    enable_facets: bool = True
+    enable_facets: bool = True,
+    enable_synonyms: bool = True
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -978,6 +1041,7 @@ def run_server(
         max_results: Maximum total results for pagination (default: 100)
         enable_autocomplete: If True, enable /suggest endpoint (default: True)
         enable_facets: If True, enable faceted search filtering (default: True)
+        enable_synonyms: If True, show synonym expansion toggle (default: True)
         
     Returns:
         HTTPServer instance (call serve_forever() to start)
@@ -990,5 +1054,6 @@ def run_server(
     SearchHandler.start_time = time.time()  # Record server start time
     SearchHandler.enable_facets = enable_facets
     SearchHandler.enable_autocomplete = enable_autocomplete
+    SearchHandler.enable_synonyms = enable_synonyms
     server = HTTPServer((host, port), SearchHandler)
     return server
