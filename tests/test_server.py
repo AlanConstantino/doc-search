@@ -51,13 +51,14 @@ class MockSearchEngine:
 
 
 class MockEnhancedSearchEngine(MockSearchEngine):
-    """Mock EnhancedSearchEngine with autocomplete, spell check, and facet support."""
+    """Mock EnhancedSearchEngine with autocomplete, spell check, facet, and synonym support."""
     
     def __init__(self, results: Optional[List[Dict[str, Any]]] = None,
                  stats: Optional[Dict[str, Any]] = None,
                  autocomplete_suggestions: Optional[List[str]] = None,
                  spelling_suggestion: Optional[str] = None,
-                 facet_counts: Optional[Dict[str, Dict[str, int]]] = None):
+                 facet_counts: Optional[Dict[str, Dict[str, int]]] = None,
+                 synonym_results: Optional[List[Dict[str, Any]]] = None):
         """
         Create mock enhanced search engine.
         
@@ -67,11 +68,22 @@ class MockEnhancedSearchEngine(MockSearchEngine):
             autocomplete_suggestions: List of suggestions to return
             spelling_suggestion: Spelling suggestion to return (or None)
             facet_counts: Facet counts to return from get_facet_counts()
+            synonym_results: Results to return when synonyms expanded (or None for same as results)
         """
         super().__init__(results, stats)
         self._autocomplete_suggestions = autocomplete_suggestions or []
         self._spelling_suggestion = spelling_suggestion
         self._facet_counts = facet_counts or {}
+        self._synonym_results = synonym_results
+        self._last_expand_synonyms = None
+    
+    def search(self, query: str, top_k: int = 10, expand_synonyms: bool = False) -> List[Dict[str, Any]]:
+        """Search with optional synonym expansion."""
+        self._last_expand_synonyms = expand_synonyms
+        self.search_calls.append({'query': query, 'top_k': top_k, 'expand_synonyms': expand_synonyms})
+        if expand_synonyms and self._synonym_results is not None:
+            return self._synonym_results[:top_k]
+        return self._results[:top_k]
     
     def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
         """Return mock autocomplete suggestions."""
@@ -1370,6 +1382,169 @@ class TestServerFacetsNoSupport(ServerTestCase):
         self.assertEqual(status, 200)
         self.assertIn('Test 1', body)
         self.assertNotIn('<div class="facet-filters">', body)
+
+
+# ============================================================================
+# Issue #152: Synonym Toggle Tests
+# ============================================================================
+
+class TestRenderPageSynonymToggle(unittest.TestCase):
+    """Tests for synonym toggle rendering."""
+    
+    def test_renders_toggle_when_enabled(self):
+        """Should render synonym checkbox when show_synonym_toggle=True."""
+        html = render_page(
+            query='test',
+            results=[],
+            show_synonym_toggle=True
+        )
+        
+        self.assertIn('Expand synonyms', html)
+        self.assertIn('type="checkbox"', html)
+        self.assertIn('name="synonyms"', html)
+    
+    def test_no_toggle_when_disabled(self):
+        """Should not render synonym checkbox when show_synonym_toggle=False."""
+        html = render_page(
+            query='test',
+            results=[],
+            show_synonym_toggle=False
+        )
+        
+        self.assertNotIn('Expand synonyms', html)
+    
+    def test_checkbox_checked_when_active(self):
+        """Checkbox should be checked when synonyms_active=True."""
+        html = render_page(
+            query='test',
+            results=[],
+            show_synonym_toggle=True,
+            synonyms_active=True
+        )
+        
+        self.assertIn('checked', html)
+    
+    def test_checkbox_unchecked_when_inactive(self):
+        """Checkbox should not be checked when synonyms_active=False."""
+        html = render_page(
+            query='test',
+            results=[],
+            show_synonym_toggle=True,
+            synonyms_active=False
+        )
+        
+        # Count that 'checked' doesn't appear in checkbox element
+        checkbox_section = html.split('name="synonyms"')[1].split('>')[0]
+        self.assertNotIn('checked', checkbox_section)
+
+
+class TestServerSynonymToggle(ServerTestCase):
+    """Tests for synonym toggle in server responses."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with enhanced engine."""
+        normal_results = [
+            {'url': 'http://normal', 'title': 'Normal Result', 'score': 1.0}
+        ]
+        synonym_results = [
+            {'url': 'http://normal', 'title': 'Normal Result', 'score': 1.0},
+            {'url': 'http://synonym', 'title': 'Synonym Result', 'score': 0.9}
+        ]
+        cls.engine = MockEnhancedSearchEngine(
+            results=normal_results,
+            synonym_results=synonym_results
+        )
+        cls.start_server(engine=cls.engine, enable_synonyms=True)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_shows_synonym_toggle(self):
+        """Should show synonym toggle checkbox."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('Expand synonyms', body)
+        self.assertIn('type="checkbox"', body)
+    
+    def test_synonyms_not_expanded_by_default(self):
+        """Synonyms should not be expanded without parameter."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertEqual(self.engine._last_expand_synonyms, False)
+    
+    def test_synonyms_expanded_with_parameter(self):
+        """Synonyms should be expanded with ?synonyms=1."""
+        status, headers, body = self.make_request('/?q=test&synonyms=1')
+        
+        self.assertEqual(status, 200)
+        self.assertEqual(self.engine._last_expand_synonyms, True)
+    
+    def test_checkbox_preserves_state(self):
+        """Checkbox should be checked when synonyms=1."""
+        status, headers, body = self.make_request('/?q=test&synonyms=1')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('checked', body)
+
+
+class TestServerSynonymToggleDisabled(ServerTestCase):
+    """Tests for server when synonym toggle is disabled."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with synonyms disabled."""
+        cls.engine = MockEnhancedSearchEngine(
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}]
+        )
+        cls.start_server(engine=cls.engine, enable_synonyms=False)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_no_toggle_when_disabled(self):
+        """Should not show synonym toggle when enable_synonyms=False."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertNotIn('Expand synonyms', body)
+    
+    def test_parameter_ignored_when_disabled(self):
+        """?synonyms=1 should be ignored when toggle is disabled."""
+        status, headers, body = self.make_request('/?q=test&synonyms=1')
+        
+        self.assertEqual(status, 200)
+        self.assertEqual(self.engine._last_expand_synonyms, False)
+
+
+class TestServerSynonymBasicEngine(ServerTestCase):
+    """Tests with basic engine (no synonym support in search method)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with basic engine."""
+        cls.engine = MockSearchEngine(
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}]
+        )
+        cls.start_server(engine=cls.engine, enable_synonyms=True)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_works_without_expand_synonyms_param(self):
+        """Server should work when engine search() lacks expand_synonyms."""
+        status, headers, body = self.make_request('/?q=test&synonyms=1')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('Test', body)
 
 
 if __name__ == '__main__':

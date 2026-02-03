@@ -206,4 +206,10 @@ def _add_serve_parser(subparsers):
                              help='Maximum total results for pagination (default: 100)')
     serve_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
+    serve_parser.add_argument('--enable-synonyms', action='store_true', default=True,
+                             dest='enable_synonyms',
+                             help='Enable synonym expansion toggle (default: enabled)')
+    serve_parser.add_argument('--disable-synonyms', action='store_false',
+                             dest='enable_synonyms',
+                             help='Disable synonym expansion toggle')
     serve_parser.set_defaults(func=cmd_serve)
