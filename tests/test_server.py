@@ -55,7 +55,8 @@ class MockEnhancedSearchEngine(MockSearchEngine):
     
     def __init__(self, results: Optional[List[Dict[str, Any]]] = None,
                  stats: Optional[Dict[str, Any]] = None,
-                 autocomplete_suggestions: Optional[List[str]] = None):
+                 autocomplete_suggestions: Optional[List[str]] = None,
+                 spelling_suggestion: Optional[str] = None):
         """
         Create mock enhanced search engine.
         
@@ -63,15 +64,20 @@ class MockEnhancedSearchEngine(MockSearchEngine):
             results: List of result dicts to return from search()
             stats: Stats dict to return from get_stats()
             autocomplete_suggestions: List of suggestions to return
+            spelling_suggestion: Spelling suggestion to return (or None)
         """
         super().__init__(results, stats)
         self._autocomplete_suggestions = autocomplete_suggestions or []
+        self._spelling_suggestion = spelling_suggestion
     
     def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
         """Return mock autocomplete suggestions."""
-        # Filter suggestions that start with prefix and limit
         matching = [s for s in self._autocomplete_suggestions if s.startswith(prefix)]
         return matching[:max_suggestions]
+    
+    def get_spelling_suggestion(self, query: str) -> Optional[str]:
+        """Return mock spelling suggestion."""
+        return self._spelling_suggestion
 
 
 def get_free_port() -> int:
@@ -782,6 +788,191 @@ class TestHealthEndpointUnhealthy(ServerTestCase):
         data = json.loads(body)
         self.assertIn('reason', data)
         self.assertIn('documents', data['reason'].lower())
+
+
+# ============================================================================
+# Issue #149: Spell Check ("Did you mean...") Tests
+# ============================================================================
+
+class TestRenderPageSpellSuggestion(unittest.TestCase):
+    """Tests for spell check suggestion rendering."""
+    
+    def test_renders_suggestion_when_provided(self):
+        """Should render 'Did you mean' when suggestion provided."""
+        html = render_page(
+            query='pyhton',
+            results=[],
+            suggestion='python'
+        )
+        
+        self.assertIn('Did you mean', html)
+        self.assertIn('python', html)
+        self.assertIn('spell-suggestion', html)
+    
+    def test_suggestion_is_clickable_link(self):
+        """Suggestion should be a clickable link."""
+        html = render_page(
+            query='pyhton',
+            results=[],
+            suggestion='python'
+        )
+        
+        # Should have a link to search with the suggestion
+        self.assertIn('href="/?q=python"', html)
+        self.assertIn('spell-suggestion-link', html)
+    
+    def test_no_suggestion_when_none(self):
+        """Should not render suggestion section when None."""
+        html = render_page(
+            query='test',
+            results=[],
+            suggestion=None
+        )
+        
+        self.assertNotIn('Did you mean', html)
+        # Check for the div element, not just the CSS class name
+        self.assertNotIn('<div class="spell-suggestion">', html)
+    
+    def test_suggestion_escapes_special_chars(self):
+        """Suggestion should be HTML escaped."""
+        html = render_page(
+            query='test',
+            results=[],
+            suggestion='<script>alert(1)</script>'
+        )
+        
+        self.assertNotIn('<script>alert', html)
+        self.assertIn('&lt;script&gt;', html)
+    
+    def test_suggestion_url_encoded_in_link(self):
+        """Suggestion with spaces should be URL encoded in link."""
+        html = render_page(
+            query='pyhton async',
+            results=[],
+            suggestion='python async'
+        )
+        
+        # The link href should have URL-encoded spaces
+        self.assertIn('href="/?q=python%20async"', html)
+
+
+class TestServerSpellCheckSuggestion(ServerTestCase):
+    """Tests for spell check suggestion in server responses."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with enhanced engine that returns spell suggestions."""
+        # No results, but has a spelling suggestion
+        cls.engine = MockEnhancedSearchEngine(
+            results=[],
+            spelling_suggestion='python'
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_shows_suggestion_on_no_results(self):
+        """Should show 'Did you mean' when no results and suggestion available."""
+        status, headers, body = self.make_request('/?q=pyhton')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('Did you mean', body)
+        self.assertIn('python', body)
+    
+    def test_suggestion_link_is_clickable(self):
+        """Suggestion link should point to corrected query."""
+        status, headers, body = self.make_request('/?q=pyhton')
+        
+        self.assertIn('href="/?q=python"', body)
+
+
+class TestServerSpellCheckNoSuggestion(ServerTestCase):
+    """Tests for server when spell check returns no suggestion."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with enhanced engine that returns no suggestion."""
+        cls.engine = MockEnhancedSearchEngine(
+            results=[],
+            spelling_suggestion=None
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_no_suggestion_shown_when_none_available(self):
+        """Should not show suggestion when engine returns None."""
+        status, headers, body = self.make_request('/?q=xyzabc123')
+        
+        self.assertEqual(status, 200)
+        self.assertNotIn('Did you mean', body)
+        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Should still show no results message
+        self.assertIn('No results found', body)
+
+
+class TestServerSpellCheckWithResults(ServerTestCase):
+    """Tests for spell check when results are found."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with results (no suggestion needed)."""
+        mock_results = [
+            {'url': 'https://example.com/test', 'title': 'Test Page', 'score': 1.0}
+        ]
+        cls.engine = MockEnhancedSearchEngine(
+            results=mock_results,
+            spelling_suggestion='python'  # Suggestion exists but shouldn't show
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_no_suggestion_shown_when_results_found(self):
+        """Should not show suggestion when results are found."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        # Should show results
+        self.assertIn('Test Page', body)
+        # Should NOT show spell suggestion (results were found)
+        self.assertNotIn('Did you mean', body)
+        self.assertNotIn('<div class="spell-suggestion">', body)
+
+
+class TestServerWithBasicEngine(ServerTestCase):
+    """Tests that basic SearchEngine (without spell check) still works."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with basic engine (no spell check)."""
+        cls.engine = MockSearchEngine(results=[])
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_works_without_spell_check_method(self):
+        """Server should work when engine lacks get_spelling_suggestion."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        # Should show no results without crashing
+        self.assertIn('No results found', body)
+        # No spell suggestion shown (engine doesn't have the method)
+        self.assertNotIn('Did you mean', body)
+        self.assertNotIn('<div class="spell-suggestion">', body)
 
 
 # ============================================================================

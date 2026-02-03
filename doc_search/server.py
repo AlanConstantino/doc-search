@@ -306,6 +306,37 @@ a:hover {
     opacity: 0.5;
 }
 
+/* Spell check suggestion */
+.spell-suggestion {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.spell-suggestion-icon {
+    font-size: 1.25rem;
+}
+
+.spell-suggestion-text {
+    color: var(--text-secondary);
+}
+
+.spell-suggestion-link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.spell-suggestion-link:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+
 /* Tips */
 .tips {
     background: var(--bg-secondary);
@@ -450,13 +481,26 @@ def render_page(
     show_scores: bool = True,
     page: int = 1,
     per_page: int = 10,
-    total_results: int = 0
+    total_results: int = 0,
+    suggestion: Optional[str] = None
 ) -> str:
     """Render the full HTML page."""
     
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
     unique_terms = stats.get('unique_terms', 0)
+    
+    # Build spell check suggestion HTML
+    suggestion_html = ""
+    if suggestion:
+        encoded_suggestion = urllib.parse.quote(suggestion)
+        suggestion_html = f'''
+        <div class="spell-suggestion">
+            <span class="spell-suggestion-icon">💡</span>
+            <span class="spell-suggestion-text">Did you mean:</span>
+            <a href="/?q={encoded_suggestion}" class="spell-suggestion-link">{escape(suggestion)}</a>?
+        </div>
+        '''
     
     # Build results HTML
     if query and results is not None:
@@ -534,7 +578,7 @@ def render_page(
                 
                 results_html += '</div>'
         else:
-            results_html = '''
+            results_html = suggestion_html + '''
             <div class="no-results">
                 <div class="no-results-icon">🔍</div>
                 <div>No results found. Try different keywords.</div>
@@ -701,6 +745,14 @@ class SearchHandler(BaseHTTPRequestHandler):
                 page = 1
                 page_results = all_results[:per_page]
             
+            # Check for spelling suggestions when results are low
+            suggestion = None
+            if total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+                suggestion = self.engine.get_spelling_suggestion(query)
+                # Only show suggestion if it's different from the query
+                if suggestion and suggestion.lower() == query.lower():
+                    suggestion = None
+            
             html_content = render_page(
                 query=query,
                 results=page_results,
@@ -708,7 +760,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                 stats=stats,
                 page=page,
                 per_page=per_page,
-                total_results=total_results
+                total_results=total_results,
+                suggestion=suggestion
             )
         else:
             # Welcome page
