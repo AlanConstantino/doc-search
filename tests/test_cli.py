@@ -981,9 +981,9 @@ class MockBM25Index:
         """Set the number of documents to return from build_from_pages."""
         self._num_docs_to_return = num
     
-    def build_from_pages(self, pages_dir: Path, verbose: bool = True) -> int:
+    def build_from_pages(self, pages_dir: Path, verbose: bool = True, parser: str = 'dom') -> int:
         """Return mock document count."""
-        self.build_calls.append({'pages_dir': pages_dir, 'verbose': verbose})
+        self.build_calls.append({'pages_dir': pages_dir, 'verbose': verbose, 'parser': parser})
         return self._num_docs_to_return
     
     def save(self, path: Path, compress: bool = True) -> Path:

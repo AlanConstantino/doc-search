@@ -151,7 +151,8 @@ def cmd_crawl(args):
         workers=args.workers,
         extract_docs=args.extract_docs,
         incremental=getattr(args, 'incremental', False),
-        save_html=not getattr(args, 'no_save_html', False)
+        save_html=not getattr(args, 'no_save_html', False),
+        parser=getattr(args, 'parser', 'dom')
     )
     
     # Start crawling
@@ -188,8 +189,9 @@ def cmd_index(args):
     
     # Build index
     stem = not getattr(args, 'no_stemming', False)
+    parser = getattr(args, 'parser', 'dom')
     index = BM25Index(k1=args.k1, b=args.b, stem=stem)
-    num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet)
+    num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet, parser=parser)
     
     if not args.quiet:
         print(f"Stemming: {'enabled' if stem else 'disabled'}")

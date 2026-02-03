@@ -87,6 +87,8 @@ def _add_crawl_parser(subparsers):
                              help='Extract text from PDFs and Office documents')
     crawl_parser.add_argument('--no-save-html', action='store_true',
                              help='Do not save raw HTML (saves disk space but prevents re-parsing)')
+    crawl_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
+                             help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
     crawl_parser.add_argument('--separate-paths', action='store_true',
                              help='Store different URL paths separately (e.g., /3.11/ and /3.12/ get their own folders)')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
@@ -108,6 +110,8 @@ def _add_index_parser(subparsers):
                              help='Disable Porter stemming')
     index_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
+    index_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
+                             help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)

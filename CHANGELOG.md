@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-02-03
+
+### Added
+- **DOM tree parser** - New default HTML parser with structure-aware content extraction (#168)
+- **`--parser` flag** - Choose between `dom` (default) or `stream` (legacy) parser
+- **Better boilerplate detection** - Strips content by tag, ARIA role, and CSS class patterns
+- **Main content detection** - Finds `<main>`, `<article>`, or best-scoring content `<div>`
+- **Re-parsing support** - Re-index with different parser using saved raw HTML
+
+### Changed
+- DOM parser is now the default (use `--parser=stream` for legacy behavior)
+- Index command re-parses from raw HTML when available
+
 ## [1.12.1] - 2026-02-03
 
 ### Added
