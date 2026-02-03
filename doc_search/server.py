@@ -21,6 +21,7 @@ from . import __version__
 # ============================================================================
 
 CSS = """
+/* Dark theme (default) */
 :root {
     --bg-primary: #0d1117;
     --bg-secondary: #161b22;
@@ -37,6 +38,25 @@ CSS = """
     --warning: #d29922;
     --gradient-start: #58a6ff;
     --gradient-end: #a371f7;
+}
+
+/* Light theme */
+body.light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --bg-tertiary: #eaeef2;
+    --border: #d0d7de;
+    --text-primary: #1f2328;
+    --text-secondary: #656d76;
+    --text-muted: #8c959f;
+    --accent: #0969da;
+    --accent-hover: #0550ae;
+    --highlight-bg: rgba(9, 105, 218, 0.1);
+    --highlight-text: #0550ae;
+    --success: #1a7f37;
+    --warning: #9a6700;
+    --gradient-start: #0969da;
+    --gradient-end: #8250df;
 }
 
 * {
@@ -162,6 +182,69 @@ a:hover {
 
 .search-button:active {
     transform: scale(0.98);
+}
+
+/* Search options row */
+.search-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+}
+
+.search-option {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-secondary);
+}
+
+.search-option label {
+    cursor: pointer;
+}
+
+.search-option select {
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.search-option select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.search-option input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* Theme toggle */
+.theme-toggle {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.theme-toggle select {
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    cursor: pointer;
 }
 
 /* Results info */
@@ -547,7 +630,10 @@ def render_page(
     suggestion: Optional[str] = None,
     facets: Optional[Dict[str, Dict[str, int]]] = None,
     active_facet: Optional[str] = None,
-    total_unfiltered: int = 0
+    total_unfiltered: int = 0,
+    sort_by: str = "relevance",
+    exact_match: bool = False,
+    theme: str = "dark"
 ) -> str:
     """Render the full HTML page."""
     
@@ -691,6 +777,50 @@ def render_page(
         </div>
         '''
     
+    # Build search options HTML
+    sort_relevance_sel = 'selected' if sort_by == 'relevance' else ''
+    sort_date_sel = 'selected' if sort_by == 'date' else ''
+    limit_10_sel = 'selected' if per_page == 10 else ''
+    limit_25_sel = 'selected' if per_page == 25 else ''
+    limit_50_sel = 'selected' if per_page == 50 else ''
+    exact_checked = 'checked' if exact_match else ''
+    theme_dark_sel = 'selected' if theme == 'dark' else ''
+    theme_light_sel = 'selected' if theme == 'light' else ''
+    body_class = 'light' if theme == 'light' else ''
+    
+    search_options_html = f'''
+            <div class="search-options">
+                <div class="search-option">
+                    <label for="sort">Sort:</label>
+                    <select name="sort" id="sort">
+                        <option value="relevance" {sort_relevance_sel}>Relevance</option>
+                        <option value="date" {sort_date_sel}>Newest</option>
+                    </select>
+                </div>
+                <div class="search-option">
+                    <label for="limit">Results:</label>
+                    <select name="limit" id="limit">
+                        <option value="10" {limit_10_sel}>10</option>
+                        <option value="25" {limit_25_sel}>25</option>
+                        <option value="50" {limit_50_sel}>50</option>
+                    </select>
+                </div>
+                <div class="search-option">
+                    <label>
+                        <input type="checkbox" name="exact" value="1" {exact_checked}>
+                        Exact match
+                    </label>
+                </div>
+                <div class="theme-toggle">
+                    <label for="theme">🎨</label>
+                    <select name="theme" id="theme">
+                        <option value="dark" {theme_dark_sel}>Dark</option>
+                        <option value="light" {theme_light_sel}>Light</option>
+                    </select>
+                </div>
+            </div>
+    '''
+    
     return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -699,7 +829,7 @@ def render_page(
     <title>{"Search: " + escape(query) + " — " if query else ""}doc-search</title>
     <style>{CSS}</style>
 </head>
-<body>
+<body class="{body_class}">
     <header class="header">
         <div class="header-content">
             <a href="/" class="logo">
@@ -723,6 +853,7 @@ def render_page(
                 >
                 <button type="submit" class="search-button">Search</button>
             </div>
+            {search_options_html}
         </form>
         
         {results_html}
@@ -814,7 +945,27 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Get facet filter (category)
         category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
         
-        per_page = self.per_page
+        # Get search options
+        sort_by = query_params.get('sort', ['relevance'])[0]
+        if sort_by not in ('relevance', 'date'):
+            sort_by = 'relevance'
+        
+        # Get results limit (per page)
+        try:
+            per_page = int(query_params.get('limit', [str(self.per_page)])[0])
+            if per_page not in (10, 25, 50):
+                per_page = self.per_page
+        except ValueError:
+            per_page = self.per_page
+        
+        # Get exact match toggle
+        exact_match = query_params.get('exact', [''])[0] == '1'
+        
+        # Get theme
+        theme = query_params.get('theme', ['dark'])[0]
+        if theme not in ('dark', 'light'):
+            theme = 'dark'
+        
         max_results = self.max_results
         
         # Get stats
@@ -880,11 +1031,17 @@ class SearchHandler(BaseHTTPRequestHandler):
                 suggestion=suggestion,
                 facets=facets,
                 active_facet=category_filter if category_filter else None,
-                total_unfiltered=total_unfiltered
+                total_unfiltered=total_unfiltered,
+                sort_by=sort_by,
+                exact_match=exact_match,
+                theme=theme
             )
         else:
             # Welcome page
-            html_content = render_page(stats=stats)
+            theme = query_params.get('theme', ['dark'])[0]
+            if theme not in ('dark', 'light'):
+                theme = 'dark'
+            html_content = render_page(stats=stats, theme=theme)
         
         self.send_html(html_content)
     
