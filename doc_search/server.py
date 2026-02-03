@@ -668,6 +668,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     per_page: int = 10
     max_results: int = 100
     start_time: float = None  # Server start time for uptime calculation
+    enable_autocomplete: bool = True  # Enable /suggest endpoint
     
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -702,6 +703,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Handle /health endpoint
         if parsed.path == '/health':
             self.handle_health()
+            return
+        
+        # Handle /suggest endpoint for autocomplete
+        if parsed.path == '/suggest':
+            self.handle_suggest(parsed.query)
             return
         
         query_params = urllib.parse.parse_qs(parsed.query)
@@ -763,6 +769,44 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         self.send_html(html_content)
     
+    def handle_suggest(self, query_string: str):
+        """Handle /suggest endpoint for autocomplete suggestions.
+        
+        Returns JSON: {"suggestions": ["term1", "term2", ...]}
+        Query params:
+            q: prefix to get suggestions for
+            limit: maximum number of suggestions (default 5, max 20)
+        """
+        # Check if autocomplete is enabled
+        if not self.enable_autocomplete:
+            self.send_json({'error': 'Autocomplete is disabled'}, 403)
+            return
+        
+        # Check if engine supports autocomplete
+        if not hasattr(self.engine, 'get_autocomplete_suggestions'):
+            self.send_json({'error': 'Autocomplete not available'}, 501)
+            return
+        
+        # Parse query parameters
+        query_params = urllib.parse.parse_qs(query_string)
+        prefix = query_params.get('q', [''])[0].strip()
+        
+        # Get limit (default 5, max 20)
+        try:
+            limit = min(20, max(1, int(query_params.get('limit', ['5'])[0])))
+        except ValueError:
+            limit = 5
+        
+        if not prefix:
+            self.send_json({'suggestions': []})
+            return
+        
+        try:
+            suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
+            self.send_json({'suggestions': suggestions})
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+    
     def handle_health(self):
         """Handle /health endpoint for monitoring and load balancers."""
         try:
@@ -809,7 +853,8 @@ def run_server(
     version: str = "",
     log_requests: bool = False,
     per_page: int = 10,
-    max_results: int = 100
+    max_results: int = 100,
+    enable_autocomplete: bool = True
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -821,6 +866,7 @@ def run_server(
         log_requests: If True, log HTTP requests to stdout
         per_page: Number of results per page (default: 10)
         max_results: Maximum total results for pagination (default: 100)
+        enable_autocomplete: If True, enable /suggest endpoint (default: True)
         
     Returns:
         HTTPServer instance (call serve_forever() to start)
@@ -831,5 +877,6 @@ def run_server(
     SearchHandler.per_page = per_page
     SearchHandler.max_results = max_results
     SearchHandler.start_time = time.time()  # Record server start time
+    SearchHandler.enable_autocomplete = enable_autocomplete
     server = HTTPServer((host, port), SearchHandler)
     return server
