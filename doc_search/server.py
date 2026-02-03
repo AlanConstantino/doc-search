@@ -370,9 +370,38 @@ a:hover {
 .result-score-fill {
     display: block;
     height: 100%;
-    background: var(--accent);
     border-radius: 3px;
     transition: width 0.2s ease;
+}
+
+.result-score-fill.score-high {
+    background: #22c55e;
+}
+
+.result-score-fill.score-medium {
+    background: #eab308;
+}
+
+.result-score-fill.score-low {
+    background: #ef4444;
+}
+
+.result-score-pct {
+    font-size: 0.7rem;
+    font-weight: 600;
+    min-width: 2.5em;
+}
+
+.result-score-pct.score-high {
+    color: #22c55e;
+}
+
+.result-score-pct.score-medium {
+    color: #eab308;
+}
+
+.result-score-pct.score-low {
+    color: #ef4444;
 }
 
 .result-url {
@@ -680,7 +709,8 @@ def render_page(
     sort_by: str = "relevance",
     exact_match: bool = False,
     theme: str = "dark",
-    autocomplete_terms: Optional[List[str]] = None
+    autocomplete_terms: Optional[List[str]] = None,
+    global_max_score: Optional[float] = None
 ) -> str:
     """Render the full HTML page."""
     
@@ -737,8 +767,8 @@ def render_page(
             start_num = (page - 1) * per_page + 1
             end_num = min(page * per_page, total_results)
             
-            # Find max score for normalization
-            max_score = max((r.get('score', 0) for r in results), default=1) or 1
+            # Use global max score for normalization (so colors are consistent across pages)
+            max_score = global_max_score if global_max_score else max((r.get('score', 0) for r in results), default=1) or 1
             
             results_html = f'''
             <div class="results-info">
@@ -757,8 +787,16 @@ def render_page(
                 
                 # Visual score bar (normalize relative to max score in results)
                 score_pct = int((score / max_score) * 100) if max_score > 0 else 0
+                # Color based on confidence: green (>=70%), yellow (40-69%), red (<40%)
+                if score_pct >= 70:
+                    score_color = 'score-high'
+                elif score_pct >= 40:
+                    score_color = 'score-medium'
+                else:
+                    score_color = 'score-low'
                 score_html = f'''<span class="result-score" title="Score: {score:.2f}">
-                    <span class="result-score-bar"><span class="result-score-fill" style="width: {score_pct}%"></span></span>
+                    <span class="result-score-bar"><span class="result-score-fill {score_color}" style="width: {score_pct}%"></span></span>
+                    <span class="result-score-pct {score_color}">{score_pct}%</span>
                 </span>''' if show_scores else ''
                 
                 snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
@@ -1125,6 +1163,9 @@ class SearchHandler(BaseHTTPRequestHandler):
                 if query:
                     autocomplete_terms = self.engine.get_autocomplete_suggestions(query[:3], max_suggestions=50)
             
+            # Get global max score for consistent color normalization across pages
+            global_max = filtered_results[0].get('score', 1) if filtered_results else 1
+            
             html_content = render_page(
                 query=query,
                 results=page_results,
@@ -1140,7 +1181,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                 sort_by=sort_by,
                 exact_match=exact_match,
                 theme=theme,
-                autocomplete_terms=autocomplete_terms
+                autocomplete_terms=autocomplete_terms,
+                global_max_score=global_max
             )
         else:
             # Welcome page
