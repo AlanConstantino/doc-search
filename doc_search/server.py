@@ -368,6 +368,7 @@ a:hover {
 }
 
 .result-score-fill {
+    display: block;
     height: 100%;
     background: var(--accent);
     border-radius: 3px;
@@ -736,6 +737,9 @@ def render_page(
             start_num = (page - 1) * per_page + 1
             end_num = min(page * per_page, total_results)
             
+            # Find max score for normalization
+            max_score = max((r.get('score', 0) for r in results), default=1) or 1
+            
             results_html = f'''
             <div class="results-info">
                 <span class="results-count">{_e('check')} Found {total_results} result{"s" if total_results != 1 else ""}</span>
@@ -751,8 +755,8 @@ def render_page(
                 snippet = highlight_snippet(r.get('snippet', '') or r.get('description', ''))
                 score = r.get('score', 0)
                 
-                # Visual score bar (normalize to percentage, cap at 100%)
-                score_pct = min(100, int(score * 100))
+                # Visual score bar (normalize relative to max score in results)
+                score_pct = int((score / max_score) * 100) if max_score > 0 else 0
                 score_html = f'''<span class="result-score" title="Score: {score:.2f}">
                     <span class="result-score-bar"><span class="result-score-fill" style="width: {score_pct}%"></span></span>
                 </span>''' if show_scores else ''
