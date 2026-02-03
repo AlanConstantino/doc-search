@@ -997,7 +997,9 @@ class SearchHandler(BaseHTTPRequestHandler):
             # Perform search - fetch enough for pagination
             search_start = time.perf_counter()
             # Pass expand_synonyms if enabled and engine supports it
-            if self.enable_synonyms and hasattr(self.engine, 'search'):
+            # Exact match disables synonym expansion
+            use_synonyms = self.enable_synonyms and not exact_match
+            if use_synonyms and hasattr(self.engine, 'search'):
                 import inspect
                 sig = inspect.signature(self.engine.search)
                 if 'expand_synonyms' in sig.parameters:
