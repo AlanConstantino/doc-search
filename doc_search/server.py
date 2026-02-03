@@ -232,19 +232,28 @@ a:hover {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+    gap: 0.25rem;
 }
 
-.theme-toggle select {
+.theme-btn {
     padding: 0.35rem 0.5rem;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 6px;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    cursor: pointer;
+    text-decoration: none;
+    font-size: 1rem;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+
+.theme-btn:hover {
+    opacity: 0.8;
+}
+
+.theme-btn.active {
+    opacity: 1;
+    border-color: var(--accent);
 }
 
 /* Results info */
@@ -784,9 +793,25 @@ def render_page(
     limit_25_sel = 'selected' if per_page == 25 else ''
     limit_50_sel = 'selected' if per_page == 50 else ''
     exact_checked = 'checked' if exact_match else ''
-    theme_dark_sel = 'selected' if theme == 'dark' else ''
-    theme_light_sel = 'selected' if theme == 'light' else ''
     body_class = 'light' if theme == 'light' else ''
+    
+    # Build theme toggle URLs (preserve current query params)
+    theme_params = []
+    if query:
+        theme_params.append(f"q={urllib.parse.quote(query)}")
+    if sort_by != "relevance":
+        theme_params.append(f"sort={sort_by}")
+    if per_page != 10:
+        theme_params.append(f"limit={per_page}")
+    if exact_match:
+        theme_params.append("exact=1")
+    if active_facet:
+        theme_params.append(f"category={urllib.parse.quote(active_facet)}")
+    base_params = "&".join(theme_params)
+    dark_url = "/?" + (base_params + "&theme=dark" if base_params else "theme=dark")
+    light_url = "/?" + (base_params + "&theme=light" if base_params else "theme=light")
+    dark_class = "theme-btn active" if theme == "dark" else "theme-btn"
+    light_class = "theme-btn active" if theme == "light" else "theme-btn"
     
     search_options_html = f'''
             <div class="search-options">
@@ -812,11 +837,8 @@ def render_page(
                     </label>
                 </div>
                 <div class="theme-toggle">
-                    <label for="theme">🎨</label>
-                    <select name="theme" id="theme">
-                        <option value="dark" {theme_dark_sel}>Dark</option>
-                        <option value="light" {theme_light_sel}>Light</option>
-                    </select>
+                    <a href="{dark_url}" class="{dark_class}" title="Dark theme">🌙</a>
+                    <a href="{light_url}" class="{light_class}" title="Light theme">☀️</a>
                 </div>
             </div>
     '''
