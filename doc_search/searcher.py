@@ -137,7 +137,8 @@ class SearchEngine:
         top_k: int = 10,
         min_score: float = 0.0,
         highlight: bool = True,
-        snippet_length: int = 150
+        snippet_length: int = 150,
+        title_boost: float = 3.0
     ) -> List[Dict[str, Any]]:
         """
         Search the index with phrase support and highlighted snippets.
@@ -148,6 +149,7 @@ class SearchEngine:
             min_score: Minimum score threshold
             highlight: Highlight query terms in snippets
             snippet_length: Target snippet length
+            title_boost: Score multiplier for title matches (default 2.0)
             
         Returns:
             List of result dictionaries
@@ -164,8 +166,8 @@ class SearchEngine:
             all_terms.extend(phrase)
         
         # Get initial results from BM25
-        # Request more than needed to filter by phrase
-        initial_k = top_k * 3 if phrases else top_k
+        # Request more than needed to allow for phrase filtering and title boosting reranking
+        initial_k = top_k * 3 if phrases else (top_k * 5 if title_boost > 1.0 else top_k)
         bm25_results = self.index.search(' '.join(all_terms), top_k=initial_k)
         
         if min_score > 0:
@@ -206,20 +208,33 @@ class SearchEngine:
             if highlight and snippet:
                 snippet = highlight_terms(snippet, terms_set)
             
+            # Calculate title boost - add bonus points for title matches
+            score = r.get('score', 0)
+            if title_boost > 1.0 and terms_set:
+                title = r.get('title', '').lower()
+                title_tokens = set(tokenize(title))
+                # Check how many query terms appear in title
+                matching_terms = terms_set & title_tokens
+                if matching_terms:
+                    # Add bonus points proportional to term coverage
+                    # Use the max score seen as a baseline for bonus calculation
+                    coverage = len(matching_terms) / len(terms_set)
+                    # Add significant bonus (title_boost points per matching term)
+                    score = score + (title_boost * coverage * len(terms_set))
+            
             result = {
                 'url': r['url'],
                 'title': r.get('title', ''),
                 'snippet': snippet,
                 'description': r.get('description', ''),  # Keep original too
-                'score': r.get('score', 0)
+                'score': score
             }
             
             results.append(result)
-            
-            if len(results) >= top_k:
-                break
         
-        return results
+        # Re-sort by boosted score and limit to top_k
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:top_k]
     
     def search_with_context(
         self,
@@ -429,7 +444,8 @@ class EnhancedSearchEngine(SearchEngine):
         highlight: bool = True,
         snippet_length: int = 150,
         facet_filters: Optional[Dict[str, str]] = None,
-        expand_synonyms: bool = True
+        expand_synonyms: bool = True,
+        title_boost: float = 3.0
     ) -> List[Dict[str, Any]]:
         """
         Search the index with enhanced features.
@@ -448,6 +464,7 @@ class EnhancedSearchEngine(SearchEngine):
             snippet_length: Target snippet length
             facet_filters: Optional facet filters (type -> value)
             expand_synonyms: Whether to expand query with synonyms
+            title_boost: Score multiplier for title matches (default 2.0)
             
         Returns:
             List of result dictionaries (same as SearchEngine.search())
@@ -483,7 +500,9 @@ class EnhancedSearchEngine(SearchEngine):
             all_terms.extend(phrase)
         
         # Get initial results from BM25
-        initial_k = top_k * 3 if phrases or facet_filters else top_k
+        # Request more to allow for phrase filtering, facets, and title boosting reranking
+        needs_extra = phrases or facet_filters or title_boost > 1.0
+        initial_k = top_k * 5 if needs_extra else top_k
         bm25_results = self.index.search(' '.join(all_terms), top_k=initial_k)
         
         if min_score > 0:
@@ -537,12 +556,25 @@ class EnhancedSearchEngine(SearchEngine):
             if highlight and snippet:
                 snippet = highlight_terms(snippet, terms_set)
             
+            # Calculate title boost - add bonus points for title matches
+            score = r.get('score', 0)
+            if title_boost > 1.0 and terms_set:
+                title = r.get('title', '').lower()
+                title_tokens = set(tokenize(title))
+                # Check how many query terms appear in title
+                matching_terms = terms_set & title_tokens
+                if matching_terms:
+                    # Add bonus points proportional to term coverage
+                    coverage = len(matching_terms) / len(terms_set)
+                    # Add significant bonus (title_boost points per matching term)
+                    score = score + (title_boost * coverage * len(terms_set))
+            
             result = {
                 'url': r['url'],
                 'title': r.get('title', ''),
                 'snippet': snippet,
                 'description': r.get('description', ''),
-                'score': r.get('score', 0)
+                'score': score
             }
             
             # Add facets for this result
@@ -552,9 +584,10 @@ class EnhancedSearchEngine(SearchEngine):
                     result['facets'] = self._facets.get_doc_facets(doc_id)
             
             results.append(result)
-            
-            if len(results) >= top_k:
-                break
+        
+        # Re-sort by boosted score and limit to top_k
+        results.sort(key=lambda x: x['score'], reverse=True)
+        results = results[:top_k]
         
         # Get facet counts for results
         if self._facets and results:
