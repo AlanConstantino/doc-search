@@ -165,9 +165,14 @@ a:hover {
     gap: 0.75rem;
 }
 
-.search-input {
+.search-input-wrapper {
+    position: relative;
     flex: 1;
-    padding: 0.875rem 1rem;
+}
+
+.search-input {
+    width: 100%;
+    padding: 0.875rem 2.5rem 0.875rem 1rem;
     font-size: 1.125rem;
     background: var(--bg-secondary);
     border: 2px solid var(--border);
@@ -175,6 +180,25 @@ a:hover {
     color: var(--text-primary);
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+
+.search-clear {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    padding: 0.25rem;
+    line-height: 1;
+}
+
+.search-clear:hover {
+    color: var(--text-primary);
 }
 
 .search-input:focus {
@@ -971,19 +995,22 @@ def render_page(
     <main class="main">
         <form class="search-form" method="GET" action="/">
             <div class="search-box">
-                <input 
-                    type="search" 
-                    name="q"
-                    class="search-input" 
-                    placeholder="Search documentation..."
-                    value="{escape(query)}"
-                    list="search-suggestions"
-                    autocomplete="off"
-                    minlength="1"
-                    maxlength="200"
-                    accesskey="s"
-                    autofocus
-                >
+                <div class="search-input-wrapper">
+                    <input 
+                        type="text" 
+                        name="q"
+                        class="search-input" 
+                        placeholder="Search documentation..."
+                        value="{escape(query)}"
+                        list="search-suggestions"
+                        autocomplete="off"
+                        minlength="1"
+                        maxlength="200"
+                        accesskey="s"
+                        autofocus
+                    >
+                    <button type="button" class="search-clear" onclick="this.previousElementSibling.value='';this.previousElementSibling.focus();" aria-label="Clear search">✕</button>
+                </div>
                 <button type="submit" class="search-button">Search</button>
             </div>
             {search_options_html}
