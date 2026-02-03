@@ -46,6 +46,7 @@ def build_page_data(
     etag: Optional[str] = None,
     last_modified: Optional[str] = None,
     hash_value: Optional[str] = None,
+    raw_html: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build a page data dictionary from extracted content.
@@ -57,6 +58,7 @@ def build_page_data(
         etag: Optional ETag header value for incremental crawling.
         last_modified: Optional Last-Modified header value for incremental crawling.
         hash_value: Optional content hash for change detection.
+        raw_html: Optional raw HTML content for re-parsing later.
     
     Returns:
         A dictionary with all page data ready for persistence.
@@ -69,7 +71,7 @@ def build_page_data(
         >>> data['title']
         'Test'
     """
-    return {
+    data = {
         'url': url,
         'title': extracted['title'],
         'description': extracted['description'],
@@ -82,6 +84,9 @@ def build_page_data(
         'last_modified': last_modified,
         'content_hash': hash_value,
     }
+    if raw_html is not None:
+        data['raw_html'] = raw_html
+    return data
 
 
 def build_document_data(
@@ -141,15 +146,17 @@ class PageProcessor:
         'Example Page'
     """
     
-    def __init__(self, pages_dir: Path):
+    def __init__(self, pages_dir: Path, save_html: bool = True):
         """
         Initialize the page processor.
         
         Args:
             pages_dir: Directory for storing page JSON files.
+            save_html: Whether to save raw HTML content (default: True).
         """
         self.pages_dir = Path(pages_dir)
         self.pages_dir.mkdir(parents=True, exist_ok=True)
+        self.save_html = save_html
     
     def process_html(
         self,
@@ -213,6 +220,7 @@ class PageProcessor:
             etag=etag,
             last_modified=last_modified,
             hash_value=hash_value,
+            raw_html=html if self.save_html else None,
         )
         
         return {
