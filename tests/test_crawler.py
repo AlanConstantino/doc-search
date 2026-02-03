@@ -1579,7 +1579,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
         self.assertEqual(saved_data['last_modified'], 'Wed, 01 Jan 2020 00:00:00 GMT')
         self.assertEqual(saved_data['content_hash'], 'hash123')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_sends_etag_header(self, mock_urlopen):
         """_fetch should send If-None-Match header when etag is provided."""
         crawler = self.create_crawler()
@@ -1594,7 +1594,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
         request = call_args[0][0]
         self.assertEqual(request.get_header('If-none-match'), '"abc123"')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_sends_last_modified_header(self, mock_urlopen):
         """_fetch should send If-Modified-Since header when last_modified is provided."""
         crawler = self.create_crawler()
@@ -1610,7 +1610,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
         request = call_args[0][0]
         self.assertEqual(request.get_header('If-modified-since'), last_mod)
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_handles_304_not_modified(self, mock_urlopen):
         """_fetch should return not_modified=True on HTTP 304."""
         crawler = self.create_crawler()
@@ -1629,7 +1629,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
         self.assertIsNone(content_type)
         self.assertTrue(metadata.get('not_modified'))
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_etag_from_response(self, mock_urlopen):
         """_fetch should capture ETag from response headers."""
         crawler = self.create_crawler()
@@ -1644,7 +1644,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
         
         self.assertEqual(metadata.get('etag'), '"newetag456"')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_last_modified_from_response(self, mock_urlopen):
         """_fetch should capture Last-Modified from response headers."""
         crawler = self.create_crawler()
@@ -1721,7 +1721,7 @@ class TestIncrementalCrawl(CrawlerTestCase):
 class TestCrawlErrorRecording(CrawlerTestCase):
     """Tests for error recording during crawling."""
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_http_error_metadata_for_404(self, mock_urlopen):
         """_fetch should return error metadata for HTTP 404."""
         crawler = self.create_crawler()
@@ -1736,7 +1736,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(metadata.get('error_type'), 'http')
         self.assertIn('404', metadata.get('error_message', ''))
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_http_error_metadata_for_500(self, mock_urlopen):
         """_fetch should return error metadata for HTTP 500."""
         crawler = self.create_crawler()
@@ -1752,7 +1752,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertIn('500', metadata.get('error_message', ''))
         self.assertIn('Server error', metadata.get('error_message', ''))
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_http_error_metadata_for_429(self, mock_urlopen):
         """_fetch should return error metadata for HTTP 429 (rate limited)."""
         crawler = self.create_crawler()
@@ -1771,7 +1771,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertIn('429', metadata.get('error_message', ''))
         self.assertIn('Rate limited', metadata.get('error_message', ''))
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_timeout_error_metadata(self, mock_urlopen):
         """_fetch should return timeout error metadata."""
         crawler = self.create_crawler()
@@ -1783,7 +1783,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertIsNone(content)
         self.assertEqual(metadata.get('error_type'), 'timeout')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_ssl_error_metadata(self, mock_urlopen):
         """_fetch should return SSL error metadata."""
         crawler = self.create_crawler()
@@ -1795,7 +1795,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertIsNone(content)
         self.assertEqual(metadata.get('error_type'), 'ssl')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_fetch_returns_network_error_metadata(self, mock_urlopen):
         """_fetch should return network error metadata for connection errors."""
         crawler = self.create_crawler()
@@ -1808,7 +1808,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(metadata.get('error_type'), 'network')
         self.assertIn('Connection refused', metadata.get('error_message', ''))
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_process_page_records_http_error(self, mock_urlopen):
         """_process_page should record HTTP errors in crawl state."""
         crawler = self.create_crawler()
@@ -1830,7 +1830,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(errors[0].error_type, 'http')
         self.assertIn('404', errors[0].message)
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_process_page_records_timeout_error(self, mock_urlopen):
         """_process_page should record timeout errors in crawl state."""
         crawler = self.create_crawler()
@@ -1846,7 +1846,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0].error_type, 'timeout')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_process_page_records_ssl_error(self, mock_urlopen):
         """_process_page should record SSL errors in crawl state."""
         crawler = self.create_crawler()
@@ -1862,7 +1862,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0].error_type, 'ssl')
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_multiple_errors_recorded(self, mock_urlopen):
         """Should record multiple errors for multiple failed pages."""
         crawler = self.create_crawler()
@@ -1892,7 +1892,7 @@ class TestCrawlErrorRecording(CrawlerTestCase):
         self.assertEqual(summary['http'], 2)
         self.assertEqual(summary['timeout'], 1)
     
-    @patch('doc_search.crawler.urlopen')
+    @patch('doc_search.crawler.fetcher.urlopen')
     def test_errors_persist_through_checkpoint(self, mock_urlopen):
         """Errors should be saved and restored through checkpoints."""
         crawler = self.create_crawler()

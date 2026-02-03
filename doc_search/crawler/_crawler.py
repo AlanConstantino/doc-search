@@ -5,29 +5,27 @@ Supports parallel crawling with per-domain rate limiting.
 
 import json
 import time
-import gzip
 import hashlib
 import threading
 from pathlib import Path
 from typing import Optional, Set, Dict, Any, Callable, Tuple, List
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
-from .utils import (
+from ..utils import (
     normalize_url, is_same_domain, url_to_filename, 
     is_html_content, get_domain, make_basic_auth_header,
     create_permissive_ssl_context
 )
-from .robots import RobotsChecker
-from .parser import extract_text, extract_links
-from .constants import (
+from ..robots import RobotsChecker
+from ..parser import extract_text, extract_links
+from ..constants import (
     DEFAULT_CRAWL_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_CRAWL_RETRIES,
-    CHECKPOINT_INTERVAL as CHECKPOINT_INTERVAL_CONST, DEFAULT_RATE_LIMIT_BACKOFF
+    CHECKPOINT_INTERVAL as CHECKPOINT_INTERVAL_CONST
 )
-from .crawl_state import CrawlState
-from .rate_limiter import RateLimiter
+from ..crawl_state import CrawlState
+from ..rate_limiter import RateLimiter
+from .fetcher import Fetcher
 
 
 # Extensions that should never be crawled (archives, media, binaries)
@@ -119,7 +117,7 @@ class Crawler:
         # Initialize PDF extractor if document extraction is enabled
         self._pdf_extractor = None
         if self.extract_docs:
-            from .pdf_extractor import PDFExtractor
+            from ..pdf_extractor import PDFExtractor
             self._pdf_extractor = PDFExtractor(
                 timeout=timeout,
                 user_agent=self.USER_AGENT,
@@ -157,12 +155,29 @@ class Crawler:
         
         # Stop flag for graceful shutdown
         self._stop_requested = False
+        
+        # Initialize fetcher
+        self._fetcher = Fetcher(
+            user_agent=self.USER_AGENT,
+            delay=delay,
+            timeout=timeout,
+            auth=auth,
+            auth_token=auth_token,
+            rate_limiter=self.rate_limiter,
+            ssl_context=self.ssl_context,
+            log_func=self._log,
+            stats_callback=self._update_stat
+        )
     
     def _log(self, message: str):
         """Print message if verbose mode is enabled (thread-safe)."""
         if self.verbose:
             with self._print_lock:
                 print(message)
+    
+    def _update_stat(self, stat_name: str, value: int):
+        """Update a crawl statistic (thread-safe)."""
+        self.state.increment_stat(stat_name, value)
     
     def _get_auth_header(self) -> Optional[str]:
         """Get Basic Auth header if credentials provided."""
@@ -195,140 +210,8 @@ class Crawler:
         For incremental crawling, pass etag/last_modified from previous crawl.
         Returns content=None with metadata={'not_modified': True} if unchanged.
         """
-        domain = get_domain(url)
-        self.rate_limiter.wait_for_domain(domain)
-        
-        headers = {
-            'User-Agent': self.USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
-        
-        # Add conditional headers for incremental crawling
-        if etag:
-            headers['If-None-Match'] = etag
-        if last_modified:
-            headers['If-Modified-Since'] = last_modified
-        
-        auth_header = self._get_auth_header()
-        if auth_header:
-            headers['Authorization'] = auth_header
-        
-        request = Request(url, headers=headers)
-        
-        try:
-            response = urlopen(request, timeout=self.timeout, context=self.ssl_context)
-            
-            # Read content
-            content_bytes = response.read()
-            
-            # Handle gzip encoding
-            content_encoding = response.headers.get('Content-Encoding', '')
-            if 'gzip' in content_encoding.lower():
-                try:
-                    content_bytes = gzip.decompress(content_bytes)
-                except Exception:
-                    pass
-            
-            # Decode content
-            content_type = response.headers.get('Content-Type', '')
-            charset = 'utf-8'
-            if 'charset=' in content_type:
-                charset = content_type.split('charset=')[-1].split(';')[0].strip()
-            
-            try:
-                content = content_bytes.decode(charset)
-            except (UnicodeDecodeError, LookupError):
-                content = content_bytes.decode('utf-8', errors='replace')
-            
-            self.state.increment_stat('bytes_downloaded', len(content_bytes))
-            
-            # Capture metadata for incremental crawling
-            metadata = {
-                'etag': response.headers.get('ETag'),
-                'last_modified': response.headers.get('Last-Modified'),
-            }
-            
-            return content, content_type, metadata
-            
-        except HTTPError as e:
-            if e.code == 304:
-                # Not Modified - content unchanged
-                return None, None, {'not_modified': True}
-            elif e.code == 429:
-                # Rate limited - back off
-                retry_after = e.headers.get('Retry-After', str(DEFAULT_RATE_LIMIT_BACKOFF))
-                try:
-                    wait_time = int(retry_after)
-                except ValueError:
-                    wait_time = DEFAULT_RATE_LIMIT_BACKOFF
-                self.rate_limiter.set_backoff(domain, wait_time)
-                self._log(f"  Rate limited, backing off for {wait_time}s")
-                return None, None, {
-                    'error_type': 'http',
-                    'error_message': f'HTTP {e.code}: Rate limited (retry after {wait_time}s)'
-                }
-            elif e.code >= 500:
-                self._log(f"  Server error: {e.code}")
-                return None, None, {
-                    'error_type': 'http',
-                    'error_message': f'HTTP {e.code}: Server error'
-                }
-            else:
-                self._log(f"  HTTP error: {e.code}")
-                return None, None, {
-                    'error_type': 'http',
-                    'error_message': f'HTTP {e.code}'
-                }
-            
-        except URLError as e:
-            reason = str(e.reason)
-            # Check for SSL errors
-            if 'ssl' in reason.lower() or 'certificate' in reason.lower():
-                self._log(f"  SSL error: {reason}")
-                return None, None, {
-                    'error_type': 'ssl',
-                    'error_message': reason
-                }
-            # Check for timeout
-            elif 'timed out' in reason.lower() or 'timeout' in reason.lower():
-                self._log(f"  Timeout: {reason}")
-                return None, None, {
-                    'error_type': 'timeout',
-                    'error_message': reason
-                }
-            else:
-                self._log(f"  URL error: {reason}")
-                return None, None, {
-                    'error_type': 'network',
-                    'error_message': reason
-                }
-            
-        except ssl.SSLError as e:
-            message = str(e)
-            self._log(f"  SSL error: {message}")
-            return None, None, {
-                'error_type': 'ssl',
-                'error_message': message
-            }
-            
-        except TimeoutError as e:
-            message = str(e) or 'Connection timed out'
-            self._log(f"  Timeout: {message}")
-            return None, None, {
-                'error_type': 'timeout',
-                'error_message': message
-            }
-            
-        except Exception as e:
-            message = str(e)
-            self._log(f"  Error: {message}")
-            return None, None, {
-                'error_type': 'unknown',
-                'error_message': message
-            }
+        result = self._fetcher.fetch(url, etag=etag, last_modified=last_modified)
+        return result.as_tuple()
     
     def _is_skippable_extension(self, url: str) -> bool:
         """Check if URL has an extension that should be skipped."""
@@ -599,6 +482,8 @@ class Crawler:
             self._log(f"Respecting robots.txt crawl-delay: {robots_delay}s")
             self.delay = robots_delay
             self.rate_limiter = RateLimiter(self.delay)
+            # Update fetcher's rate limiter too
+            self._fetcher.rate_limiter = self.rate_limiter
         
         # Load or initialize state
         if self.incremental:
