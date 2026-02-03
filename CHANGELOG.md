@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-02-03
+
+### Added
+- **Raw HTML storage** - Crawler now saves raw HTML by default for re-parsing later (#167)
+- **`--no-save-html` flag** - Disable raw HTML storage to save disk space
+- **Keyboard shortcut** - `accesskey="s"` to focus search (Alt+S / Ctrl+Opt+S) (#161)
+- **First/Last pagination** - Jump to beginning/end of results (#161)
+- **Colored score bars** - Visual confidence indicators (green/yellow/red) with percentages (#163)
+
+### Changed
+- Exact match toggle now uses phrase matching (words must appear in order) (#164)
+- Removed collapsible snippet cards for simpler UI (#160)
+- Score bars normalize relative to global max score across all pages (#162)
+
+### Fixed
+- Search clear button (X) now positioned at right edge of input (#165)
+- Score bar fill now displays correctly (#162)
+
 ## [1.12.0] - 2026-02-03
 
 ### Added
