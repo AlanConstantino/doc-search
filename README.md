@@ -106,6 +106,8 @@ Press `Ctrl+C` to stop the server.
 --delay 2.0          # Seconds between requests (default: 1.0)
 --workers 4          # Parallel crawlers (default: 1)
 --extract-docs       # Extract text from PDFs
+--parser dom         # HTML parser: dom (default) or stream
+--no-save-html       # Don't save raw HTML (saves disk space)
 --user admin         # HTTP Basic Auth username
 ```
 
@@ -127,6 +129,44 @@ Example:
 ```bash
 export DOC_SEARCH_NO_EMOJI=1
 python -m doc_search serve ~/.doc_search/sites/*/
+```
+
+## HTML Parsers
+
+doc-search includes two HTML parsers for text extraction:
+
+### DOM Parser (Default)
+
+The DOM parser builds a tree structure from HTML, enabling:
+- **Smart content detection** — Finds `<main>`, `<article>`, or the best content `<div>`
+- **Better boilerplate removal** — Strips nav, sidebar, footer by tag, ARIA role, and CSS class
+- **Structure-aware extraction** — Understands document hierarchy
+
+```bash
+# Uses DOM parser by default
+python -m doc_search crawl https://docs.example.com
+python -m doc_search index https://docs.example.com
+```
+
+### Streaming Parser (Legacy)
+
+The streaming parser processes HTML sequentially without building a tree:
+- **Faster** — Lower memory usage
+- **Simpler** — Basic tag filtering
+
+```bash
+# Use streaming parser
+python -m doc_search crawl https://docs.example.com --parser=stream
+python -m doc_search index https://docs.example.com --parser=stream
+```
+
+### Re-indexing with a Different Parser
+
+If raw HTML was saved during crawling (default), you can re-index with a different parser without re-crawling:
+
+```bash
+# Re-index existing crawl with DOM parser
+python -m doc_search index https://docs.example.com --parser=dom
 ```
 
 ## PDF Extraction
