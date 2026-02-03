@@ -195,13 +195,13 @@ class TestHighlightSnippet(unittest.TestCase):
     def test_highlights_terms(self):
         """Should convert **term** to highlighted span."""
         result = highlight_snippet('This is **important** text')
-        self.assertIn('<span class="highlight">important</span>', result)
+        self.assertIn('<mark>important</mark>', result)
         self.assertNotIn('**', result)
     
     def test_highlights_multiple_terms(self):
         """Should highlight multiple terms."""
         result = highlight_snippet('**first** and **second** terms')
-        self.assertEqual(result.count('<span class="highlight">'), 2)
+        self.assertEqual(result.count('<mark>'), 2)
         self.assertIn('first', result)
         self.assertIn('second', result)
     
@@ -694,11 +694,11 @@ class TestServerResultRendering(ServerTestCase):
         self.assertIn('&lt;script&gt;', body)
     
     def test_snippet_highlight_preserved(self):
-        """Highlight markers should become highlight spans."""
+        """Highlight markers should become <mark> elements (HTML5)."""
         status, headers, body = self.make_request('/?q=test')
         
-        # **highlight** should become highlighted span
-        self.assertIn('class="highlight"', body)
+        # **highlight** should become <mark> element
+        self.assertIn('<mark>', body)
         self.assertIn('>highlight<', body)
 
 

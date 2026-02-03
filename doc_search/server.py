@@ -374,12 +374,46 @@ a:hover {
     line-height: 1.6;
 }
 
-.highlight {
+/* HTML5 <mark> element for semantic highlighting */
+mark {
     background: var(--highlight-bg);
     color: var(--highlight-text);
     padding: 0.1em 0.25em;
     border-radius: 3px;
     font-weight: 600;
+}
+
+/* HTML5 <details>/<summary> for expandable snippets */
+.result-snippet-details {
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.result-snippet-summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    list-style: none;
+}
+
+.result-snippet-summary::-webkit-details-marker {
+    display: none;
+}
+
+.result-snippet-summary::before {
+    content: "▶ ";
+    font-size: 0.75em;
+    color: var(--text-muted);
+}
+
+details[open] .result-snippet-summary::before {
+    content: "▼ ";
+}
+
+.result-snippet-full {
+    margin-top: 0.5rem;
+    padding-left: 1rem;
+    border-left: 2px solid var(--border);
 }
 
 /* Empty/welcome state */
@@ -634,16 +668,16 @@ def escape(text: str) -> str:
 
 
 def highlight_snippet(snippet: str) -> str:
-    """Convert **term** markers to <span class="highlight">."""
+    """Convert **term** markers to <mark> elements (HTML5 semantic highlighting)."""
     if not snippet:
         return ""
     
     result = escape(snippet)
-    # Replace **term** with highlighted spans
+    # Replace **term** with <mark> elements
     import re
     result = re.sub(
         r'\*\*([^*]+)\*\*',
-        r'<span class="highlight">\1</span>',
+        r'<mark>\1</mark>',
         result
     )
     return result
@@ -664,13 +698,23 @@ def render_page(
     total_unfiltered: int = 0,
     sort_by: str = "relevance",
     exact_match: bool = False,
-    theme: str = "dark"
+    theme: str = "dark",
+    autocomplete_terms: Optional[List[str]] = None
 ) -> str:
     """Render the full HTML page."""
     
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
     unique_terms = stats.get('unique_terms', 0)
+    
+    # Build datalist for HTML5 autocomplete
+    datalist_html = ""
+    if autocomplete_terms:
+        options = "\n".join(f'        <option value="{escape(term)}">' for term in autocomplete_terms[:100])
+        datalist_html = f'''
+    <datalist id="search-suggestions">
+{options}
+    </datalist>'''
     
     # Build facet filter HTML
     facets_html = ""
@@ -729,6 +773,23 @@ def render_page(
                 
                 score_html = f'<span class="result-score">{score:.2f}</span>' if show_scores else ''
                 
+                # Use <details> for long snippets (HTML5 collapsible)
+                snippet_html = ""
+                if snippet:
+                    # Strip HTML for length check
+                    import re
+                    plain_snippet = re.sub(r'<[^>]+>', '', snippet)
+                    if len(plain_snippet) > 150:
+                        # Long snippet: use details/summary
+                        preview = plain_snippet[:100] + "..."
+                        snippet_html = f'''
+                    <details class="result-snippet-details">
+                        <summary class="result-snippet-summary">{escape(preview)}</summary>
+                        <div class="result-snippet-full">{snippet}</div>
+                    </details>'''
+                    else:
+                        snippet_html = f'<div class="result-snippet">{snippet}</div>'
+                
                 results_html += f'''
                 <div class="result">
                     <div class="result-header">
@@ -737,7 +798,7 @@ def render_page(
                         {score_html}
                     </div>
                     <div class="result-url">{url}</div>
-                    {"<div class='result-snippet'>" + snippet + "</div>" if snippet else ""}
+                    {snippet_html}
                 </div>
                 '''
             results_html += '</div>'
@@ -888,17 +949,22 @@ def render_page(
         <form class="search-form" method="GET" action="/">
             <div class="search-box">
                 <input 
-                    type="text" 
+                    type="search" 
                     name="q"
                     class="search-input" 
                     placeholder="Search documentation..."
                     value="{escape(query)}"
+                    list="search-suggestions"
+                    autocomplete="off"
+                    minlength="1"
+                    maxlength="200"
                     autofocus
                 >
                 <button type="submit" class="search-button">Search</button>
             </div>
             {search_options_html}
         </form>
+        {datalist_html}
         
         {results_html}
     </main>
@@ -1066,6 +1132,13 @@ class SearchHandler(BaseHTTPRequestHandler):
                 if suggestion and suggestion.lower() == query.lower():
                     suggestion = None
             
+            # Get autocomplete terms for datalist
+            autocomplete_terms = None
+            if self.enable_autocomplete and hasattr(self.engine, 'get_autocomplete_suggestions'):
+                # Get suggestions based on query for refinement
+                if query:
+                    autocomplete_terms = self.engine.get_autocomplete_suggestions(query[:3], max_suggestions=50)
+            
             html_content = render_page(
                 query=query,
                 results=page_results,
@@ -1080,14 +1153,22 @@ class SearchHandler(BaseHTTPRequestHandler):
                 total_unfiltered=total_unfiltered,
                 sort_by=sort_by,
                 exact_match=exact_match,
-                theme=theme
+                theme=theme,
+                autocomplete_terms=autocomplete_terms
             )
         else:
             # Welcome page
             theme = query_params.get('theme', ['dark'])[0]
             if theme not in ('dark', 'light'):
                 theme = 'dark'
-            html_content = render_page(stats=stats, theme=theme)
+            
+            # Get popular terms for datalist on welcome page
+            autocomplete_terms = None
+            if self.enable_autocomplete and hasattr(self.engine, 'get_autocomplete_suggestions'):
+                # Get general suggestions for empty search
+                autocomplete_terms = self.engine.get_autocomplete_suggestions('', max_suggestions=100)
+            
+            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms)
         
         self.send_html(html_content)
     
