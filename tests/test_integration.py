@@ -170,7 +170,7 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_full_workflow_crawl_index_search(self):
         """Test complete workflow: crawl mock site → build index → search."""
         # Step 1: Crawl mock site
@@ -234,7 +234,7 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         )
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_index_persistence_save_load(self):
         """Test index save/load round-trip."""
         # Crawl and build index
@@ -276,7 +276,7 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
             self.assertAlmostEqual(orig['score'], loaded['score'], places=4)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_index_uncompressed_save_load(self):
         """Test uncompressed index save/load."""
         # Crawl and build index
@@ -303,7 +303,7 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         self.assertEqual(loaded_index.total_docs, index.total_docs)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_enhanced_search_engine(self):
         """Test EnhancedSearchEngine with full workflow."""
         # Crawl and build index
@@ -394,7 +394,7 @@ class TestCrawlerErrorHandling(unittest.TestCase):
             raise HTTPError(url, 404, 'Not Found', {}, None)
         
         with patch('urllib.request.urlopen', mock_urlopen_with_errors), \
-             patch('doc_search.crawler.urlopen', mock_urlopen_with_errors):
+             patch('doc_search.crawler.fetcher.urlopen', mock_urlopen_with_errors):
             crawler = Crawler(
                 base_url='https://example.com/',
                 data_dir=self.data_dir,
@@ -434,7 +434,7 @@ class TestCrawlerErrorHandling(unittest.TestCase):
             raise HTTPError(url, 404, 'Not Found', {}, None)
         
         with patch('urllib.request.urlopen', mock_urlopen_network_error), \
-             patch('doc_search.crawler.urlopen', mock_urlopen_network_error):
+             patch('doc_search.crawler.fetcher.urlopen', mock_urlopen_network_error):
             crawler = Crawler(
                 base_url='https://example.com/',
                 data_dir=self.data_dir,
@@ -522,7 +522,7 @@ class TestCrawlerConfiguration(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_max_pages_limit(self):
         """Test crawler respects max_pages limit."""
         crawler = Crawler(
@@ -538,7 +538,7 @@ class TestCrawlerConfiguration(unittest.TestCase):
         self.assertLessEqual(stats['pages_crawled'], 2)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_max_depth_limit(self):
         """Test crawler respects max_depth limit."""
         crawler = Crawler(
@@ -555,7 +555,7 @@ class TestCrawlerConfiguration(unittest.TestCase):
         self.assertEqual(stats['pages_crawled'], 1)
     
     @patch('urllib.request.urlopen', mock_urlopen)
-    @patch('doc_search.crawler.urlopen', mock_urlopen)
+    @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
     def test_url_filter(self):
         """Test crawler respects custom URL filter."""
         def only_tutorials(url):
