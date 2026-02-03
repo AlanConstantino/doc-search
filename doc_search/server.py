@@ -449,6 +449,68 @@ a:hover {
     color: var(--text-secondary);
     font-size: 0.875rem;
 }
+
+/* Facet filters */
+.facet-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.facet-label {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.5rem 0;
+    margin-right: 0.5rem;
+}
+
+.facet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.facet-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.facet-btn.active {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    border-color: transparent;
+    color: white;
+}
+
+.facet-btn.active:hover {
+    opacity: 0.9;
+}
+
+.facet-count {
+    background: rgba(255, 255, 255, 0.15);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.facet-btn:not(.active) .facet-count {
+    background: var(--bg-primary);
+}
 """
 
 
@@ -482,13 +544,36 @@ def render_page(
     page: int = 1,
     per_page: int = 10,
     total_results: int = 0,
-    suggestion: Optional[str] = None
+    suggestion: Optional[str] = None,
+    facets: Optional[Dict[str, Dict[str, int]]] = None,
+    active_facet: Optional[str] = None,
+    total_unfiltered: int = 0
 ) -> str:
     """Render the full HTML page."""
     
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
     unique_terms = stats.get('unique_terms', 0)
+    
+    # Build facet filter HTML
+    facets_html = ""
+    if query and facets and 'category' in facets and len(facets['category']) > 1:
+        encoded_query = urllib.parse.quote(query)
+        facets_html = '<div class="facet-filters"><span class="facet-label">Filter by:</span>'
+        
+        # "All" button - active if no facet selected
+        all_class = 'facet-btn active' if not active_facet else 'facet-btn'
+        all_count = total_unfiltered if total_unfiltered else total_results
+        facets_html += f'<a href="/?q={encoded_query}" class="{all_class}">All <span class="facet-count">{all_count}</span></a>'
+        
+        # Facet buttons - sorted by count descending
+        sorted_facets = sorted(facets['category'].items(), key=lambda x: -x[1])
+        for facet_value, count in sorted_facets:
+            is_active = active_facet == facet_value
+            btn_class = 'facet-btn active' if is_active else 'facet-btn'
+            facets_html += f'<a href="/?q={encoded_query}&category={urllib.parse.quote(facet_value)}" class="{btn_class}">{escape(facet_value)} <span class="facet-count">{count}</span></a>'
+        
+        facets_html += '</div>'
     
     # Build spell check suggestion HTML
     suggestion_html = ""
@@ -516,6 +601,7 @@ def render_page(
                 <span class="results-time">in {elapsed_ms:.1f}ms</span>
                 <span class="results-query">showing {start_num}-{end_num} for "{escape(query)}"</span>
             </div>
+            {facets_html}
             <div class="results">
             '''
             for i, r in enumerate(results, start_num):
@@ -542,11 +628,13 @@ def render_page(
             # Build pagination controls (pure HTML links)
             if total_pages > 1:
                 encoded_query = urllib.parse.quote(query)
+                # Preserve active facet in pagination links
+                facet_param = f'&category={urllib.parse.quote(active_facet)}' if active_facet else ''
                 results_html += '<div class="pagination">'
                 
                 # Previous link
                 if page > 1:
-                    results_html += f'<a href="/?q={encoded_query}&page={page-1}">← Previous</a>'
+                    results_html += f'<a href="/?q={encoded_query}&page={page-1}{facet_param}">← Previous</a>'
                 else:
                     results_html += '<span class="disabled">← Previous</span>'
                 
@@ -555,7 +643,7 @@ def render_page(
                 end_page = min(total_pages, page + 3)
                 
                 if start_page > 1:
-                    results_html += f'<a href="/?q={encoded_query}&page=1">1</a>'
+                    results_html += f'<a href="/?q={encoded_query}&page=1{facet_param}">1</a>'
                     if start_page > 2:
                         results_html += '<span class="page-info">...</span>'
                 
@@ -563,16 +651,16 @@ def render_page(
                     if p == page:
                         results_html += f'<span class="current">{p}</span>'
                     else:
-                        results_html += f'<a href="/?q={encoded_query}&page={p}">{p}</a>'
+                        results_html += f'<a href="/?q={encoded_query}&page={p}{facet_param}">{p}</a>'
                 
                 if end_page < total_pages:
                     if end_page < total_pages - 1:
                         results_html += '<span class="page-info">...</span>'
-                    results_html += f'<a href="/?q={encoded_query}&page={total_pages}">{total_pages}</a>'
+                    results_html += f'<a href="/?q={encoded_query}&page={total_pages}{facet_param}">{total_pages}</a>'
                 
                 # Next link
                 if page < total_pages:
-                    results_html += f'<a href="/?q={encoded_query}&page={page+1}">Next →</a>'
+                    results_html += f'<a href="/?q={encoded_query}&page={page+1}{facet_param}">Next →</a>'
                 else:
                     results_html += '<span class="disabled">Next →</span>'
                 
@@ -669,6 +757,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     max_results: int = 100
     start_time: float = None  # Server start time for uptime calculation
     enable_autocomplete: bool = True  # Enable /suggest endpoint
+    enable_facets: bool = True  # Enable faceted search filtering
     
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -721,6 +810,9 @@ class SearchHandler(BaseHTTPRequestHandler):
         except ValueError:
             page = 1
         
+        # Get facet filter (category)
+        category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
+        
         per_page = self.per_page
         max_results = self.max_results
         
@@ -733,17 +825,31 @@ class SearchHandler(BaseHTTPRequestHandler):
             all_results = self.engine.search(query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
             
-            total_results = len(all_results)
+            # Get facet counts before filtering (for accurate counts)
+            facets = None
+            total_unfiltered = len(all_results)
+            if self.enable_facets and hasattr(self.engine, 'get_facet_counts'):
+                facets = self.engine.get_facet_counts(all_results)
+            
+            # Apply facet filter if specified
+            filtered_results = all_results
+            if category_filter and facets and 'category' in facets:
+                filtered_results = [
+                    r for r in all_results 
+                    if r.get('facets', {}).get('category') == category_filter
+                ]
+            
+            total_results = len(filtered_results)
             
             # Slice for current page
             start_idx = (page - 1) * per_page
             end_idx = start_idx + per_page
-            page_results = all_results[start_idx:end_idx]
+            page_results = filtered_results[start_idx:end_idx]
             
             # If page is beyond results, redirect to page 1
             if not page_results and total_results > 0:
                 page = 1
-                page_results = all_results[:per_page]
+                page_results = filtered_results[:per_page]
             
             # Check for spelling suggestions when results are low
             suggestion = None
@@ -761,7 +867,10 @@ class SearchHandler(BaseHTTPRequestHandler):
                 page=page,
                 per_page=per_page,
                 total_results=total_results,
-                suggestion=suggestion
+                suggestion=suggestion,
+                facets=facets,
+                active_facet=category_filter if category_filter else None,
+                total_unfiltered=total_unfiltered
             )
         else:
             # Welcome page
@@ -854,7 +963,8 @@ def run_server(
     log_requests: bool = False,
     per_page: int = 10,
     max_results: int = 100,
-    enable_autocomplete: bool = True
+    enable_autocomplete: bool = True,
+    enable_facets: bool = True
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -867,6 +977,7 @@ def run_server(
         per_page: Number of results per page (default: 10)
         max_results: Maximum total results for pagination (default: 100)
         enable_autocomplete: If True, enable /suggest endpoint (default: True)
+        enable_facets: If True, enable faceted search filtering (default: True)
         
     Returns:
         HTTPServer instance (call serve_forever() to start)
@@ -877,6 +988,7 @@ def run_server(
     SearchHandler.per_page = per_page
     SearchHandler.max_results = max_results
     SearchHandler.start_time = time.time()  # Record server start time
+    SearchHandler.enable_facets = enable_facets
     SearchHandler.enable_autocomplete = enable_autocomplete
     server = HTTPServer((host, port), SearchHandler)
     return server
