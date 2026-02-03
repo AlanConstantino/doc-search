@@ -106,13 +106,15 @@ class BM25Index:
         else:
             self.avg_doc_length = 1.0  # Avoid division by zero
     
-    def build_from_pages(self, pages_dir: Path, verbose: bool = True) -> int:
+    def build_from_pages(self, pages_dir: Path, verbose: bool = True, parser: str = 'dom') -> int:
         """
         Build index from crawled page files.
         
         Args:
             pages_dir: Directory containing page JSON files
             verbose: Print progress messages
+            parser: Parser for text extraction ('dom' or 'stream'). If raw_html
+                    is available in page data, re-extracts using specified parser.
             
         Returns:
             Number of documents indexed
@@ -122,25 +124,48 @@ class BM25Index:
         total_files = len(page_files)
         
         if verbose:
-            print(f"Indexing {total_files} pages...")
+            print(f"Indexing {total_files} pages (parser: {parser})...")
+        
+        # Import extractors
+        from .parser import extract_text
+        from .dom import extract_text_dom
         
         doc_id = 0
+        reparsed_count = 0
         for i, page_file in enumerate(page_files):
             try:
                 with open(page_file, 'r') as f:
                     page = json.load(f)
                 
+                # Re-extract from raw HTML if available
+                if 'raw_html' in page and page['raw_html']:
+                    if parser == 'dom':
+                        extracted = extract_text_dom(page['raw_html'])
+                    else:
+                        extracted = extract_text(page['raw_html'])
+                    text = extracted.get('text', '')
+                    title = extracted.get('title', page.get('title', ''))
+                    description = extracted.get('description', page.get('description', ''))
+                    headings = extracted.get('headings', page.get('headings', []))
+                    reparsed_count += 1
+                else:
+                    # Use pre-extracted text
+                    text = page.get('text', '')
+                    title = page.get('title', '')
+                    description = page.get('description', '')
+                    headings = page.get('headings', [])
+                
                 # Skip pages with no content
-                if not page.get('text', '').strip():
+                if not text.strip():
                     continue
                 
                 self.add_document(
                     doc_id=doc_id,
                     url=page['url'],
-                    title=page.get('title', ''),
-                    text=page.get('text', ''),
-                    description=page.get('description', ''),
-                    headings=page.get('headings', [])
+                    title=title,
+                    text=text,
+                    description=description,
+                    headings=headings
                 )
                 
                 doc_id += 1
@@ -162,6 +187,8 @@ class BM25Index:
             print(f"  Documents: {self.total_docs}")
             print(f"  Unique terms: {len(self.index)}")
             print(f"  Avg document length: {self.avg_doc_length:.1f} terms")
+            if reparsed_count > 0:
+                print(f"  Re-parsed from raw HTML: {reparsed_count}")
         
         return self.total_docs
     

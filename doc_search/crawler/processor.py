@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..parser import extract_text, extract_links
+from ..dom import extract_text_dom
 from ..utils import url_to_filename
 
 
@@ -146,17 +147,19 @@ class PageProcessor:
         'Example Page'
     """
     
-    def __init__(self, pages_dir: Path, save_html: bool = True):
+    def __init__(self, pages_dir: Path, save_html: bool = True, parser: str = 'dom'):
         """
         Initialize the page processor.
         
         Args:
             pages_dir: Directory for storing page JSON files.
             save_html: Whether to save raw HTML content (default: True).
+            parser: Parser type for text extraction ('dom' or 'stream').
         """
         self.pages_dir = Path(pages_dir)
         self.pages_dir.mkdir(parents=True, exist_ok=True)
         self.save_html = save_html
+        self.parser = parser
     
     def process_html(
         self,
@@ -198,8 +201,11 @@ class PageProcessor:
         # Calculate content hash
         hash_value = content_hash(html)
         
-        # Extract text content and metadata
-        extracted = extract_text(html)
+        # Extract text content and metadata using selected parser
+        if self.parser == 'dom':
+            extracted = extract_text_dom(html)
+        else:
+            extracted = extract_text(html)
         
         # Extract links (use provided base_url or fall back to url)
         resolve_base = base_url or url

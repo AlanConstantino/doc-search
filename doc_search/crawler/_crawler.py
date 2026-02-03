@@ -66,7 +66,8 @@ class Crawler:
         workers: int = 1,
         extract_docs: bool = False,
         incremental: bool = False,
-        save_html: bool = True
+        save_html: bool = True,
+        parser: str = 'dom'
     ):
         """
         Initialize the crawler.
@@ -88,6 +89,7 @@ class Crawler:
             extract_docs: If True, extract text from PDF documents.
             incremental: If True, only re-download changed pages.
             save_html: If True, save raw HTML for re-parsing later (default: True).
+            parser: HTML parser for text extraction ('dom' or 'stream', default: 'dom').
         """
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
@@ -163,7 +165,8 @@ class Crawler:
         
         # Initialize PageProcessor module
         self.save_html = save_html
-        self._processor = PageProcessor(self.pages_dir, save_html=save_html)
+        self.parser = parser
+        self._processor = PageProcessor(self.pages_dir, save_html=save_html, parser=parser)
     
     # -------------------------------------------------------------------------
     # Logging and stats (orchestrator responsibilities)
