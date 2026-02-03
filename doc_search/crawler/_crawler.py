@@ -1,6 +1,11 @@
 """
 Web crawler with resumable state, rate limiting, and robots.txt compliance.
 Supports parallel crawling with per-domain rate limiting.
+
+The Crawler class is a thin orchestrator that delegates to:
+- Fetcher: HTTP fetching with rate limiting and error handling
+- UrlFilter: URL validation, filtering, and crawl decisions
+- PageProcessor: HTML processing, content extraction, and persistence
 """
 
 import json
@@ -11,11 +16,7 @@ from typing import Optional, Set, Dict, Any, Callable, Tuple, List
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
-from ..utils import (
-    normalize_url, is_same_domain, url_to_filename, 
-    is_html_content, get_domain, make_basic_auth_header,
-    create_permissive_ssl_context
-)
+from ..utils import normalize_url, get_domain, create_permissive_ssl_context
 from ..robots import RobotsChecker
 from ..constants import (
     DEFAULT_CRAWL_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_CRAWL_RETRIES,
@@ -24,18 +25,24 @@ from ..constants import (
 from ..crawl_state import CrawlState
 from ..rate_limiter import RateLimiter
 from .fetcher import Fetcher
-from .url_filter import (
-    SKIP_EXTENSIONS,
-    EXTRACTABLE_DOC_EXTENSIONS,
-    SKIP_PATH_PATTERNS,
-    UrlFilter,
-)
+from .url_filter import UrlFilter
 from .processor import PageProcessor, build_document_data
 
 
 class Crawler:
     """
     Web crawler with politeness controls, resumable crawling, and parallel fetching.
+    
+    This class orchestrates the crawling process by delegating to specialized modules:
+    - Fetcher: Handles HTTP requests with rate limiting and retries
+    - UrlFilter: Determines which URLs should be crawled
+    - PageProcessor: Extracts content and manages page persistence
+    
+    The Crawler manages:
+    - Crawl state (visited URLs, pending queue, statistics)
+    - Parallel execution with configurable workers
+    - Checkpoint saving for resumable crawls
+    - Graceful shutdown on interruption
     """
     
     USER_AGENT = "DocSearchBot/1.2 (+https://github.com/AlanConstantino/doc-search)"
@@ -50,16 +57,36 @@ class Crawler:
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
         max_pages: Optional[int] = None,
         max_depth: Optional[int] = None,
-        auth: Optional[Tuple[str, str]] = None,  # (username, password)
-        auth_token: Optional[str] = None,  # Pre-encoded Base64 token
+        auth: Optional[Tuple[str, str]] = None,
+        auth_token: Optional[str] = None,
         stay_on_domain: bool = True,
-        same_path: bool = False,  # If True, only crawl URLs under the starting path
+        same_path: bool = False,
         url_filter: Optional[Callable[[str], bool]] = None,
         verbose: bool = True,
-        workers: int = 1,  # Number of parallel workers
-        extract_docs: bool = False,  # Extract text from PDFs and Office docs
-        incremental: bool = False  # Only re-download changed pages
+        workers: int = 1,
+        extract_docs: bool = False,
+        incremental: bool = False
     ):
+        """
+        Initialize the crawler.
+        
+        Args:
+            base_url: Starting URL for the crawl.
+            data_dir: Directory for storing crawl data and state.
+            delay: Minimum delay between requests to same domain.
+            timeout: HTTP request timeout in seconds.
+            max_pages: Maximum pages to crawl (None for unlimited).
+            max_depth: Maximum crawl depth (None for unlimited).
+            auth: Tuple of (username, password) for Basic Auth.
+            auth_token: Pre-encoded Base64 auth token.
+            stay_on_domain: If True, only crawl URLs on same domain.
+            same_path: If True, only crawl URLs under the starting path.
+            url_filter: Optional custom filter function for URLs.
+            verbose: If True, print progress messages.
+            workers: Number of parallel workers (default 1).
+            extract_docs: If True, extract text from PDF documents.
+            incremental: If True, only re-download changed pages.
+        """
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
         self.data_dir = Path(data_dir)
@@ -67,13 +94,8 @@ class Crawler:
         self.timeout = timeout
         self.max_pages = max_pages
         self.max_depth = max_depth
-        self.auth = auth
-        self.auth_token = auth_token
-        self.stay_on_domain = stay_on_domain
-        self.same_path = same_path
-        self.url_filter = url_filter
         self.verbose = verbose
-        self.workers = max(1, workers)  # At least 1 worker
+        self.workers = max(1, workers)
         self.extract_docs = extract_docs
         self.incremental = incremental
         
@@ -88,15 +110,6 @@ class Crawler:
                 auth_token=auth_token
             )
         
-        # Extract base path for same_path filtering
-        # Preserve trailing slash for proper path matching
-        parsed = urlparse(self.base_url)
-        self.base_path = parsed.path.rstrip('/') or ''
-        # For root paths (empty or /), allow everything under domain
-        if self.base_path == '' or self.base_path == '/':
-            self.base_path = ''
-            self.same_path = False  # No path restriction for root
-        
         # Setup directories
         self.pages_dir = self.data_dir / 'pages'
         self.pages_dir.mkdir(parents=True, exist_ok=True)
@@ -110,8 +123,8 @@ class Crawler:
         # Initialize rate limiter
         self.rate_limiter = RateLimiter(delay)
         
-        # SSL context that doesn't verify (for self-signed certs in docs)
-        self.ssl_context = create_permissive_ssl_context()
+        # SSL context (permissive for self-signed certs)
+        ssl_context = create_permissive_ssl_context()
         
         # Output lock for verbose messages
         self._print_lock = threading.Lock()
@@ -119,7 +132,7 @@ class Crawler:
         # Stop flag for graceful shutdown
         self._stop_requested = False
         
-        # Initialize fetcher
+        # Initialize Fetcher module
         self._fetcher = Fetcher(
             user_agent=self.USER_AGENT,
             delay=delay,
@@ -127,12 +140,12 @@ class Crawler:
             auth=auth,
             auth_token=auth_token,
             rate_limiter=self.rate_limiter,
-            ssl_context=self.ssl_context,
+            ssl_context=ssl_context,
             log_func=self._log,
             stats_callback=self._update_stat
         )
         
-        # Initialize URL filter
+        # Initialize UrlFilter module
         self._url_filter = UrlFilter(
             base_url=base_url,
             robots_checker=self.robots,
@@ -146,8 +159,12 @@ class Crawler:
         self.base_path = self._url_filter.base_path
         self.same_path = self._url_filter.same_path
         
-        # Initialize page processor
+        # Initialize PageProcessor module
         self._processor = PageProcessor(self.pages_dir)
+    
+    # -------------------------------------------------------------------------
+    # Logging and stats (orchestrator responsibilities)
+    # -------------------------------------------------------------------------
     
     def _log(self, message: str):
         """Print message if verbose mode is enabled (thread-safe)."""
@@ -159,44 +176,69 @@ class Crawler:
         """Update a crawl statistic (thread-safe)."""
         self.state.increment_stat(stat_name, value)
     
-    def _get_auth_header(self) -> Optional[str]:
-        """Get Basic Auth header if credentials provided."""
-        return make_basic_auth_header(auth=self.auth, auth_token=self.auth_token)
+    # -------------------------------------------------------------------------
+    # Backward-compatible wrapper methods (delegate to modules)
+    # -------------------------------------------------------------------------
     
-    def _get_page_metadata(self, url: str) -> Optional[Dict[str, Any]]:
-        """Load existing page metadata for incremental crawling."""
-        return self._processor.load_page_metadata(url)
-    
-    def _fetch(self, url: str, etag: Optional[str] = None, 
+    def _fetch(self, url: str, etag: Optional[str] = None,
                last_modified: Optional[str] = None) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
         """
         Fetch a URL and return (content, content_type, metadata).
-        Returns (None, None, {}) on failure.
         
-        For incremental crawling, pass etag/last_modified from previous crawl.
-        Returns content=None with metadata={'not_modified': True} if unchanged.
+        Wrapper for backward compatibility - delegates to Fetcher module.
+        
+        Args:
+            url: URL to fetch.
+            etag: ETag for conditional request.
+            last_modified: Last-Modified for conditional request.
+            
+        Returns:
+            Tuple of (content, content_type, metadata).
         """
         result = self._fetcher.fetch(url, etag=etag, last_modified=last_modified)
         return result.as_tuple()
     
-    def _is_skippable_extension(self, url: str) -> bool:
-        """Check if URL has an extension that should be skipped."""
-        return self._url_filter.is_skippable_extension(url)
+    def _get_page_metadata(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Load existing page metadata for incremental crawling.
+        
+        Wrapper for backward compatibility - delegates to PageProcessor module.
+        """
+        return self._processor.load_page_metadata(url)
     
-    def _is_extractable_doc(self, url: str) -> bool:
-        """Check if URL is an extractable document (PDF, DOCX, etc.)."""
-        return self._url_filter.is_extractable_doc(url)
+    def _save_page(self, url: str, data: dict):
+        """
+        Save page data to disk.
+        
+        Wrapper for backward compatibility - delegates to PageProcessor module.
+        """
+        self._processor.save_page(url, data)
     
-    def _is_skippable_path(self, url: str) -> bool:
-        """Check if URL path indicates non-documentation content."""
-        return self._url_filter.is_skippable_path(url)
-    
-    def _is_under_base_path(self, url: str) -> bool:
-        """Check if URL is under the base path."""
-        return self._url_filter.is_under_base_path(url)
+    # -------------------------------------------------------------------------
+    # URL filtering (delegates to UrlFilter)
+    # -------------------------------------------------------------------------
     
     def _should_crawl(self, url: str, depth: int = 0, force: bool = False) -> bool:
-        """Check if URL should be crawled."""
+        """
+        Check if URL should be crawled.
+        
+        Delegates to UrlFilter.should_follow() which checks:
+        - Already visited
+        - Depth limits
+        - Extension filtering
+        - Path patterns
+        - Domain restrictions
+        - Robots.txt compliance
+        - Custom filters
+        
+        Args:
+            url: URL to check.
+            depth: Current crawl depth.
+            force: If True, skip visited check (for incremental crawling).
+            
+        Returns:
+            True if the URL should be crawled.
+        """
         return self._url_filter.should_follow(
             url,
             depth=depth,
@@ -204,13 +246,20 @@ class Crawler:
             force=force,
         )
     
-    def _save_page(self, url: str, data: dict):
-        """Save page data to disk."""
-        self._processor.save_page(url, data)
+    # -------------------------------------------------------------------------
+    # Page processing (orchestrates Fetcher and PageProcessor)
+    # -------------------------------------------------------------------------
     
     def _process_page(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
         Process a single page. Returns list of new URLs to crawl or None on failure.
+        
+        This method orchestrates:
+        1. Marking URL as visited
+        2. Document extraction (if applicable)
+        3. Fetching with incremental support
+        4. Content processing
+        5. Page persistence
         """
         if self._stop_requested:
             return None
@@ -218,52 +267,48 @@ class Crawler:
         # Mark as visited
         self.state.mark_visited(url)
         
-        # Check if this is an extractable document (PDF, DOCX, etc.)
-        if self.extract_docs and self._is_extractable_doc(url):
+        # Handle extractable documents (PDF, etc.)
+        if self.extract_docs and self._url_filter.is_extractable_doc(url):
             return self._process_document(url, depth)
         
-        # For incremental crawling, load existing page metadata
+        # For incremental crawling, get existing metadata for conditional requests
         existing_meta = None
         etag = None
         last_modified = None
         if self.incremental:
-            existing_meta = self._get_page_metadata(url)
+            existing_meta = self._processor.load_page_metadata(url)
             if existing_meta:
                 etag = existing_meta.get('etag')
                 last_modified = existing_meta.get('last_modified')
         
-        # Fetch page
+        # Fetch the page (Fetcher handles rate limiting, retries, decompression)
         self._log(f"{self.state.get_progress(self.max_pages)} Crawling: {url}")
-        content, content_type, fetch_meta = self._fetch(url, etag=etag, last_modified=last_modified)
+        fetch_result = self._fetcher.fetch(url, etag=etag, last_modified=last_modified)
         
-        # Handle 304 Not Modified (incremental crawling)
-        if fetch_meta.get('not_modified'):
+        # Handle 304 Not Modified
+        if fetch_result.not_modified:
             self._log(f"  ⏭️  Unchanged (304): {url}")
             self.state.increment_stat('pages_unchanged')
-            # Still extract links from existing content for discovery
-            if existing_meta and existing_meta.get('text'):
-                # Re-parse for links (we don't store raw HTML, so skip link extraction)
-                pass
             return []
         
-        if content is None:
-            # Record error if available in metadata
-            error_type = fetch_meta.get('error_type')
-            error_message = fetch_meta.get('error_message')
-            if error_type and error_message:
-                self.state.record_error(url, error_type, error_message)
-            
-            # Track failure for retry
+        # Handle fetch errors
+        if not fetch_result.success:
+            if fetch_result.error_type and fetch_result.error_message:
+                self.state.record_error(url, fetch_result.error_type, fetch_result.error_message)
             self.state.mark_failed(url, depth)
             return None
         
-        # Check if HTML
+        content = fetch_result.content
+        content_type = fetch_result.content_type or ''
+        
+        # Skip non-HTML content
+        from ..utils import is_html_content
         if not is_html_content(content_type):
             self._log(f"  Skipping non-HTML: {content_type}")
             self.state.increment_stat('pages_skipped')
             return []
         
-        # For incremental: check content hash to detect changes even without 304
+        # For incremental: check content hash even without 304
         if self.incremental and existing_meta:
             changed, _ = self._processor.is_content_changed(content, existing_meta)
             if not changed:
@@ -271,18 +316,18 @@ class Crawler:
                 self.state.increment_stat('pages_unchanged')
                 return []
         
-        # Process HTML: extract text, links, and build page data
+        # Process HTML (PageProcessor handles extraction and builds page data)
         result = self._processor.process_html(
             url=url,
             html=content,
             depth=depth,
-            etag=fetch_meta.get('etag'),
-            last_modified=fetch_meta.get('last_modified'),
+            etag=fetch_result.metadata.get('etag'),
+            last_modified=fetch_result.metadata.get('last_modified'),
             link_filter=self._should_crawl,
         )
         
         # Save page data
-        self._save_page(url, result['page_data'])
+        self._processor.save_page(url, result['page_data'])
         
         # Update stats
         self.state.increment_stat('pages_crawled')
@@ -292,11 +337,11 @@ class Crawler:
     def _process_document(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
         Process an extractable document (PDF, DOCX, etc.).
+        
         Returns empty list (documents don't contain links to crawl).
         """
         self._log(f"{self.state.get_progress(self.max_pages)} Extracting: {url}")
         
-        # Currently only PDF extraction is implemented
         parsed = urlparse(url)
         path = parsed.path.lower()
         
@@ -319,7 +364,7 @@ class Crawler:
                 doc_pages=result['pages'],
                 doc_metadata=result['metadata'],
             )
-            self._save_page(url, page_data)
+            self._processor.save_page(url, page_data)
             
             # Update stats
             self.state.increment_stat('pages_crawled')
@@ -333,15 +378,19 @@ class Crawler:
         self.state.increment_stat('pages_skipped')
         return []
     
+    # -------------------------------------------------------------------------
+    # Crawl execution (queue management and parallel coordination)
+    # -------------------------------------------------------------------------
+    
     def crawl(self, resume: bool = True) -> Dict[str, Any]:
         """
         Start or resume crawling.
         
         Args:
-            resume: If True, resume from saved state if available
+            resume: If True, resume from saved state if available.
             
         Returns:
-            dict with crawl statistics
+            Dict with crawl statistics.
         """
         # Load robots.txt
         self._log("Loading robots.txt...")
@@ -353,30 +402,11 @@ class Crawler:
             self._log(f"Respecting robots.txt crawl-delay: {robots_delay}s")
             self.delay = robots_delay
             self.rate_limiter = RateLimiter(self.delay)
-            # Update fetcher's rate limiter too
             self._fetcher.rate_limiter = self.rate_limiter
         
         # Load or initialize state
         if self.incremental:
-            # Incremental mode: re-check all previously crawled pages
-            self._log("Loading existing pages for incremental crawl...")
-            existing_urls = []
-            for page_file in self.pages_dir.glob('*.json'):
-                try:
-                    with open(page_file, 'r') as f:
-                        page_data = json.load(f)
-                        if 'url' in page_data:
-                            existing_urls.append((page_data['url'], page_data.get('depth', 0)))
-                except (json.JSONDecodeError, IOError):
-                    continue
-            
-            # Clear visited set and add all existing URLs to queue
-            self.state.clear()
-            self.state.add_urls(existing_urls)
-            self.state.add_urls([(self.base_url, 0)])  # Also check for new pages from start
-            with self.state._lock:
-                self.state.stats['start_time'] = time.time()
-            self._log(f"Found {len(existing_urls)} pages to check for updates")
+            self._setup_incremental_crawl()
         elif resume and self.state.load():
             self._log(f"Resuming crawl: {len(self.state.visited)} pages visited, {len(self.state.pending)} pending")
         else:
@@ -386,6 +416,49 @@ class Crawler:
                 self.state.stats['start_time'] = time.time()
         
         # Log crawl parameters
+        self._log_crawl_parameters()
+        
+        self._stop_requested = False
+        
+        try:
+            if self.workers == 1:
+                self._crawl_single_threaded()
+            else:
+                self._crawl_parallel()
+                
+        except KeyboardInterrupt:
+            self._log("\nCrawl interrupted by user")
+            self._stop_requested = True
+        
+        finally:
+            with self.state._lock:
+                self.state.stats['last_checkpoint'] = time.time()
+            self.state.save()
+        
+        return self._compute_final_stats()
+    
+    def _setup_incremental_crawl(self):
+        """Set up state for incremental crawling."""
+        self._log("Loading existing pages for incremental crawl...")
+        existing_urls = []
+        for page_file in self.pages_dir.glob('*.json'):
+            try:
+                with open(page_file, 'r') as f:
+                    page_data = json.load(f)
+                    if 'url' in page_data:
+                        existing_urls.append((page_data['url'], page_data.get('depth', 0)))
+            except (json.JSONDecodeError, IOError):
+                continue
+        
+        self.state.clear()
+        self.state.add_urls(existing_urls)
+        self.state.add_urls([(self.base_url, 0)])
+        with self.state._lock:
+            self.state.stats['start_time'] = time.time()
+        self._log(f"Found {len(existing_urls)} pages to check for updates")
+    
+    def _log_crawl_parameters(self):
+        """Log the crawl configuration."""
         if self.same_path:
             self._log(f"📁 Path restriction: {self.base_path}/*")
         else:
@@ -397,29 +470,9 @@ class Crawler:
         if self.workers > 1:
             self._log(f"Workers: {self.workers}")
         self._log("")
-        
-        pages_since_checkpoint = 0
-        self._stop_requested = False
-        
-        try:
-            if self.workers == 1:
-                # Single-threaded mode (original behavior)
-                self._crawl_single_threaded()
-            else:
-                # Multi-threaded mode
-                self._crawl_parallel()
-                
-        except KeyboardInterrupt:
-            self._log("\nCrawl interrupted by user")
-            self._stop_requested = True
-        
-        finally:
-            # Final save
-            with self.state._lock:
-                self.state.stats['last_checkpoint'] = time.time()
-            self.state.save()
-        
-        # Calculate final stats
+    
+    def _compute_final_stats(self) -> Dict[str, Any]:
+        """Compute and log final crawl statistics."""
         with self.state._lock:
             start_time = self.state.stats.get('start_time') or time.time()
             elapsed = time.time() - start_time
@@ -443,27 +496,24 @@ class Crawler:
         return stats
     
     def _crawl_single_threaded(self):
-        """Original single-threaded crawl implementation."""
+        """Single-threaded crawl implementation."""
         pages_since_checkpoint = 0
         
         while True:
             if self._stop_requested:
                 break
             
-            # Check max pages limit
             with self.state._lock:
                 if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
                     self._log(f"\nReached max pages limit: {self.max_pages}")
                     break
             
-            # Get next URL
             item = self.state.pop_url()
             if item is None:
                 break
             
             url, depth = item
             
-            # Skip if already visited or shouldn't crawl
             if self.state.is_visited(url):
                 continue
             
@@ -471,13 +521,11 @@ class Crawler:
                 self.state.increment_stat('pages_skipped')
                 continue
             
-            # Process the page
             new_urls = self._process_page(url, depth)
             
             if new_urls:
                 self.state.add_urls(new_urls)
             
-            # Checkpoint
             pages_since_checkpoint += 1
             if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
                 self._log(f"  Saving checkpoint...")
@@ -496,7 +544,6 @@ class Crawler:
                 if self._stop_requested:
                     break
                 
-                # Check max pages limit
                 with self.state._lock:
                     if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
                         self._log(f"\nReached max pages limit: {self.max_pages}")
@@ -510,7 +557,6 @@ class Crawler:
                     
                     url, depth = item
                     
-                    # Skip if already visited or shouldn't crawl
                     if self.state.is_visited(url):
                         continue
                     
@@ -518,14 +564,11 @@ class Crawler:
                         self.state.increment_stat('pages_skipped')
                         continue
                     
-                    # Submit task
                     future = executor.submit(self._process_page, url, depth)
                     future.url_depth = (url, depth)
                     active_futures.add(future)
                 
-                # If no active futures and no pending URLs, we're done
                 if not active_futures:
-                    # Double-check pending queue
                     with self.state._lock:
                         if not self.state.pending:
                             break
@@ -545,7 +588,6 @@ class Crawler:
                         
                         pages_since_checkpoint += 1
                         
-                        # Checkpoint
                         if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
                             self._log(f"  Saving checkpoint...")
                             with self.state._lock:
@@ -556,15 +598,18 @@ class Crawler:
                     active_futures -= done_futures
                     
                 except (TimeoutError, FuturesTimeoutError):
-                    # Timeout is fine, just continue checking
                     pass
             
-            # Cancel remaining futures on stop
             for future in active_futures:
                 future.cancel()
     
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
+    
     def get_crawled_pages(self, warn_on_error: bool = True):
-        """Generator that yields all crawled page data.
+        """
+        Generator that yields all crawled page data.
         
         Args:
             warn_on_error: If True, print a warning for skipped corrupted files.
