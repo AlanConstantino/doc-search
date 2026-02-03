@@ -1,7 +1,21 @@
 """
 Crawler package for doc-search.
 
-Re-exports Crawler from _crawler for backward compatibility.
+This package provides the web crawling functionality for doc-search.
+It has been refactored from a single file into a modular package while
+maintaining full backward compatibility.
+
+Public API (all importable from doc_search.crawler):
+    - Crawler: Main crawler class for crawling documentation sites
+    - RateLimiter: Rate limiting for HTTP requests (re-exported from rate_limiter)
+    - Fetcher: HTTP fetching with retry logic
+    - FetchResult: Dataclass for fetch results
+    - UrlFilter: URL validation and filtering
+    - PageProcessor: Content processing and extraction
+
+Backward-compatible imports:
+    >>> from doc_search.crawler import Crawler
+    >>> from doc_search.crawler import RateLimiter
 """
 
 from ._crawler import Crawler
