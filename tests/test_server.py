@@ -295,8 +295,10 @@ class TestRenderPage(unittest.TestCase):
             per_page=10
         )
         
-        self.assertIn('Previous', html)
+        self.assertIn('Prev', html)
         self.assertIn('Next', html)
+        self.assertIn('First', html)
+        self.assertIn('Last', html)
         self.assertIn('page=1', html)
         self.assertIn('page=3', html)
 
@@ -497,13 +499,14 @@ class TestServerPaginationResponses(ServerTestCase):
         self.assertIn('Document 24', body)
     
     def test_first_page_has_disabled_previous(self):
-        """Page 1 should show disabled Previous link."""
+        """Page 1 should show disabled Prev link."""
         status, headers, body = self.make_request('/?q=test&page=1')
         
-        # Previous should be disabled (span with disabled class, not an <a> link)
+        # Prev/First should be disabled (span with disabled class, not an <a> link)
         self.assertIn('class="disabled"', body)
-        self.assertIn('Previous', body)
-        # Should have active Next link
+        self.assertIn('Prev', body)
+        self.assertIn('First', body)
+        # Should have active Next/Last link
         self.assertIn('page=2', body)
     
     def test_last_page_has_disabled_next(self):
