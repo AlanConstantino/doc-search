@@ -383,39 +383,6 @@ mark {
     font-weight: 600;
 }
 
-/* HTML5 <details>/<summary> for expandable snippets */
-.result-snippet-details {
-    font-size: 0.9375rem;
-    color: var(--text-secondary);
-    line-height: 1.6;
-}
-
-.result-snippet-summary {
-    cursor: pointer;
-    color: var(--text-muted);
-    list-style: none;
-}
-
-.result-snippet-summary::-webkit-details-marker {
-    display: none;
-}
-
-.result-snippet-summary::before {
-    content: "▶ ";
-    font-size: 0.75em;
-    color: var(--text-muted);
-}
-
-details[open] .result-snippet-summary::before {
-    content: "▼ ";
-}
-
-.result-snippet-full {
-    margin-top: 0.5rem;
-    padding-left: 1rem;
-    border-left: 2px solid var(--border);
-}
-
 /* Empty/welcome state */
 .welcome {
     text-align: center;
@@ -773,22 +740,7 @@ def render_page(
                 
                 score_html = f'<span class="result-score">{score:.2f}</span>' if show_scores else ''
                 
-                # Use <details> for long snippets (HTML5 collapsible)
-                snippet_html = ""
-                if snippet:
-                    # Strip HTML for length check
-                    import re
-                    plain_snippet = re.sub(r'<[^>]+>', '', snippet)
-                    if len(plain_snippet) > 150:
-                        # Long snippet: use details/summary
-                        preview = plain_snippet[:100] + "..."
-                        snippet_html = f'''
-                    <details class="result-snippet-details">
-                        <summary class="result-snippet-summary">{escape(preview)}</summary>
-                        <div class="result-snippet-full">{snippet}</div>
-                    </details>'''
-                    else:
-                        snippet_html = f'<div class="result-snippet">{snippet}</div>'
+                snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
                 
                 results_html += f'''
                 <div class="result">
