@@ -1991,7 +1991,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2000,7 +2000,7 @@ class TestCmdServe(CLITestCase):
                     'serve', str(self.site_dir)
                 ])
                 
-                # Verify SearchEngine.load was called with correct path
+                # Verify EnhancedSearchEngine.load was called with correct path
                 MockEngineClass.load.assert_called_once()
                 load_args = MockEngineClass.load.call_args[0]
                 self.assertEqual(load_args[0], self.site_dir / 'index.json')
@@ -2026,7 +2026,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2048,7 +2048,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2070,7 +2070,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2094,7 +2094,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2116,7 +2116,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2138,7 +2138,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2160,7 +2160,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 with patch('webbrowser.open') as mock_webbrowser:
                     MockEngineClass.load.return_value = mock_engine
@@ -2183,7 +2183,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 with patch('webbrowser.open') as mock_webbrowser:
                     MockEngineClass.load.return_value = mock_engine
@@ -2208,7 +2208,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 with patch('webbrowser.open') as mock_webbrowser:
                     MockEngineClass.load.return_value = mock_engine
@@ -2230,7 +2230,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2252,7 +2252,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2274,7 +2274,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 with patch('webbrowser.open') as mock_webbrowser:
                     MockEngineClass.load.return_value = mock_engine
@@ -2314,7 +2314,7 @@ class TestCmdServe(CLITestCase):
         
         self.create_mock_index()
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server
@@ -2343,7 +2343,7 @@ class TestCmdServe(CLITestCase):
         with gzip.open(compressed_index, 'wt') as f:
             json.dump({'k1': 1.5, 'b': 0.75, 'documents': {}, 'index': {}}, f)
         
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
+        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
             with patch('doc_search.server.run_server') as mock_run_server:
                 MockEngineClass.load.return_value = mock_engine
                 mock_run_server.return_value = mock_server

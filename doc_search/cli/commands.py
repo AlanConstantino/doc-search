@@ -598,9 +598,16 @@ def cmd_serve(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
-    # Load index
+    # Load index (use EnhancedSearchEngine for spellcheck, autocomplete, facets)
     print(style_info(f"Loading index from: {index_path}"))
-    engine = SearchEngine.load(index_path)
+    enable_synonyms = getattr(args, 'synonyms', True)
+    engine = EnhancedSearchEngine.load(
+        index_path,
+        enable_spellcheck=True,
+        enable_autocomplete=True,
+        enable_facets=True,
+        enable_synonyms=enable_synonyms
+    )
     
     stats = engine.get_stats()
     
