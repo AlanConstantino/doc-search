@@ -170,6 +170,48 @@ With SSL verification disabled:
 
 A `--verify-ssl` flag may be added in the future for users who need strict certificate validation. See the issue tracker if this is important for your use case.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [API Reference](docs/API.md) | Library usage guide with code examples |
+| [Architecture](docs/ARCHITECTURE.md) | Data flow and module interactions |
+| [Index Format](docs/INDEX_FORMAT.md) | BM25 index file specification |
+| [Operator Guide](docs/OPERATOR_GUIDE.md) | Workflow guide and troubleshooting |
+| [Examples](examples/) | Runnable usage examples |
+
+## Using as a Library
+
+```python
+from doc_search.crawler import Crawler
+from doc_search.indexer import BM25Index
+from doc_search.searcher import EnhancedSearchEngine
+
+# Crawl
+crawler = Crawler(base_url='https://docs.example.com', data_dir='./data')
+crawler.crawl()
+
+# Index
+index = BM25Index()
+index.build_from_pages('./data/pages')
+
+# Search
+engine = EnhancedSearchEngine(index, pages_dir='./data/pages')
+results = engine.search('your query')
+```
+
+See [docs/API.md](docs/API.md) for comprehensive library documentation.
+
+## Development
+
+```bash
+# Run tests (955 tests)
+python -m pytest
+
+# Run specific test file
+python -m pytest tests/test_crawler.py
+```
+
 ## Limitations
 
 - **English only** — Tokenization assumes space-separated words
