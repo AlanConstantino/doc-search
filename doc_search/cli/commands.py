@@ -147,6 +147,7 @@ def cmd_crawl(args):
         auth=auth,
         auth_token=auth_token,
         same_path=getattr(args, 'same_path', False),
+        ignore_robots=getattr(args, 'ignore_robots', False),
         verbose=not args.quiet,
         workers=args.workers,
         extract_docs=args.extract_docs,

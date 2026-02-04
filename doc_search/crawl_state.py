@@ -69,15 +69,17 @@ class CrawlState:
     def save(self):
         """Save state to disk (thread-safe)."""
         with self._lock:
+            # Create deep copies of all mutable state to avoid race conditions
+            # during json.dump() which happens outside the lock
             state = {
                 'visited': list(self.visited),
                 'pending': list(self.pending),
-                'failed': self.failed,
+                'failed': dict(self.failed),  # Copy dict
                 'errors': [e.to_dict() for e in self.errors],
-                'stats': self.stats
+                'stats': dict(self.stats)  # Copy dict to avoid modification during dump
             }
         
-        # Write atomically
+        # Write atomically (outside lock to avoid blocking other threads)
         tmp_file = self.state_file.with_suffix('.tmp')
         with open(tmp_file, 'w') as f:
             json.dump(state, f)

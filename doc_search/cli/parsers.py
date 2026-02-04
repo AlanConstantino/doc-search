@@ -77,6 +77,8 @@ def _add_crawl_parser(subparsers):
                              help='Maximum link depth from starting URL')
     crawl_parser.add_argument('--same-path', action='store_true',
                              help='Only crawl URLs under the starting path (default: crawl entire domain)')
+    crawl_parser.add_argument('--ignore-robots', action='store_true',
+                             help='Ignore robots.txt rules (use responsibly)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
                              help='Start fresh crawl (ignore saved state)')
     crawl_parser.add_argument('--incremental', '-i', action='store_true',
