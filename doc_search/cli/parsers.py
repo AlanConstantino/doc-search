@@ -224,4 +224,6 @@ def _add_serve_parser(subparsers):
                              help='Number of search queries to cache (default: 128, 0 to disable)')
     serve_parser.add_argument('--cache-ttl', type=float, default=0,
                              help='Cache TTL in seconds (default: 0 = never expire, only evict when full)')
+    serve_parser.add_argument('--cache-file', type=str, default=None,
+                             help='Path to persistent cache file (SQLite). If set, cache survives restarts.')
     serve_parser.set_defaults(func=cmd_serve)

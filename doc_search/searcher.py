@@ -4,6 +4,7 @@ Search interface for querying the BM25 index.
 
 import json
 import re
+import sqlite3
 import time
 import warnings
 from collections import OrderedDict
@@ -25,21 +26,83 @@ from .searcher_utils import (
 
 class SearchCache:
     """
-    Thread-safe LRU cache for search results with optional TTL.
+    Thread-safe LRU cache for search results with optional TTL and persistence.
     
     Args:
         maxsize: Maximum number of cached queries (default: 128)
         ttl: Time-to-live in seconds. Set to 0 or None to disable TTL
              (entries only evicted when cache is full). Default: None.
+        cache_path: Optional path for SQLite persistence. If provided, cache
+                    survives restarts. If None, uses in-memory only.
     """
     
-    def __init__(self, maxsize: int = 128, ttl: Optional[float] = None):
+    def __init__(
+        self, 
+        maxsize: int = 128, 
+        ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None
+    ):
         self.maxsize = maxsize
         self.ttl = ttl
+        self.cache_path = Path(cache_path) if cache_path else None
         self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
         self._lock = Lock()
         self._hits = 0
         self._misses = 0
+        self._db: Optional[sqlite3.Connection] = None
+        
+        if self.cache_path:
+            self._init_db()
+            self._load_from_db()
+    
+    def _init_db(self):
+        """Initialize SQLite database for persistent cache."""
+        self._db = sqlite3.connect(str(self.cache_path), check_same_thread=False)
+        self._db.execute('''
+            CREATE TABLE IF NOT EXISTS search_cache (
+                key TEXT PRIMARY KEY,
+                timestamp REAL NOT NULL,
+                result TEXT NOT NULL,
+                last_access REAL NOT NULL
+            )
+        ''')
+        self._db.execute('CREATE INDEX IF NOT EXISTS idx_last_access ON search_cache(last_access)')
+        self._db.commit()
+    
+    def _load_from_db(self):
+        """Load valid cache entries from database on startup."""
+        if not self._db:
+            return
+        
+        now = time.time()
+        cursor = self._db.execute(
+            'SELECT key, timestamp, result FROM search_cache ORDER BY last_access ASC'
+        )
+        
+        expired_keys = []
+        for key, timestamp, result_json in cursor:
+            # Check TTL
+            if self.ttl and (now - timestamp) > self.ttl:
+                expired_keys.append(key)
+                continue
+            
+            # Only load up to maxsize
+            if len(self._cache) >= self.maxsize:
+                break
+            
+            try:
+                result = json.loads(result_json)
+                self._cache[key] = (timestamp, result)
+            except json.JSONDecodeError:
+                expired_keys.append(key)
+        
+        # Clean up expired entries
+        if expired_keys:
+            self._db.executemany(
+                'DELETE FROM search_cache WHERE key = ?',
+                [(k,) for k in expired_keys]
+            )
+            self._db.commit()
     
     def _make_key(self, query: str, **kwargs) -> str:
         """Create a cache key from query and parameters."""
@@ -65,29 +128,62 @@ class SearchCache:
             # Check TTL
             if self.ttl and (time.time() - timestamp) > self.ttl:
                 del self._cache[key]
+                if self._db:
+                    self._db.execute('DELETE FROM search_cache WHERE key = ?', (key,))
+                    self._db.commit()
                 self._misses += 1
                 return None
             
             # Move to end (most recently used)
             self._cache.move_to_end(key)
+            
+            # Update last_access in DB
+            if self._db:
+                self._db.execute(
+                    'UPDATE search_cache SET last_access = ? WHERE key = ?',
+                    (time.time(), key)
+                )
+                self._db.commit()
+            
             self._hits += 1
             return result
     
     def set(self, query: str, result: Any, **kwargs):
         """Cache a search result."""
         key = self._make_key(query, **kwargs)
+        now = time.time()
         
         with self._lock:
             # Remove oldest if at capacity
             while len(self._cache) >= self.maxsize:
-                self._cache.popitem(last=False)
+                oldest_key, _ = self._cache.popitem(last=False)
+                if self._db:
+                    self._db.execute('DELETE FROM search_cache WHERE key = ?', (oldest_key,))
             
-            self._cache[key] = (time.time(), result)
+            self._cache[key] = (now, result)
+            
+            # Persist to DB
+            if self._db:
+                result_json = json.dumps(result)
+                self._db.execute('''
+                    INSERT OR REPLACE INTO search_cache (key, timestamp, result, last_access)
+                    VALUES (?, ?, ?, ?)
+                ''', (key, now, result_json, now))
+                self._db.commit()
     
     def clear(self):
         """Clear all cached results."""
         with self._lock:
             self._cache.clear()
+            if self._db:
+                self._db.execute('DELETE FROM search_cache')
+                self._db.commit()
+    
+    def close(self):
+        """Close database connection."""
+        if self._db:
+            self._db.close()
+            self._db = None
     
     def stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
@@ -100,7 +196,9 @@ class SearchCache:
                 'hits': self._hits,
                 'misses': self._misses,
                 'hit_rate': f"{hit_rate:.1f}%",
-                'ttl': self.ttl
+                'ttl': self.ttl,
+                'persistent': self.cache_path is not None,
+                'cache_path': str(self.cache_path) if self.cache_path else None
             }
 
 
@@ -182,7 +280,8 @@ class SearchEngine:
         index: BM25Index, 
         pages_dir: Optional[Path] = None,
         cache_size: int = 0,
-        cache_ttl: Optional[float] = None
+        cache_ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None
     ):
         """
         Initialize the search engine.
@@ -192,17 +291,23 @@ class SearchEngine:
             pages_dir: Optional directory containing page JSON files
             cache_size: Max number of queries to cache (0 to disable caching)
             cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
         """
         self.index = index
         self.pages_dir = pages_dir
-        self._cache = SearchCache(maxsize=cache_size, ttl=cache_ttl) if cache_size > 0 else None
+        self._cache = SearchCache(
+            maxsize=cache_size, 
+            ttl=cache_ttl,
+            cache_path=cache_path
+        ) if cache_size > 0 else None
     
     @classmethod
     def load(
         cls, 
         index_path: Path,
         cache_size: int = 0,
-        cache_ttl: Optional[float] = None
+        cache_ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None
     ) -> 'SearchEngine':
         """
         Load search engine from saved index.
@@ -211,6 +316,7 @@ class SearchEngine:
             index_path: Path to the saved index file
             cache_size: Max number of queries to cache (0 to disable)
             cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
         """
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
@@ -221,7 +327,7 @@ class SearchEngine:
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl)
+        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, cache_path=cache_path)
     
     def _load_page_text(self, url: str) -> Optional[str]:
         """Load full page text from disk."""
@@ -408,7 +514,8 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_synonyms: bool = False,
                  synonym_groups: Optional[List[Set[str]]] = None,
                  cache_size: int = 0,
-                 cache_ttl: Optional[float] = None):
+                 cache_ttl: Optional[float] = None,
+                 cache_path: Optional[Path] = None):
         """
         Initialize enhanced search engine.
         
@@ -422,8 +529,9 @@ class EnhancedSearchEngine(SearchEngine):
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
             cache_size: Max number of queries to cache (0 to disable)
             cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
         """
-        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl)
+        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, cache_path=cache_path)
         
         self._spellcheck_enabled = enable_spellcheck
         self._autocomplete_enabled = enable_autocomplete

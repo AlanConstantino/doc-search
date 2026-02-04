@@ -168,3 +168,164 @@ class TestSearchEngineCaching(unittest.TestCase):
         
         engine.clear_cache()
         self.assertEqual(engine.get_cache_stats()['size'], 0)
+
+
+# ============================================================================
+# Persistent Cache Tests
+# ============================================================================
+
+class TestPersistentCache(unittest.TestCase):
+    """Tests for persistent (SQLite-backed) cache functionality."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        import tempfile
+        import os
+        self.temp_dir = tempfile.mkdtemp()
+        self.cache_path = os.path.join(self.temp_dir, 'test_cache.db')
+    
+    def tearDown(self):
+        """Clean up temp files."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_persistent_cache_creates_db(self):
+        """Should create SQLite database file when cache_path is provided."""
+        import os
+        from pathlib import Path
+        
+        cache = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        
+        self.assertTrue(os.path.exists(self.cache_path))
+        cache.close()
+    
+    def test_persistent_cache_survives_restart(self):
+        """Cache entries should survive cache recreation (simulated restart)."""
+        from pathlib import Path
+        
+        # Create cache and add entries
+        cache1 = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        cache1.set('query1', ['result1'], top_k=10)
+        cache1.set('query2', ['result2'], top_k=5)
+        cache1.close()
+        
+        # Create new cache instance (simulates restart)
+        cache2 = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        
+        # Entries should be restored
+        self.assertEqual(cache2.get('query1', top_k=10), ['result1'])
+        self.assertEqual(cache2.get('query2', top_k=5), ['result2'])
+        cache2.close()
+    
+    def test_persistent_cache_respects_ttl_on_load(self):
+        """Expired entries should be pruned when loading from disk."""
+        from pathlib import Path
+        
+        # Create cache with short TTL
+        cache1 = SearchCache(maxsize=10, ttl=0.1, cache_path=Path(self.cache_path))
+        cache1.set('query', ['result'], top_k=10)
+        cache1.close()
+        
+        # Wait for TTL to expire
+        time.sleep(0.15)
+        
+        # Create new cache - expired entries should be pruned
+        cache2 = SearchCache(maxsize=10, ttl=0.1, cache_path=Path(self.cache_path))
+        self.assertIsNone(cache2.get('query', top_k=10))
+        cache2.close()
+    
+    def test_persistent_cache_clear(self):
+        """Clear should remove entries from both memory and disk."""
+        from pathlib import Path
+        
+        # Create and populate cache
+        cache1 = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        cache1.set('query', ['result'], top_k=10)
+        cache1.clear()
+        cache1.close()
+        
+        # New instance should not have the entry
+        cache2 = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        self.assertIsNone(cache2.get('query', top_k=10))
+        cache2.close()
+    
+    def test_persistent_cache_lru_eviction(self):
+        """LRU eviction should also remove from disk."""
+        from pathlib import Path
+        
+        cache = SearchCache(maxsize=2, ttl=300, cache_path=Path(self.cache_path))
+        cache.set('query1', ['r1'], top_k=10)
+        cache.set('query2', ['r2'], top_k=10)
+        cache.set('query3', ['r3'], top_k=10)  # Should evict query1
+        cache.close()
+        
+        # Reload and verify query1 was evicted from disk too
+        cache2 = SearchCache(maxsize=2, ttl=300, cache_path=Path(self.cache_path))
+        self.assertIsNone(cache2.get('query1', top_k=10))
+        self.assertEqual(cache2.get('query2', top_k=10), ['r2'])
+        self.assertEqual(cache2.get('query3', top_k=10), ['r3'])
+        cache2.close()
+    
+    def test_persistent_cache_stats(self):
+        """Stats should indicate persistent mode."""
+        from pathlib import Path
+        
+        cache = SearchCache(maxsize=10, ttl=300, cache_path=Path(self.cache_path))
+        stats = cache.stats()
+        
+        self.assertTrue(stats['persistent'])
+        self.assertEqual(stats['cache_path'], self.cache_path)
+        cache.close()
+    
+    def test_in_memory_cache_stats(self):
+        """In-memory cache stats should indicate non-persistent mode."""
+        cache = SearchCache(maxsize=10, ttl=300)
+        stats = cache.stats()
+        
+        self.assertFalse(stats['persistent'])
+        self.assertIsNone(stats['cache_path'])
+
+
+class TestSearchEnginePersistentCache(unittest.TestCase):
+    """Tests for SearchEngine with persistent cache."""
+    
+    def setUp(self):
+        """Create test index and temp directory."""
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp()
+        self.cache_path = f"{self.temp_dir}/engine_cache.db"
+        
+        self.index = BM25Index()
+        docs = [
+            {'url': 'https://example.com/1', 'title': 'Python Tutorial', 
+             'text': 'Learn Python programming language basics'},
+            {'url': 'https://example.com/2', 'title': 'Python Functions',
+             'text': 'Functions in Python are defined with def keyword'},
+        ]
+        for i, doc in enumerate(docs):
+            self.index.add_document(i, doc['url'], doc['title'], doc['text'])
+    
+    def tearDown(self):
+        """Clean up temp files."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_engine_persistent_cache(self):
+        """SearchEngine should use persistent cache when cache_path is provided."""
+        from pathlib import Path
+        import os
+        
+        engine = SearchEngine(
+            self.index, 
+            cache_size=10, 
+            cache_path=Path(self.cache_path)
+        )
+        
+        # Perform search
+        results1 = engine.search('python', top_k=10)
+        
+        # Check DB file exists
+        self.assertTrue(os.path.exists(self.cache_path))
+        
+        stats = engine.get_cache_stats()
+        self.assertTrue(stats['persistent'])
