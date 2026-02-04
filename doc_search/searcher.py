@@ -2,6 +2,7 @@
 Search interface for querying the BM25 index.
 """
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -24,6 +25,29 @@ from .searcher_utils import (
 )
 
 
+def compute_index_fingerprint(index: BM25Index) -> str:
+    """
+    Compute a fingerprint for the index based on its content.
+    
+    The fingerprint changes when documents are added, removed, or modified.
+    Used to invalidate cache when the index changes.
+    
+    Args:
+        index: The BM25 index
+        
+    Returns:
+        A hex string fingerprint
+    """
+    # Use document count and sorted URLs to create fingerprint
+    # This catches additions, deletions, and URL changes
+    doc_count = len(index.documents)
+    urls = sorted(doc.get('url', '') for doc in index.documents.values())
+    
+    # Create a hash of the content
+    content = f"{doc_count}:" + "|".join(urls)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
 class SearchCache:
     """
     Thread-safe LRU cache for search results with optional TTL and persistence.
@@ -34,17 +58,21 @@ class SearchCache:
              (entries only evicted when cache is full). Default: None.
         cache_path: Optional path for SQLite persistence. If provided, cache
                     survives restarts. If None, uses in-memory only.
+        index_fingerprint: Optional fingerprint of the index. If provided and
+                          the stored fingerprint doesn't match, cache is cleared.
     """
     
     def __init__(
         self, 
         maxsize: int = 128, 
         ttl: Optional[float] = None,
-        cache_path: Optional[Path] = None
+        cache_path: Optional[Path] = None,
+        index_fingerprint: Optional[str] = None
     ):
         self.maxsize = maxsize
         self.ttl = ttl
         self.cache_path = Path(cache_path) if cache_path else None
+        self.index_fingerprint = index_fingerprint
         self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
         self._lock = Lock()
         self._hits = 0
@@ -53,6 +81,9 @@ class SearchCache:
         
         if self.cache_path:
             self._init_db()
+            if not self._check_fingerprint():
+                self._clear_db()
+                self._store_fingerprint()
             self._load_from_db()
     
     def _init_db(self):
@@ -66,7 +97,46 @@ class SearchCache:
                 last_access REAL NOT NULL
             )
         ''')
+        self._db.execute('''
+            CREATE TABLE IF NOT EXISTS cache_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ''')
         self._db.execute('CREATE INDEX IF NOT EXISTS idx_last_access ON search_cache(last_access)')
+        self._db.commit()
+    
+    def _check_fingerprint(self) -> bool:
+        """Check if stored fingerprint matches current index fingerprint."""
+        if not self._db or not self.index_fingerprint:
+            return True  # No fingerprint to check
+        
+        cursor = self._db.execute(
+            "SELECT value FROM cache_metadata WHERE key = 'index_fingerprint'"
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            return False  # No stored fingerprint, need to initialize
+        
+        return row[0] == self.index_fingerprint
+    
+    def _store_fingerprint(self):
+        """Store current index fingerprint in database."""
+        if not self._db or not self.index_fingerprint:
+            return
+        
+        self._db.execute('''
+            INSERT OR REPLACE INTO cache_metadata (key, value)
+            VALUES ('index_fingerprint', ?)
+        ''', (self.index_fingerprint,))
+        self._db.commit()
+    
+    def _clear_db(self):
+        """Clear all entries from the database."""
+        if not self._db:
+            return
+        self._db.execute('DELETE FROM search_cache')
         self._db.commit()
     
     def _load_from_db(self):
@@ -295,10 +365,15 @@ class SearchEngine:
         """
         self.index = index
         self.pages_dir = pages_dir
+        
+        # Compute index fingerprint for cache invalidation
+        fingerprint = compute_index_fingerprint(index) if cache_path else None
+        
         self._cache = SearchCache(
             maxsize=cache_size, 
             ttl=cache_ttl,
-            cache_path=cache_path
+            cache_path=cache_path,
+            index_fingerprint=fingerprint
         ) if cache_size > 0 else None
     
     @classmethod

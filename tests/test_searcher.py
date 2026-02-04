@@ -329,3 +329,133 @@ class TestSearchEnginePersistentCache(unittest.TestCase):
         
         stats = engine.get_cache_stats()
         self.assertTrue(stats['persistent'])
+
+
+# ============================================================================
+# Index Fingerprint / Cache Invalidation Tests
+# ============================================================================
+
+class TestIndexFingerprint(unittest.TestCase):
+    """Tests for automatic cache invalidation when index changes."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp()
+        self.cache_path = f"{self.temp_dir}/fingerprint_cache.db"
+    
+    def tearDown(self):
+        """Clean up temp files."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_fingerprint_computed(self):
+        """compute_index_fingerprint should return consistent fingerprint."""
+        from doc_search.searcher import compute_index_fingerprint
+        
+        index = BM25Index()
+        index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
+        index.add_document(1, 'https://example.com/2', 'Title 2', 'Content 2')
+        
+        fp1 = compute_index_fingerprint(index)
+        fp2 = compute_index_fingerprint(index)
+        
+        self.assertEqual(fp1, fp2)
+        self.assertEqual(len(fp1), 16)  # 16 hex chars
+    
+    def test_fingerprint_changes_on_add(self):
+        """Fingerprint should change when document is added."""
+        from doc_search.searcher import compute_index_fingerprint
+        
+        index = BM25Index()
+        index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
+        
+        fp1 = compute_index_fingerprint(index)
+        
+        index.add_document(1, 'https://example.com/2', 'Title 2', 'Content 2')
+        
+        fp2 = compute_index_fingerprint(index)
+        
+        self.assertNotEqual(fp1, fp2)
+    
+    def test_fingerprint_changes_on_url_change(self):
+        """Fingerprint should change when URLs change."""
+        from doc_search.searcher import compute_index_fingerprint
+        
+        index1 = BM25Index()
+        index1.add_document(0, 'https://example.com/old', 'Title', 'Content')
+        
+        index2 = BM25Index()
+        index2.add_document(0, 'https://example.com/new', 'Title', 'Content')
+        
+        self.assertNotEqual(
+            compute_index_fingerprint(index1),
+            compute_index_fingerprint(index2)
+        )
+    
+    def test_cache_invalidated_on_reindex(self):
+        """Cache should be cleared when index fingerprint changes."""
+        from pathlib import Path
+        
+        # Create index and cache with some data
+        index1 = BM25Index()
+        index1.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        
+        engine1 = SearchEngine(
+            index1,
+            cache_size=10,
+            cache_path=Path(self.cache_path)
+        )
+        engine1.search('python', top_k=10)
+        
+        # Verify cache has entry
+        self.assertEqual(engine1.get_cache_stats()['size'], 1)
+        
+        # Create NEW index with different content (simulates re-index)
+        index2 = BM25Index()
+        index2.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        index2.add_document(1, 'https://example.com/2', 'Java', 'Java content')
+        
+        # Create new engine with same cache path but different index
+        engine2 = SearchEngine(
+            index2,
+            cache_size=10,
+            cache_path=Path(self.cache_path)
+        )
+        
+        # Cache should have been invalidated (size = 0)
+        self.assertEqual(engine2.get_cache_stats()['size'], 0)
+    
+    def test_cache_preserved_when_index_unchanged(self):
+        """Cache should be preserved when index fingerprint matches."""
+        from pathlib import Path
+        
+        # Create index and cache with some data
+        index1 = BM25Index()
+        index1.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        
+        engine1 = SearchEngine(
+            index1,
+            cache_size=10,
+            cache_path=Path(self.cache_path)
+        )
+        engine1.search('python', top_k=10)
+        self.assertEqual(engine1.get_cache_stats()['size'], 1)
+        
+        # Create identical index (simulates restart without re-index)
+        index2 = BM25Index()
+        index2.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        
+        # Create new engine - cache should be preserved
+        engine2 = SearchEngine(
+            index2,
+            cache_size=10,
+            cache_path=Path(self.cache_path)
+        )
+        
+        # Cache should still have the entry
+        self.assertEqual(engine2.get_cache_stats()['size'], 1)
+        
+        # And we should get a cache hit
+        engine2.search('python', top_k=10)
+        self.assertEqual(engine2.get_cache_stats()['hits'], 1)
