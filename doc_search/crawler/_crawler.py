@@ -67,7 +67,8 @@ class Crawler:
         extract_docs: bool = False,
         incremental: bool = False,
         save_html: bool = True,
-        parser: str = 'dom'
+        parser: str = 'dom',
+        verify_ssl: bool = False
     ):
         """
         Initialize the crawler.
@@ -90,6 +91,7 @@ class Crawler:
             incremental: If True, only re-download changed pages.
             save_html: If True, save raw HTML for re-parsing later (default: True).
             parser: HTML parser for text extraction ('dom' or 'stream', default: 'dom').
+            verify_ssl: If True, verify SSL certificates (default: False for self-signed certs).
         """
         self.base_url = normalize_url(base_url)
         self.base_domain = get_domain(base_url)
@@ -127,8 +129,13 @@ class Crawler:
         # Initialize rate limiter
         self.rate_limiter = RateLimiter(delay)
         
-        # SSL context (permissive for self-signed certs)
-        ssl_context = create_permissive_ssl_context()
+        # SSL context (permissive by default for self-signed certs)
+        self.verify_ssl = verify_ssl
+        if verify_ssl:
+            import ssl
+            ssl_context = ssl.create_default_context()
+        else:
+            ssl_context = create_permissive_ssl_context()
         
         # Output lock for verbose messages
         self._print_lock = threading.Lock()

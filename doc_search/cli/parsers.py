@@ -67,6 +67,8 @@ def _add_crawl_parser(subparsers):
     crawl_parser.add_argument('--user', '-u', help='Username for HTTP Basic Auth')
     crawl_parser.add_argument('--password', '-p', help='Password (will prompt if not provided)')
     crawl_parser.add_argument('--token', help='Pre-encoded Base64 auth token (alternative to user/password)')
+    crawl_parser.add_argument('--verify-ssl', action='store_true',
+                             help='Enable SSL certificate verification (disabled by default)')
     crawl_parser.add_argument('--delay', '-d', type=float, default=1.0,
                              help='Delay between requests in seconds (default: 1.0)')
     crawl_parser.add_argument('--timeout', '-t', type=float, default=30.0,

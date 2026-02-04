@@ -152,7 +152,8 @@ def cmd_crawl(args):
         extract_docs=args.extract_docs,
         incremental=getattr(args, 'incremental', False),
         save_html=not getattr(args, 'no_save_html', False),
-        parser=getattr(args, 'parser', 'dom')
+        parser=getattr(args, 'parser', 'dom'),
+        verify_ssl=getattr(args, 'verify_ssl', False)
     )
     
     # Start crawling
