@@ -401,9 +401,14 @@ def cmd_interactive(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
-    # Load enhanced engine
+    # Load enhanced engine with caching
     print(style_info(f"Loading index from: {index_path}"))
-    engine = EnhancedSearchEngine.load(index_path)
+    cache_path = site_dir / '.cache.db'
+    engine = EnhancedSearchEngine.load(
+        index_path,
+        cache_size=128,
+        cache_path=cache_path
+    )
     
     stats = engine.get_stats()
     
