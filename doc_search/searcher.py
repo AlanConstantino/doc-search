@@ -4,9 +4,12 @@ Search interface for querying the BM25 index.
 
 import json
 import re
+import sqlite3
 import time
 import warnings
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .indexer import BM25Index
@@ -19,6 +22,246 @@ from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
     format_results, check_phrase_match
 )
+
+
+def compute_index_fingerprint(index_path: Path) -> str:
+    """
+    Compute a fingerprint for the index based on file modification time.
+    
+    The fingerprint changes whenever the index file is modified (re-indexed).
+    Used to invalidate cache when the index changes.
+    
+    Args:
+        index_path: Path to the index file
+        
+    Returns:
+        A string fingerprint based on file mtime
+    """
+    return str(Path(index_path).stat().st_mtime)
+
+
+class SearchCache:
+    """
+    Thread-safe LRU cache for search results with optional TTL and persistence.
+    
+    Args:
+        maxsize: Maximum number of cached queries (default: 128)
+        ttl: Time-to-live in seconds. Set to 0 or None to disable TTL
+             (entries only evicted when cache is full). Default: None.
+        cache_path: Optional path for SQLite persistence. If provided, cache
+                    survives restarts. If None, uses in-memory only.
+        index_fingerprint: Optional fingerprint of the index. If provided and
+                          the stored fingerprint doesn't match, cache is cleared.
+    """
+    
+    def __init__(
+        self, 
+        maxsize: int = 128, 
+        ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None,
+        index_fingerprint: Optional[str] = None
+    ):
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self.cache_path = Path(cache_path) if cache_path else None
+        self.index_fingerprint = index_fingerprint
+        self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
+        self._lock = Lock()
+        self._hits = 0
+        self._misses = 0
+        self._db: Optional[sqlite3.Connection] = None
+        
+        if self.cache_path:
+            self._init_db()
+            if not self._check_fingerprint():
+                self._clear_db()
+                self._store_fingerprint()
+            self._load_from_db()
+    
+    def _init_db(self):
+        """Initialize SQLite database for persistent cache."""
+        self._db = sqlite3.connect(str(self.cache_path), check_same_thread=False)
+        self._db.execute('''
+            CREATE TABLE IF NOT EXISTS search_cache (
+                key TEXT PRIMARY KEY,
+                timestamp REAL NOT NULL,
+                result TEXT NOT NULL,
+                last_access REAL NOT NULL
+            )
+        ''')
+        self._db.execute('''
+            CREATE TABLE IF NOT EXISTS cache_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ''')
+        self._db.execute('CREATE INDEX IF NOT EXISTS idx_last_access ON search_cache(last_access)')
+        self._db.commit()
+    
+    def _check_fingerprint(self) -> bool:
+        """Check if stored fingerprint matches current index fingerprint."""
+        if not self._db or not self.index_fingerprint:
+            return True  # No fingerprint to check
+        
+        cursor = self._db.execute(
+            "SELECT value FROM cache_metadata WHERE key = 'index_fingerprint'"
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            return False  # No stored fingerprint, need to initialize
+        
+        return row[0] == self.index_fingerprint
+    
+    def _store_fingerprint(self):
+        """Store current index fingerprint in database."""
+        if not self._db or not self.index_fingerprint:
+            return
+        
+        self._db.execute('''
+            INSERT OR REPLACE INTO cache_metadata (key, value)
+            VALUES ('index_fingerprint', ?)
+        ''', (self.index_fingerprint,))
+        self._db.commit()
+    
+    def _clear_db(self):
+        """Clear all entries from the database."""
+        if not self._db:
+            return
+        self._db.execute('DELETE FROM search_cache')
+        self._db.commit()
+    
+    def _load_from_db(self):
+        """Load valid cache entries from database on startup."""
+        if not self._db:
+            return
+        
+        now = time.time()
+        cursor = self._db.execute(
+            'SELECT key, timestamp, result FROM search_cache ORDER BY last_access ASC'
+        )
+        
+        expired_keys = []
+        for key, timestamp, result_json in cursor:
+            # Check TTL
+            if self.ttl and (now - timestamp) > self.ttl:
+                expired_keys.append(key)
+                continue
+            
+            # Only load up to maxsize
+            if len(self._cache) >= self.maxsize:
+                break
+            
+            try:
+                result = json.loads(result_json)
+                self._cache[key] = (timestamp, result)
+            except json.JSONDecodeError:
+                expired_keys.append(key)
+        
+        # Clean up expired entries
+        if expired_keys:
+            self._db.executemany(
+                'DELETE FROM search_cache WHERE key = ?',
+                [(k,) for k in expired_keys]
+            )
+            self._db.commit()
+    
+    def _make_key(self, query: str, **kwargs) -> str:
+        """Create a cache key from query and parameters."""
+        # Sort kwargs for consistent key generation
+        sorted_kwargs = sorted(kwargs.items())
+        return f"{query}|{sorted_kwargs}"
+    
+    def get(self, query: str, **kwargs) -> Optional[Any]:
+        """
+        Get cached result if it exists and hasn't expired.
+        
+        Returns None if not found or expired.
+        """
+        key = self._make_key(query, **kwargs)
+        
+        with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return None
+            
+            timestamp, result = self._cache[key]
+            
+            # Check TTL
+            if self.ttl and (time.time() - timestamp) > self.ttl:
+                del self._cache[key]
+                if self._db:
+                    self._db.execute('DELETE FROM search_cache WHERE key = ?', (key,))
+                    self._db.commit()
+                self._misses += 1
+                return None
+            
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            
+            # Update last_access in DB
+            if self._db:
+                self._db.execute(
+                    'UPDATE search_cache SET last_access = ? WHERE key = ?',
+                    (time.time(), key)
+                )
+                self._db.commit()
+            
+            self._hits += 1
+            return result
+    
+    def set(self, query: str, result: Any, **kwargs):
+        """Cache a search result."""
+        key = self._make_key(query, **kwargs)
+        now = time.time()
+        
+        with self._lock:
+            # Remove oldest if at capacity
+            while len(self._cache) >= self.maxsize:
+                oldest_key, _ = self._cache.popitem(last=False)
+                if self._db:
+                    self._db.execute('DELETE FROM search_cache WHERE key = ?', (oldest_key,))
+            
+            self._cache[key] = (now, result)
+            
+            # Persist to DB
+            if self._db:
+                result_json = json.dumps(result)
+                self._db.execute('''
+                    INSERT OR REPLACE INTO search_cache (key, timestamp, result, last_access)
+                    VALUES (?, ?, ?, ?)
+                ''', (key, now, result_json, now))
+                self._db.commit()
+    
+    def clear(self):
+        """Clear all cached results."""
+        with self._lock:
+            self._cache.clear()
+            if self._db:
+                self._db.execute('DELETE FROM search_cache')
+                self._db.commit()
+    
+    def close(self):
+        """Close database connection."""
+        if self._db:
+            self._db.close()
+            self._db = None
+    
+    def stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = (self._hits / total * 100) if total > 0 else 0.0
+            return {
+                'size': len(self._cache),
+                'maxsize': self.maxsize,
+                'hits': self._hits,
+                'misses': self._misses,
+                'hit_rate': f"{hit_rate:.1f}%",
+                'ttl': self.ttl,
+                'persistent': self.cache_path is not None,
+                'cache_path': str(self.cache_path) if self.cache_path else None
+            }
 
 
 def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
@@ -94,13 +337,58 @@ class SearchEngine:
     High-level search interface with phrase search and snippet highlighting.
     """
     
-    def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None):
+    def __init__(
+        self, 
+        index: BM25Index, 
+        pages_dir: Optional[Path] = None,
+        cache_size: int = 0,
+        cache_ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None,
+        index_path: Optional[Path] = None
+    ):
+        """
+        Initialize the search engine.
+        
+        Args:
+            index: The BM25 index to search
+            pages_dir: Optional directory containing page JSON files
+            cache_size: Max number of queries to cache (0 to disable caching)
+            cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
+            index_path: Optional path to index file (for cache invalidation)
+        """
         self.index = index
         self.pages_dir = pages_dir
+        
+        # Compute index fingerprint for cache invalidation (needs index_path)
+        fingerprint = None
+        if cache_path and index_path:
+            fingerprint = compute_index_fingerprint(index_path)
+        
+        self._cache = SearchCache(
+            maxsize=cache_size, 
+            ttl=cache_ttl,
+            cache_path=cache_path,
+            index_fingerprint=fingerprint
+        ) if cache_size > 0 else None
     
     @classmethod
-    def load(cls, index_path: Path) -> 'SearchEngine':
-        """Load search engine from saved index."""
+    def load(
+        cls, 
+        index_path: Path,
+        cache_size: int = 0,
+        cache_ttl: Optional[float] = None,
+        cache_path: Optional[Path] = None
+    ) -> 'SearchEngine':
+        """
+        Load search engine from saved index.
+        
+        Args:
+            index_path: Path to the saved index file
+            cache_size: Max number of queries to cache (0 to disable)
+            cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
+        """
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
         
@@ -110,7 +398,8 @@ class SearchEngine:
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir)
+        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, 
+                   cache_path=cache_path, index_path=index_path)
     
     def _load_page_text(self, url: str) -> Optional[str]:
         """Load full page text from disk."""
@@ -152,6 +441,15 @@ class SearchEngine:
         Returns:
             List of result dictionaries
         """
+        # Check cache first
+        if self._cache:
+            cached = self._cache.get(
+                query, top_k=top_k, min_score=min_score, 
+                highlight=highlight, snippet_length=snippet_length
+            )
+            if cached is not None:
+                return cached
+        
         # Parse query into terms and phrases
         terms, phrases = parse_query(query)
         
@@ -219,6 +517,13 @@ class SearchEngine:
             if len(results) >= top_k:
                 break
         
+        # Cache the results
+        if self._cache:
+            self._cache.set(
+                query, results, top_k=top_k, min_score=min_score,
+                highlight=highlight, snippet_length=snippet_length
+            )
+        
         return results
     
     def search_with_context(
@@ -242,6 +547,22 @@ class SearchEngine:
     def get_stats(self) -> Dict[str, Any]:
         """Get search engine statistics."""
         return self.index.get_stats()
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        """Get cache statistics, or None if caching is disabled."""
+        if self._cache:
+            return self._cache.stats()
+        return None
+    
+    def clear_cache(self):
+        """Clear the search result cache."""
+        if self._cache:
+            self._cache.clear()
+    
+    @property
+    def cache_enabled(self) -> bool:
+        """Check if caching is enabled."""
+        return self._cache is not None
 
 
 class EnhancedSearchEngine(SearchEngine):
@@ -263,7 +584,11 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
-                 synonym_groups: Optional[List[Set[str]]] = None):
+                 synonym_groups: Optional[List[Set[str]]] = None,
+                 cache_size: int = 0,
+                 cache_ttl: Optional[float] = None,
+                 cache_path: Optional[Path] = None,
+                 index_path: Optional[Path] = None):
         """
         Initialize enhanced search engine.
         
@@ -275,8 +600,13 @@ class EnhancedSearchEngine(SearchEngine):
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
+            cache_size: Max number of queries to cache (0 to disable)
+            cache_ttl: Cache TTL in seconds (None = never expire)
+            cache_path: Optional path for persistent cache (survives restarts)
+            index_path: Optional path to index file (for cache invalidation)
         """
-        super().__init__(index, pages_dir)
+        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, 
+                         cache_path=cache_path, index_path=index_path)
         
         self._spellcheck_enabled = enable_spellcheck
         self._autocomplete_enabled = enable_autocomplete
@@ -347,7 +677,7 @@ class EnhancedSearchEngine(SearchEngine):
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir, **kwargs)
+        return cls(index, pages_dir, index_path=index_path, **kwargs)
     
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
         """
@@ -458,6 +788,22 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_query = query
         self.last_expanded_query = None
         
+        # Check cache first
+        facet_key = tuple(sorted(facet_filters.items())) if facet_filters else None
+        if self._cache:
+            cached = self._cache.get(
+                query, top_k=top_k, min_score=min_score, 
+                highlight=highlight, snippet_length=snippet_length,
+                facet_filters=facet_key, expand_synonyms=expand_synonyms
+            )
+            if cached is not None:
+                # Restore metadata from cache
+                results, metadata = cached
+                self.last_suggestion = metadata.get('suggestion')
+                self.last_facets = metadata.get('facets', {})
+                self.last_expanded_query = metadata.get('expanded_query')
+                return results
+        
         # Parse query
         terms, phrases = parse_query(query)
         
@@ -559,6 +905,20 @@ class EnhancedSearchEngine(SearchEngine):
         # Get facet counts for results
         if self._facets and results:
             self.last_facets = self.get_facet_counts(results)
+        
+        # Store in cache
+        if self._cache:
+            metadata = {
+                'suggestion': self.last_suggestion,
+                'facets': self.last_facets,
+                'expanded_query': self.last_expanded_query
+            }
+            self._cache.set(
+                query, (results, metadata),
+                top_k=top_k, min_score=min_score,
+                highlight=highlight, snippet_length=snippet_length,
+                facet_filters=facet_key, expand_synonyms=expand_synonyms
+            )
         
         return results
     

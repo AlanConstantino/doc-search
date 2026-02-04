@@ -250,7 +250,8 @@ def format_results(
     show_scores: bool = False,
     query_terms: Optional[Set[str]] = None,
     elapsed_ms: Optional[float] = None,
-    colorize_output: bool = True
+    colorize_output: bool = True,
+    start_index: int = 0
 ) -> str:
     """
     Format search results for display with beautiful ANSI colors.
@@ -261,6 +262,7 @@ def format_results(
         query_terms: Set of query terms for ANSI highlighting (optional)
         elapsed_ms: Search time in milliseconds (optional)
         colorize_output: Use ANSI colors (default: True)
+        start_index: Starting index for result numbering (for pagination)
         
     Returns:
         Formatted string
@@ -281,7 +283,7 @@ def format_results(
             lines.append(perf_line)
         lines.append("")
     
-    for i, result in enumerate(results, 1):
+    for i, result in enumerate(results, start_index + 1):
         title = result.get('title', 'Untitled') or 'Untitled'
         url = result['url']
         # Prefer snippet (with highlighting) over description

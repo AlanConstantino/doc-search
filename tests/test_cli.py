@@ -88,6 +88,11 @@ class MockSearchEngine:
         self.autocomplete_calls.append({'prefix': prefix, 'max_suggestions': max_suggestions})
         return [s for s in self._suggestions if s.startswith(prefix)][:max_suggestions]
     
+    @property
+    def cache_enabled(self) -> bool:
+        """Mock cache_enabled property."""
+        return False
+    
     @classmethod
     def load(cls, path: Path, **kwargs) -> 'MockSearchEngine':
         """Mock load method for compatibility."""

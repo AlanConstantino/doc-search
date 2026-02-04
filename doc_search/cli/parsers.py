@@ -170,8 +170,10 @@ def _add_interactive_parser(subparsers):
     """Add the interactive command parser."""
     interactive_parser = subparsers.add_parser('interactive', help='Interactive search mode')
     interactive_parser.add_argument('site_dir', help='Site data directory or original URL')
-    interactive_parser.add_argument('--limit', '-l', type=int, default=10,
-                                   help='Number of results per query (default: 10)')
+    interactive_parser.add_argument('--limit', '--per-page', '-l', type=int, default=10, dest='limit',
+                                   help='Results per page (default: 10)')
+    interactive_parser.add_argument('--max-results', '-m', type=int, default=100, dest='max_results',
+                                   help='Max results to fetch per query (default: 100)')
     interactive_parser.add_argument('--scores', '-s', action='store_true',
                                    help='Show BM25 scores')
     interactive_parser.add_argument('--separate-paths', action='store_true',
@@ -220,4 +222,10 @@ def _add_serve_parser(subparsers):
     serve_parser.add_argument('--disable-synonyms', action='store_false',
                              dest='enable_synonyms',
                              help='Disable synonym expansion toggle')
+    serve_parser.add_argument('--cache-size', type=int, default=128,
+                             help='Number of search queries to cache (default: 128, 0 to disable)')
+    serve_parser.add_argument('--cache-ttl', type=float, default=0,
+                             help='Cache TTL in seconds (default: 0 = never expire, only evict when full)')
+    serve_parser.add_argument('--cache-file', type=str, default=None,
+                             help='Path to cache file (default: <site_dir>/.cache.db)')
     serve_parser.set_defaults(func=cmd_serve)
