@@ -631,7 +631,9 @@ def cmd_serve(args):
     print(style_info(f"Loading index from: {index_path}"))
     enable_synonyms = getattr(args, 'synonyms', True)
     cache_size = getattr(args, 'cache_size', 128)
-    cache_ttl = getattr(args, 'cache_ttl', 300.0)
+    cache_ttl_arg = getattr(args, 'cache_ttl', 0)
+    # TTL of 0 means never expire (None internally)
+    cache_ttl = None if cache_ttl_arg == 0 else cache_ttl_arg
     engine = EnhancedSearchEngine.load(
         index_path,
         enable_spellcheck=True,
@@ -643,7 +645,8 @@ def cmd_serve(args):
     )
     
     if engine.cache_enabled:
-        print(style_info(f"Search cache: {cache_size} queries, {cache_ttl}s TTL"))
+        ttl_str = "no expiry" if cache_ttl is None else f"{cache_ttl}s TTL"
+        print(style_info(f"Search cache: {cache_size} queries, {ttl_str}"))
     
     stats = engine.get_stats()
     

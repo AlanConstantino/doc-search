@@ -29,11 +29,11 @@ class SearchCache:
     
     Args:
         maxsize: Maximum number of cached queries (default: 128)
-        ttl: Time-to-live in seconds (default: 300, i.e., 5 minutes). 
-             Set to 0 or None to disable TTL.
+        ttl: Time-to-live in seconds. Set to 0 or None to disable TTL
+             (entries only evicted when cache is full). Default: None.
     """
     
-    def __init__(self, maxsize: int = 128, ttl: Optional[float] = 300.0):
+    def __init__(self, maxsize: int = 128, ttl: Optional[float] = None):
         self.maxsize = maxsize
         self.ttl = ttl
         self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
@@ -182,7 +182,7 @@ class SearchEngine:
         index: BM25Index, 
         pages_dir: Optional[Path] = None,
         cache_size: int = 0,
-        cache_ttl: Optional[float] = 300.0
+        cache_ttl: Optional[float] = None
     ):
         """
         Initialize the search engine.
@@ -191,7 +191,7 @@ class SearchEngine:
             index: The BM25 index to search
             pages_dir: Optional directory containing page JSON files
             cache_size: Max number of queries to cache (0 to disable caching)
-            cache_ttl: Cache time-to-live in seconds (default: 300)
+            cache_ttl: Cache TTL in seconds (None = never expire)
         """
         self.index = index
         self.pages_dir = pages_dir
@@ -202,7 +202,7 @@ class SearchEngine:
         cls, 
         index_path: Path,
         cache_size: int = 0,
-        cache_ttl: Optional[float] = 300.0
+        cache_ttl: Optional[float] = None
     ) -> 'SearchEngine':
         """
         Load search engine from saved index.
@@ -210,7 +210,7 @@ class SearchEngine:
         Args:
             index_path: Path to the saved index file
             cache_size: Max number of queries to cache (0 to disable)
-            cache_ttl: Cache time-to-live in seconds (default: 300)
+            cache_ttl: Cache TTL in seconds (None = never expire)
         """
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
@@ -408,7 +408,7 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_synonyms: bool = False,
                  synonym_groups: Optional[List[Set[str]]] = None,
                  cache_size: int = 0,
-                 cache_ttl: Optional[float] = 300.0):
+                 cache_ttl: Optional[float] = None):
         """
         Initialize enhanced search engine.
         
@@ -421,7 +421,7 @@ class EnhancedSearchEngine(SearchEngine):
             enable_synonyms: Enable query expansion with synonyms (default: False)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
             cache_size: Max number of queries to cache (0 to disable)
-            cache_ttl: Cache time-to-live in seconds (default: 300)
+            cache_ttl: Cache TTL in seconds (None = never expire)
         """
         super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl)
         

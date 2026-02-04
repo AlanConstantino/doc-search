@@ -222,6 +222,6 @@ def _add_serve_parser(subparsers):
                              help='Disable synonym expansion toggle')
     serve_parser.add_argument('--cache-size', type=int, default=128,
                              help='Number of search queries to cache (default: 128, 0 to disable)')
-    serve_parser.add_argument('--cache-ttl', type=float, default=300.0,
-                             help='Cache time-to-live in seconds (default: 300)')
+    serve_parser.add_argument('--cache-ttl', type=float, default=0,
+                             help='Cache TTL in seconds (default: 0 = never expire, only evict when full)')
     serve_parser.set_defaults(func=cmd_serve)
