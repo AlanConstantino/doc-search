@@ -788,6 +788,22 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_query = query
         self.last_expanded_query = None
         
+        # Check cache first
+        facet_key = tuple(sorted(facet_filters.items())) if facet_filters else None
+        if self._cache:
+            cached = self._cache.get(
+                query, top_k=top_k, min_score=min_score, 
+                highlight=highlight, snippet_length=snippet_length,
+                facet_filters=facet_key, expand_synonyms=expand_synonyms
+            )
+            if cached is not None:
+                # Restore metadata from cache
+                results, metadata = cached
+                self.last_suggestion = metadata.get('suggestion')
+                self.last_facets = metadata.get('facets', {})
+                self.last_expanded_query = metadata.get('expanded_query')
+                return results
+        
         # Parse query
         terms, phrases = parse_query(query)
         
@@ -889,6 +905,20 @@ class EnhancedSearchEngine(SearchEngine):
         # Get facet counts for results
         if self._facets and results:
             self.last_facets = self.get_facet_counts(results)
+        
+        # Store in cache
+        if self._cache:
+            metadata = {
+                'suggestion': self.last_suggestion,
+                'facets': self.last_facets,
+                'expanded_query': self.last_expanded_query
+            }
+            self._cache.set(
+                query, (results, metadata),
+                top_k=top_k, min_score=min_score,
+                highlight=highlight, snippet_length=snippet_length,
+                facet_filters=facet_key, expand_synonyms=expand_synonyms
+            )
         
         return results
     
