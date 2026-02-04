@@ -635,8 +635,13 @@ def cmd_serve(args):
     cache_file = getattr(args, 'cache_file', None)
     # TTL of 0 means never expire (None internally)
     cache_ttl = None if cache_ttl_arg == 0 else cache_ttl_arg
-    # Convert cache_file to Path if provided
-    cache_path = Path(cache_file) if cache_file else None
+    # Default cache path is <site_dir>/.cache.db, or user-specified path
+    if cache_file:
+        cache_path = Path(cache_file)
+    elif cache_size > 0:
+        cache_path = site_dir / '.cache.db'
+    else:
+        cache_path = None
     engine = EnhancedSearchEngine.load(
         index_path,
         enable_spellcheck=True,
@@ -650,8 +655,7 @@ def cmd_serve(args):
     
     if engine.cache_enabled:
         ttl_str = "no expiry" if cache_ttl is None else f"{cache_ttl}s TTL"
-        persist_str = f", persistent ({cache_file})" if cache_file else ", in-memory"
-        print(style_info(f"Search cache: {cache_size} queries, {ttl_str}{persist_str}"))
+        print(style_info(f"Search cache: {cache_size} queries, {ttl_str}, persistent ({cache_path})"))
     
     stats = engine.get_stats()
     
