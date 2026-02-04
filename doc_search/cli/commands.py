@@ -434,47 +434,109 @@ def cmd_interactive(args):
     print()
     
     prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
+    page_prompt = f"{Colors.BRIGHT_CYAN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
+    
+    per_page = getattr(args, 'limit', 10)
+    max_results = getattr(args, 'max_results', 100)
+    
+    # State for pagination
+    current_results = []
+    current_query_terms = set()
+    current_suggestion = None
+    current_page = 0
+    elapsed_ms = 0
+    
+    def show_page(page_num):
+        """Display a single page of results."""
+        start_idx = page_num * per_page
+        end_idx = start_idx + per_page
+        page_results = current_results[start_idx:end_idx]
+        
+        total_pages = (len(current_results) + per_page - 1) // per_page
+        
+        print()
+        
+        # Show suggestion only on first page
+        if page_num == 0 and current_suggestion:
+            print(style_info(f'{_e("bulb")} Did you mean: "{current_suggestion}"?'))
+            print()
+        
+        print(format_results(
+            page_results, 
+            show_scores=args.scores,
+            query_terms=current_query_terms,
+            elapsed_ms=elapsed_ms if page_num == 0 else None,
+            colorize_output=True,
+            start_index=start_idx
+        ))
+        
+        # Show pagination info if there are multiple pages
+        if total_pages > 1:
+            print()
+            print(style_info(f"  Page {page_num + 1} of {total_pages} ({len(current_results)} total results)"))
+            nav_hints = []
+            if page_num > 0:
+                nav_hints.append("[p]rev")
+            if page_num < total_pages - 1:
+                nav_hints.append("[n]ext")
+            nav_hints.append("[q]uit")
+            print(style_info(f"  {' / '.join(nav_hints)} or type a new query"))
     
     while True:
         try:
-            query = input(prompt).strip()
+            # Use pagination prompt if we have results to navigate
+            if current_results and len(current_results) > per_page:
+                user_input = input(page_prompt).strip().lower()
+            else:
+                user_input = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             print(style_info("\nGoodbye! 👋"))
             break
         
-        if not query:
+        if not user_input:
             print(style_info("\nGoodbye! 👋"))
             break
         
+        # Handle pagination commands
+        if user_input == 'n' and current_results:
+            total_pages = (len(current_results) + per_page - 1) // per_page
+            if current_page < total_pages - 1:
+                current_page += 1
+                show_page(current_page)
+            else:
+                print(style_info("  Already on last page"))
+            continue
+        elif user_input == 'p' and current_results:
+            if current_page > 0:
+                current_page -= 1
+                show_page(current_page)
+            else:
+                print(style_info("  Already on first page"))
+            continue
+        elif user_input == 'q':
+            print(style_info("\nGoodbye! 👋"))
+            break
+        
+        # New search query
+        query = user_input
+        
         # Time the search (use search_enhanced for dict response with metadata)
         start_time = time.perf_counter()
-        response = engine.search_enhanced(query, top_k=args.limit)
+        response = engine.search_enhanced(query, top_k=max_results)
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         
-        results = response['results']
-        suggestion = response.get('suggestion')
+        current_results = response['results']
+        current_suggestion = response.get('suggestion')
+        current_page = 0
         
         # Get query terms for highlighting
         terms, phrases = parse_query(query)
-        query_terms = set(terms)
+        current_query_terms = set(terms)
         for phrase in phrases:
-            query_terms.update(phrase)
+            current_query_terms.update(phrase)
         
-        print()
-        
-        # Show "Did you mean..." suggestion
-        if suggestion:
-            print(style_info(f'{_e("bulb")} Did you mean: "{suggestion}"?'))
-            print()
-        
-        print(format_results(
-            results, 
-            show_scores=args.scores,
-            query_terms=query_terms,
-            elapsed_ms=elapsed_ms,
-            colorize_output=True
-        ))
+        show_page(current_page)
     
     return 0
 

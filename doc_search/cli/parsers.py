@@ -170,8 +170,10 @@ def _add_interactive_parser(subparsers):
     """Add the interactive command parser."""
     interactive_parser = subparsers.add_parser('interactive', help='Interactive search mode')
     interactive_parser.add_argument('site_dir', help='Site data directory or original URL')
-    interactive_parser.add_argument('--limit', '-l', type=int, default=10,
-                                   help='Number of results per query (default: 10)')
+    interactive_parser.add_argument('--limit', '--per-page', '-l', type=int, default=10, dest='limit',
+                                   help='Results per page (default: 10)')
+    interactive_parser.add_argument('--max-results', '-m', type=int, default=100, dest='max_results',
+                                   help='Max results to fetch per query (default: 100)')
     interactive_parser.add_argument('--scores', '-s', action='store_true',
                                    help='Show BM25 scores')
     interactive_parser.add_argument('--separate-paths', action='store_true',
