@@ -17,6 +17,7 @@ class RobotsChecker:
         self.user_agent = user_agent
         self.parser = urllib.robotparser.RobotFileParser()
         self._loaded = False
+        self._load_failed = False  # Track if robots.txt couldn't be loaded
         self._crawl_delay: Optional[float] = None
     
     def load(self, timeout: float = 10.0) -> bool:
@@ -30,6 +31,7 @@ class RobotsChecker:
             self.parser.set_url(robots_url)
             self.parser.read()
             self._loaded = True
+            self._load_failed = False
             
             # Try to get crawl delay
             try:
@@ -43,14 +45,22 @@ class RobotsChecker:
         except Exception as e:
             # If we can't load robots.txt, assume everything is allowed
             self._loaded = True
+            self._load_failed = True
             return False
     
     def can_fetch(self, url: str) -> bool:
         """
         Check if the URL can be fetched according to robots.txt.
+        
+        If robots.txt couldn't be loaded (SSL error, auth required, etc.),
+        we allow all URLs since we can't know the site's policy.
         """
         if not self._loaded:
             self.load()
+        
+        # If robots.txt failed to load, allow everything
+        if self._load_failed:
+            return True
         
         try:
             return self.parser.can_fetch(self.user_agent, url)

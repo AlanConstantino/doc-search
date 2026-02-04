@@ -84,21 +84,23 @@ class TestRobotsCheckerCanFetch(unittest.TestCase):
     """Tests for can_fetch method."""
     
     @patch('urllib.request.urlopen')
-    def test_denies_when_robots_txt_load_fails(self, mock_urlopen):
-        """Should deny URLs when robots.txt fails to load (conservative default).
+    def test_allows_when_robots_txt_load_fails(self, mock_urlopen):
+        """Should allow URLs when robots.txt fails to load.
         
-        Note: This is a safe default - when we can't verify robots.txt,
-        we err on the side of caution and deny access.
+        This is the standard behavior for web crawlers: if robots.txt cannot
+        be fetched (due to SSL errors, auth requirements, network issues, etc.),
+        assume the site allows crawling. Otherwise, sites with these issues
+        would become completely uncrawlable.
         """
         mock_urlopen.side_effect = URLError("Not found")
         
         checker = RobotsChecker("https://example.com", "TestBot")
         result = checker.load()
         
-        # Load should return False
+        # Load should return False (failed to load)
         self.assertFalse(result)
-        # Parser defaults to deny when nothing has been parsed
-        self.assertFalse(checker.can_fetch("https://example.com/page"))
+        # But we should allow crawling when robots.txt couldn't be loaded
+        self.assertTrue(checker.can_fetch("https://example.com/page"))
     
     @patch('urllib.request.urlopen')
     def test_respects_disallow_rule(self, mock_urlopen):
