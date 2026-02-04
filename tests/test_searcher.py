@@ -349,76 +349,67 @@ class TestIndexFingerprint(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
-    def test_fingerprint_computed(self):
-        """compute_index_fingerprint should return consistent fingerprint."""
+    def test_fingerprint_based_on_mtime(self):
+        """compute_index_fingerprint should return mtime-based fingerprint."""
         from doc_search.searcher import compute_index_fingerprint
+        from pathlib import Path
+        import os
         
+        # Create a test index file (save() adds .gz suffix by default)
+        index_base = os.path.join(self.temp_dir, 'test_index')
         index = BM25Index()
         index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
-        index.add_document(1, 'https://example.com/2', 'Title 2', 'Content 2')
+        index.save(Path(index_base))
         
-        fp1 = compute_index_fingerprint(index)
-        fp2 = compute_index_fingerprint(index)
+        index_file = index_base + '.json.gz'  # Actual file path after save
         
+        fp1 = compute_index_fingerprint(Path(index_file))
+        fp2 = compute_index_fingerprint(Path(index_file))
+        
+        # Same file, same mtime = same fingerprint
         self.assertEqual(fp1, fp2)
-        self.assertEqual(len(fp1), 16)  # 16 hex chars
     
-    def test_fingerprint_changes_on_add(self):
-        """Fingerprint should change when document is added."""
+    def test_fingerprint_changes_on_file_update(self):
+        """Fingerprint should change when index file is modified."""
         from doc_search.searcher import compute_index_fingerprint
+        from pathlib import Path
+        import os
         
+        # Create initial index
+        index_base = os.path.join(self.temp_dir, 'test_index')
         index = BM25Index()
         index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
+        index.save(Path(index_base))
         
-        fp1 = compute_index_fingerprint(index)
+        index_file = index_base + '.json.gz'
         
+        fp1 = compute_index_fingerprint(Path(index_file))
+        
+        # Wait a tiny bit and re-save (changes mtime)
+        time.sleep(0.01)
         index.add_document(1, 'https://example.com/2', 'Title 2', 'Content 2')
+        index.save(Path(index_base))
         
-        fp2 = compute_index_fingerprint(index)
+        fp2 = compute_index_fingerprint(Path(index_file))
         
         self.assertNotEqual(fp1, fp2)
     
-    def test_fingerprint_changes_on_url_change(self):
-        """Fingerprint should change when URLs change."""
-        from doc_search.searcher import compute_index_fingerprint
-        
-        index1 = BM25Index()
-        index1.add_document(0, 'https://example.com/old', 'Title', 'Content')
-        
-        index2 = BM25Index()
-        index2.add_document(0, 'https://example.com/new', 'Title', 'Content')
-        
-        self.assertNotEqual(
-            compute_index_fingerprint(index1),
-            compute_index_fingerprint(index2)
-        )
-    
-    def test_fingerprint_changes_on_content_change(self):
-        """Fingerprint should change when content changes (same URL)."""
-        from doc_search.searcher import compute_index_fingerprint
-        
-        # Same URL, different content
-        index1 = BM25Index()
-        index1.add_document(0, 'https://example.com/page', 'Title', 'Original content here')
-        
-        index2 = BM25Index()
-        index2.add_document(0, 'https://example.com/page', 'Title', 'Updated content with new words')
-        
-        self.assertNotEqual(
-            compute_index_fingerprint(index1),
-            compute_index_fingerprint(index2)
-        )
-    
     def test_cache_invalidated_on_reindex(self):
-        """Cache should be cleared when index fingerprint changes."""
+        """Cache should be cleared when index file is re-saved."""
         from pathlib import Path
+        import os
         
-        # Create index and cache with some data
+        # Create index file and save
+        index_base = os.path.join(self.temp_dir, 'test_index')
         index1 = BM25Index()
         index1.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        index1.save(Path(index_base))
         
-        engine1 = SearchEngine(
-            index1,
+        index_file = index_base + '.json.gz'
+        
+        # Create engine with persistent cache
+        engine1 = SearchEngine.load(
+            Path(index_file),
             cache_size=10,
             cache_path=Path(self.cache_path)
         )
@@ -427,14 +418,14 @@ class TestIndexFingerprint(unittest.TestCase):
         # Verify cache has entry
         self.assertEqual(engine1.get_cache_stats()['size'], 1)
         
-        # Create NEW index with different content (simulates re-index)
-        index2 = BM25Index()
-        index2.add_document(0, 'https://example.com/1', 'Python', 'Python content')
-        index2.add_document(1, 'https://example.com/2', 'Java', 'Java content')
+        # Wait and re-save index (simulates re-index)
+        time.sleep(0.01)
+        index1.add_document(1, 'https://example.com/2', 'Java', 'Java content')
+        index1.save(Path(index_base))
         
-        # Create new engine with same cache path but different index
-        engine2 = SearchEngine(
-            index2,
+        # Create new engine with same cache path
+        engine2 = SearchEngine.load(
+            Path(index_file),
             cache_size=10,
             cache_path=Path(self.cache_path)
         )
@@ -443,33 +434,35 @@ class TestIndexFingerprint(unittest.TestCase):
         self.assertEqual(engine2.get_cache_stats()['size'], 0)
     
     def test_cache_preserved_when_index_unchanged(self):
-        """Cache should be preserved when index fingerprint matches."""
+        """Cache should be preserved when index file hasn't changed."""
         from pathlib import Path
+        import os
         
-        # Create index and cache with some data
-        index1 = BM25Index()
-        index1.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        # Create index file
+        index_base = os.path.join(self.temp_dir, 'test_index')
+        index = BM25Index()
+        index.add_document(0, 'https://example.com/1', 'Python', 'Python content')
+        index.save(Path(index_base))
         
-        engine1 = SearchEngine(
-            index1,
+        index_file = index_base + '.json.gz'
+        
+        # Create engine and cache some data
+        engine1 = SearchEngine.load(
+            Path(index_file),
             cache_size=10,
             cache_path=Path(self.cache_path)
         )
         engine1.search('python', top_k=10)
         self.assertEqual(engine1.get_cache_stats()['size'], 1)
         
-        # Create identical index (simulates restart without re-index)
-        index2 = BM25Index()
-        index2.add_document(0, 'https://example.com/1', 'Python', 'Python content')
-        
-        # Create new engine - cache should be preserved
-        engine2 = SearchEngine(
-            index2,
+        # Load again WITHOUT re-saving index (simulates restart)
+        engine2 = SearchEngine.load(
+            Path(index_file),
             cache_size=10,
             cache_path=Path(self.cache_path)
         )
         
-        # Cache should still have the entry
+        # Cache should still have the entry (same mtime)
         self.assertEqual(engine2.get_cache_stats()['size'], 1)
         
         # And we should get a cache hit

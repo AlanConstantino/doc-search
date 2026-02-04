@@ -2,7 +2,6 @@
 Search interface for querying the BM25 index.
 """
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -25,33 +24,20 @@ from .searcher_utils import (
 )
 
 
-def compute_index_fingerprint(index: BM25Index) -> str:
+def compute_index_fingerprint(index_path: Path) -> str:
     """
-    Compute a fingerprint for the index based on its content.
+    Compute a fingerprint for the index based on file modification time.
     
-    The fingerprint changes when documents are added, removed, or modified.
+    The fingerprint changes whenever the index file is modified (re-indexed).
     Used to invalidate cache when the index changes.
     
     Args:
-        index: The BM25 index
+        index_path: Path to the index file
         
     Returns:
-        A hex string fingerprint
+        A string fingerprint based on file mtime
     """
-    # Combine multiple signals to detect any content change:
-    # 1. Document count - catches additions/deletions
-    # 2. Vocabulary size - catches new/removed terms
-    # 3. Total term occurrences - catches content changes
-    # 4. Sorted URLs - catches URL changes
-    
-    doc_count = len(index.documents)
-    vocab_size = len(index.index)  # Number of unique terms
-    total_term_freq = sum(index.doc_freqs.values())  # Total term occurrences
-    urls = sorted(doc.get('url', '') for doc in index.documents.values())
-    
-    # Create a hash combining all signals
-    content = f"{doc_count}:{vocab_size}:{total_term_freq}:" + "|".join(urls)
-    return hashlib.sha256(content.encode()).hexdigest()[:16]
+    return str(Path(index_path).stat().st_mtime)
 
 
 class SearchCache:
@@ -357,7 +343,8 @@ class SearchEngine:
         pages_dir: Optional[Path] = None,
         cache_size: int = 0,
         cache_ttl: Optional[float] = None,
-        cache_path: Optional[Path] = None
+        cache_path: Optional[Path] = None,
+        index_path: Optional[Path] = None
     ):
         """
         Initialize the search engine.
@@ -368,12 +355,15 @@ class SearchEngine:
             cache_size: Max number of queries to cache (0 to disable caching)
             cache_ttl: Cache TTL in seconds (None = never expire)
             cache_path: Optional path for persistent cache (survives restarts)
+            index_path: Optional path to index file (for cache invalidation)
         """
         self.index = index
         self.pages_dir = pages_dir
         
-        # Compute index fingerprint for cache invalidation
-        fingerprint = compute_index_fingerprint(index) if cache_path else None
+        # Compute index fingerprint for cache invalidation (needs index_path)
+        fingerprint = None
+        if cache_path and index_path:
+            fingerprint = compute_index_fingerprint(index_path)
         
         self._cache = SearchCache(
             maxsize=cache_size, 
@@ -408,7 +398,8 @@ class SearchEngine:
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, cache_path=cache_path)
+        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, 
+                   cache_path=cache_path, index_path=index_path)
     
     def _load_page_text(self, url: str) -> Optional[str]:
         """Load full page text from disk."""
@@ -596,7 +587,8 @@ class EnhancedSearchEngine(SearchEngine):
                  synonym_groups: Optional[List[Set[str]]] = None,
                  cache_size: int = 0,
                  cache_ttl: Optional[float] = None,
-                 cache_path: Optional[Path] = None):
+                 cache_path: Optional[Path] = None,
+                 index_path: Optional[Path] = None):
         """
         Initialize enhanced search engine.
         
@@ -611,8 +603,10 @@ class EnhancedSearchEngine(SearchEngine):
             cache_size: Max number of queries to cache (0 to disable)
             cache_ttl: Cache TTL in seconds (None = never expire)
             cache_path: Optional path for persistent cache (survives restarts)
+            index_path: Optional path to index file (for cache invalidation)
         """
-        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, cache_path=cache_path)
+        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, 
+                         cache_path=cache_path, index_path=index_path)
         
         self._spellcheck_enabled = enable_spellcheck
         self._autocomplete_enabled = enable_autocomplete
@@ -683,7 +677,7 @@ class EnhancedSearchEngine(SearchEngine):
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir, **kwargs)
+        return cls(index, pages_dir, index_path=index_path, **kwargs)
     
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
         """
