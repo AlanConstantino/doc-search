@@ -38,13 +38,19 @@ def compute_index_fingerprint(index: BM25Index) -> str:
     Returns:
         A hex string fingerprint
     """
-    # Use document count and sorted URLs to create fingerprint
-    # This catches additions, deletions, and URL changes
+    # Combine multiple signals to detect any content change:
+    # 1. Document count - catches additions/deletions
+    # 2. Vocabulary size - catches new/removed terms
+    # 3. Total term occurrences - catches content changes
+    # 4. Sorted URLs - catches URL changes
+    
     doc_count = len(index.documents)
+    vocab_size = len(index.index)  # Number of unique terms
+    total_term_freq = sum(index.doc_freqs.values())  # Total term occurrences
     urls = sorted(doc.get('url', '') for doc in index.documents.values())
     
-    # Create a hash of the content
-    content = f"{doc_count}:" + "|".join(urls)
+    # Create a hash combining all signals
+    content = f"{doc_count}:{vocab_size}:{total_term_freq}:" + "|".join(urls)
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 

@@ -393,6 +393,22 @@ class TestIndexFingerprint(unittest.TestCase):
             compute_index_fingerprint(index2)
         )
     
+    def test_fingerprint_changes_on_content_change(self):
+        """Fingerprint should change when content changes (same URL)."""
+        from doc_search.searcher import compute_index_fingerprint
+        
+        # Same URL, different content
+        index1 = BM25Index()
+        index1.add_document(0, 'https://example.com/page', 'Title', 'Original content here')
+        
+        index2 = BM25Index()
+        index2.add_document(0, 'https://example.com/page', 'Title', 'Updated content with new words')
+        
+        self.assertNotEqual(
+            compute_index_fingerprint(index1),
+            compute_index_fingerprint(index2)
+        )
+    
     def test_cache_invalidated_on_reindex(self):
         """Cache should be cleared when index fingerprint changes."""
         from pathlib import Path
