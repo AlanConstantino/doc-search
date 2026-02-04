@@ -6,7 +6,9 @@ import json
 import re
 import time
 import warnings
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .indexer import BM25Index
@@ -19,6 +21,87 @@ from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
     format_results, check_phrase_match
 )
+
+
+class SearchCache:
+    """
+    Thread-safe LRU cache for search results with optional TTL.
+    
+    Args:
+        maxsize: Maximum number of cached queries (default: 128)
+        ttl: Time-to-live in seconds (default: 300, i.e., 5 minutes). 
+             Set to 0 or None to disable TTL.
+    """
+    
+    def __init__(self, maxsize: int = 128, ttl: Optional[float] = 300.0):
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
+        self._lock = Lock()
+        self._hits = 0
+        self._misses = 0
+    
+    def _make_key(self, query: str, **kwargs) -> str:
+        """Create a cache key from query and parameters."""
+        # Sort kwargs for consistent key generation
+        sorted_kwargs = sorted(kwargs.items())
+        return f"{query}|{sorted_kwargs}"
+    
+    def get(self, query: str, **kwargs) -> Optional[Any]:
+        """
+        Get cached result if it exists and hasn't expired.
+        
+        Returns None if not found or expired.
+        """
+        key = self._make_key(query, **kwargs)
+        
+        with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return None
+            
+            timestamp, result = self._cache[key]
+            
+            # Check TTL
+            if self.ttl and (time.time() - timestamp) > self.ttl:
+                del self._cache[key]
+                self._misses += 1
+                return None
+            
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return result
+    
+    def set(self, query: str, result: Any, **kwargs):
+        """Cache a search result."""
+        key = self._make_key(query, **kwargs)
+        
+        with self._lock:
+            # Remove oldest if at capacity
+            while len(self._cache) >= self.maxsize:
+                self._cache.popitem(last=False)
+            
+            self._cache[key] = (time.time(), result)
+    
+    def clear(self):
+        """Clear all cached results."""
+        with self._lock:
+            self._cache.clear()
+    
+    def stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = (self._hits / total * 100) if total > 0 else 0.0
+            return {
+                'size': len(self._cache),
+                'maxsize': self.maxsize,
+                'hits': self._hits,
+                'misses': self._misses,
+                'hit_rate': f"{hit_rate:.1f}%",
+                'ttl': self.ttl
+            }
 
 
 def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
@@ -94,13 +177,41 @@ class SearchEngine:
     High-level search interface with phrase search and snippet highlighting.
     """
     
-    def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None):
+    def __init__(
+        self, 
+        index: BM25Index, 
+        pages_dir: Optional[Path] = None,
+        cache_size: int = 0,
+        cache_ttl: Optional[float] = 300.0
+    ):
+        """
+        Initialize the search engine.
+        
+        Args:
+            index: The BM25 index to search
+            pages_dir: Optional directory containing page JSON files
+            cache_size: Max number of queries to cache (0 to disable caching)
+            cache_ttl: Cache time-to-live in seconds (default: 300)
+        """
         self.index = index
         self.pages_dir = pages_dir
+        self._cache = SearchCache(maxsize=cache_size, ttl=cache_ttl) if cache_size > 0 else None
     
     @classmethod
-    def load(cls, index_path: Path) -> 'SearchEngine':
-        """Load search engine from saved index."""
+    def load(
+        cls, 
+        index_path: Path,
+        cache_size: int = 0,
+        cache_ttl: Optional[float] = 300.0
+    ) -> 'SearchEngine':
+        """
+        Load search engine from saved index.
+        
+        Args:
+            index_path: Path to the saved index file
+            cache_size: Max number of queries to cache (0 to disable)
+            cache_ttl: Cache time-to-live in seconds (default: 300)
+        """
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
         
@@ -110,7 +221,7 @@ class SearchEngine:
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
         
-        return cls(index, pages_dir)
+        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl)
     
     def _load_page_text(self, url: str) -> Optional[str]:
         """Load full page text from disk."""
@@ -152,6 +263,15 @@ class SearchEngine:
         Returns:
             List of result dictionaries
         """
+        # Check cache first
+        if self._cache:
+            cached = self._cache.get(
+                query, top_k=top_k, min_score=min_score, 
+                highlight=highlight, snippet_length=snippet_length
+            )
+            if cached is not None:
+                return cached
+        
         # Parse query into terms and phrases
         terms, phrases = parse_query(query)
         
@@ -219,6 +339,13 @@ class SearchEngine:
             if len(results) >= top_k:
                 break
         
+        # Cache the results
+        if self._cache:
+            self._cache.set(
+                query, results, top_k=top_k, min_score=min_score,
+                highlight=highlight, snippet_length=snippet_length
+            )
+        
         return results
     
     def search_with_context(
@@ -242,6 +369,22 @@ class SearchEngine:
     def get_stats(self) -> Dict[str, Any]:
         """Get search engine statistics."""
         return self.index.get_stats()
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        """Get cache statistics, or None if caching is disabled."""
+        if self._cache:
+            return self._cache.stats()
+        return None
+    
+    def clear_cache(self):
+        """Clear the search result cache."""
+        if self._cache:
+            self._cache.clear()
+    
+    @property
+    def cache_enabled(self) -> bool:
+        """Check if caching is enabled."""
+        return self._cache is not None
 
 
 class EnhancedSearchEngine(SearchEngine):
@@ -263,7 +406,9 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
-                 synonym_groups: Optional[List[Set[str]]] = None):
+                 synonym_groups: Optional[List[Set[str]]] = None,
+                 cache_size: int = 0,
+                 cache_ttl: Optional[float] = 300.0):
         """
         Initialize enhanced search engine.
         
@@ -275,8 +420,10 @@ class EnhancedSearchEngine(SearchEngine):
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
+            cache_size: Max number of queries to cache (0 to disable)
+            cache_ttl: Cache time-to-live in seconds (default: 300)
         """
-        super().__init__(index, pages_dir)
+        super().__init__(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl)
         
         self._spellcheck_enabled = enable_spellcheck
         self._autocomplete_enabled = enable_autocomplete

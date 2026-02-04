@@ -630,13 +630,20 @@ def cmd_serve(args):
     # Load index (use EnhancedSearchEngine for spellcheck, autocomplete, facets)
     print(style_info(f"Loading index from: {index_path}"))
     enable_synonyms = getattr(args, 'synonyms', True)
+    cache_size = getattr(args, 'cache_size', 128)
+    cache_ttl = getattr(args, 'cache_ttl', 300.0)
     engine = EnhancedSearchEngine.load(
         index_path,
         enable_spellcheck=True,
         enable_autocomplete=True,
         enable_facets=True,
-        enable_synonyms=enable_synonyms
+        enable_synonyms=enable_synonyms,
+        cache_size=cache_size,
+        cache_ttl=cache_ttl
     )
+    
+    if engine.cache_enabled:
+        print(style_info(f"Search cache: {cache_size} queries, {cache_ttl}s TTL"))
     
     stats = engine.get_stats()
     
