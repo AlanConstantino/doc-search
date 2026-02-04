@@ -61,6 +61,7 @@ class Crawler:
         auth_token: Optional[str] = None,
         stay_on_domain: bool = True,
         same_path: bool = False,
+        ignore_robots: bool = False,
         url_filter: Optional[Callable[[str], bool]] = None,
         verbose: bool = True,
         workers: int = 1,
@@ -83,6 +84,7 @@ class Crawler:
             auth_token: Pre-encoded Base64 auth token.
             stay_on_domain: If True, only crawl URLs on same domain.
             same_path: If True, only crawl URLs under the starting path.
+            ignore_robots: If True, ignore robots.txt rules (use responsibly).
             url_filter: Optional custom filter function for URLs.
             verbose: If True, print progress messages.
             workers: Number of parallel workers (default 1).
@@ -102,6 +104,7 @@ class Crawler:
         self.workers = max(1, workers)
         self.extract_docs = extract_docs
         self.incremental = incremental
+        self.ignore_robots = ignore_robots
         
         # Initialize PDF extractor if document extraction is enabled
         self._pdf_extractor = None
@@ -121,8 +124,8 @@ class Crawler:
         # Initialize state
         self.state = CrawlState(self.data_dir / 'crawl_state.json')
         
-        # Initialize robots checker
-        self.robots = RobotsChecker(base_url, self.USER_AGENT)
+        # Initialize robots checker (None if ignoring robots.txt)
+        self.robots = None if ignore_robots else RobotsChecker(base_url, self.USER_AGENT)
         
         # Initialize rate limiter
         self.rate_limiter = RateLimiter(delay)
@@ -398,17 +401,20 @@ class Crawler:
         Returns:
             Dict with crawl statistics.
         """
-        # Load robots.txt
-        self._log("Loading robots.txt...")
-        self.robots.load()
-        
-        # Get crawl delay from robots.txt
-        robots_delay = self.robots.get_crawl_delay(self.delay)
-        if robots_delay > self.delay:
-            self._log(f"Respecting robots.txt crawl-delay: {robots_delay}s")
-            self.delay = robots_delay
-            self.rate_limiter = RateLimiter(self.delay)
-            self._fetcher.rate_limiter = self.rate_limiter
+        # Load robots.txt (unless ignored)
+        if self.robots:
+            self._log("Loading robots.txt...")
+            self.robots.load()
+            
+            # Get crawl delay from robots.txt
+            robots_delay = self.robots.get_crawl_delay(self.delay)
+            if robots_delay > self.delay:
+                self._log(f"Respecting robots.txt crawl-delay: {robots_delay}s")
+                self.delay = robots_delay
+                self.rate_limiter = RateLimiter(self.delay)
+                self._fetcher.rate_limiter = self.rate_limiter
+        else:
+            self._log("Ignoring robots.txt (--ignore-robots)")
         
         # Load or initialize state
         if self.incremental:
