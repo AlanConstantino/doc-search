@@ -592,63 +592,27 @@ a:hover {
     line-height: 1.6;
 }
 
-/* Result preview panel */
-.result-preview {
-    display: none;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
-}
-
-.result-preview.visible {
-    display: block;
-}
-
-.result-preview-content {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    line-height: 1.7;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.preview-snippet {
-    margin-bottom: 1rem;
-}
-
-.preview-meta {
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-}
-
-.preview-url {
-    word-break: break-all;
-    margin-bottom: 0.25rem;
-}
-
-.preview-url a {
-    color: var(--text-muted);
-}
-
-.preview-url a:hover {
-    color: var(--accent);
-}
-
-.result-preview-toggle {
+/* Copy link button */
+.copy-link-btn {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--text-muted);
     cursor: pointer;
-    font-size: 0.8125rem;
-    padding: 0.25rem 0;
+    font-size: 0.875rem;
+    padding: 0.25rem;
     margin-top: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: color 0.15s;
 }
 
-.result-preview-toggle:hover {
-    color: var(--accent-hover);
-    text-decoration: underline;
+.copy-link-btn:hover {
+    color: var(--accent);
+}
+
+.copy-link-btn.copied {
+    color: #22c55e;
 }
 
 /* HTML5 <mark> element for semantic highlighting */
@@ -1369,59 +1333,54 @@ JAVASCRIPT = """
     // ========================================================================
     // Result Previews (#177)
     // ========================================================================
-    function setupResultPreviews() {
+    // Copy Link Button
+    // ========================================================================
+    function setupCopyLinkButtons() {
         document.querySelectorAll('.result').forEach(result => {
-            // Add preview toggle button if not exists
-            if (!result.querySelector('.result-preview-toggle')) {
-                const snippet = result.querySelector('.result-snippet');
-                if (snippet) {
-                    const toggle = document.createElement('button');
-                    toggle.className = 'result-preview-toggle';
-                    toggle.textContent = 'Show more';
-                    toggle.addEventListener('click', () => togglePreview(result, toggle));
-                    snippet.parentNode.insertBefore(toggle, snippet.nextSibling);
+            // Add copy link button if not exists
+            if (!result.querySelector('.copy-link-btn')) {
+                const url = result.querySelector('.result-title')?.href;
+                if (url) {
+                    const btn = document.createElement('button');
+                    btn.className = 'copy-link-btn';
+                    btn.innerHTML = '📋 Copy link';
+                    btn.addEventListener('click', () => copyLink(btn, url));
+                    
+                    // Add after snippet or at end of result
+                    const snippet = result.querySelector('.result-snippet');
+                    if (snippet) {
+                        snippet.parentNode.insertBefore(btn, snippet.nextSibling);
+                    } else {
+                        result.appendChild(btn);
+                    }
                 }
             }
         });
     }
     
-    function togglePreview(result, toggle) {
-        let preview = result.querySelector('.result-preview');
-        
-        if (!preview) {
-            preview = document.createElement('div');
-            preview.className = 'result-preview';
-            
-            // Get data from the result element
-            const url = result.querySelector('.result-title')?.href || '';
-            const snippet = result.querySelector('.result-snippet');
-            const scoreEl = result.querySelector('.result-score');
-            
-            // Build preview content with metadata
-            let content = '<div class="result-preview-content">';
-            
-            // Show full snippet (un-truncated)
-            if (snippet) {
-                content += '<div class="preview-snippet">' + snippet.innerHTML + '</div>';
-            }
-            
-            // Show metadata
-            content += '<div class="preview-meta">';
-            if (url) {
-                content += '<div class="preview-url"><strong>URL:</strong> <a href="' + escapeHtml(url) + '" target="_blank">' + escapeHtml(url) + '</a></div>';
-            }
-            if (scoreEl) {
-                content += '<div class="preview-score">' + scoreEl.textContent + '</div>';
-            }
-            content += '</div>';
-            content += '</div>';
-            
-            preview.innerHTML = content;
-            result.appendChild(preview);
-        }
-        
-        const isVisible = preview.classList.toggle('visible');
-        toggle.textContent = isVisible ? 'Show less' : 'Show more';
+    function copyLink(btn, url) {
+        navigator.clipboard.writeText(url).then(() => {
+            btn.innerHTML = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerHTML = '📋 Copy link';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(() => {
+            // Fallback for older browsers
+            const input = document.createElement('input');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            btn.innerHTML = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerHTML = '📋 Copy link';
+                btn.classList.remove('copied');
+            }, 2000);
+        });
     }
     
     // ========================================================================
@@ -1650,7 +1609,7 @@ JAVASCRIPT = """
             container.insertAdjacentHTML('beforeend', renderResult(r));
         });
         
-        setupResultPreviews();
+        setupCopyLinkButtons();
     }
     
     function renderResults(data) {
@@ -1752,7 +1711,7 @@ JAVASCRIPT = """
             createScrollSentinel();
         }
         
-        setupResultPreviews();
+        setupCopyLinkButtons();
     }
     
     function showButtonLoading() {
@@ -1910,7 +1869,7 @@ JAVASCRIPT = """
         setupThemeToggle();
         setupInfiniteScroll();
         setupFacetButtons();
-        setupResultPreviews();
+        setupCopyLinkButtons();
         bindEvents();
         
         // Get initial state from URL
