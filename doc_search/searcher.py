@@ -59,17 +59,21 @@ class SearchCache:
         maxsize: int = 128, 
         ttl: Optional[float] = None,
         cache_path: Optional[Path] = None,
-        index_fingerprint: Optional[str] = None
+        index_fingerprint: Optional[str] = None,
+        index_path: Optional[Path] = None
     ):
         self.maxsize = maxsize
         self.ttl = ttl
         self.cache_path = Path(cache_path) if cache_path else None
         self.index_fingerprint = index_fingerprint
+        self.index_path = Path(index_path) if index_path else None
         self._cache: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
         self._lock = Lock()
         self._hits = 0
         self._misses = 0
         self._db: Optional[sqlite3.Connection] = None
+        self._last_fingerprint_check = 0.0
+        self._fingerprint_check_interval = 5.0  # Check every 5 seconds
         
         if self.cache_path:
             self._init_db()
@@ -131,6 +135,42 @@ class SearchCache:
         self._db.execute('DELETE FROM search_cache')
         self._db.commit()
     
+    def _check_index_changed(self) -> bool:
+        """
+        Check if the index has been modified since last check.
+        
+        Called periodically to detect re-indexing while server is running.
+        Returns True if cache was invalidated, False otherwise.
+        """
+        if not self.index_path:
+            return False
+        
+        now = time.time()
+        # Only check every few seconds to avoid stat() on every request
+        if now - self._last_fingerprint_check < self._fingerprint_check_interval:
+            return False
+        
+        self._last_fingerprint_check = now
+        
+        try:
+            current_fingerprint = compute_index_fingerprint(self.index_path)
+        except (FileNotFoundError, OSError):
+            return False
+        
+        if current_fingerprint != self.index_fingerprint:
+            # Index was rebuilt - clear cache
+            with self._lock:
+                self._cache.clear()
+                if self._db:
+                    self._clear_db()
+                    self.index_fingerprint = current_fingerprint
+                    self._store_fingerprint()
+                else:
+                    self.index_fingerprint = current_fingerprint
+            return True
+        
+        return False
+    
     def _load_from_db(self):
         """Load valid cache entries from database on startup."""
         if not self._db:
@@ -177,7 +217,11 @@ class SearchCache:
         Get cached result if it exists and hasn't expired.
         
         Returns None if not found or expired.
+        Also checks if the index has changed and clears cache if so.
         """
+        # Check if index was rebuilt (clears cache if so)
+        self._check_index_changed()
+        
         key = self._make_key(query, **kwargs)
         
         with self._lock:
@@ -369,7 +413,8 @@ class SearchEngine:
             maxsize=cache_size, 
             ttl=cache_ttl,
             cache_path=cache_path,
-            index_fingerprint=fingerprint
+            index_fingerprint=fingerprint,
+            index_path=index_path  # For runtime cache invalidation on re-index
         ) if cache_size > 0 else None
     
     @classmethod
