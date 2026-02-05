@@ -1769,18 +1769,22 @@ JAVASCRIPT = """
         const endNum = Math.min(data.page * data.per_page, data.total);
         
         // Update or create results info
-        if (resultsInfo) {
-            resultsInfo.innerHTML = `
-                <span class="results-count">✓ Found ${data.total} result${data.total !== 1 ? 's' : ''}</span>
-                <span class="results-time">in ${data.elapsed_ms.toFixed(1)}ms</span>
-                <span class="results-query">showing ${startNum}-${endNum} for "${escapeHtml(data.query)}"</span>
-            `;
+        let resultsInfoEl = resultsInfo;
+        if (!resultsInfoEl) {
+            resultsInfoEl = document.createElement('div');
+            resultsInfoEl.className = 'results-info';
+            mainContainer.insertBefore(resultsInfoEl, mainContainer.firstChild);
         }
+        resultsInfoEl.innerHTML = `
+            <span class="results-count">✓ Found ${data.total} result${data.total !== 1 ? 's' : ''}</span>
+            <span class="results-time">in ${data.elapsed_ms.toFixed(1)}ms</span>
+            <span class="results-query">showing ${startNum}-${endNum} for "${escapeHtml(data.query)}"</span>
+        `;
         
         // Render facets
         const facetsHtml = renderFacets(data.facets, data.active_facet, data.active_type, data.total_unfiltered);
-        if (facetsHtml && resultsInfo) {
-            resultsInfo.insertAdjacentHTML('afterend', facetsHtml);
+        if (facetsHtml) {
+            resultsInfoEl.insertAdjacentHTML('afterend', facetsHtml);
             setupFacetButtons();
         }
         
