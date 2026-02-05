@@ -944,6 +944,10 @@ JAVASCRIPT = """
     
     if (!form || !input) return;
     
+    // Hide Results dropdown when JS is enabled (infinite scroll makes it redundant)
+    const limitOption = document.querySelector('.limit-option');
+    if (limitOption) limitOption.style.display = 'none';
+    
     // ========================================================================
     // Theme Management (#180)
     // ========================================================================
@@ -2142,7 +2146,7 @@ def render_page(
                         <option value="date" {sort_date_sel}>Newest</option>
                     </select>
                 </div>
-                <div class="search-option">
+                <div class="search-option limit-option">
                     <label for="limit">Results:</label>
                     <select name="limit" id="limit">
                         <option value="10" {limit_10_sel}>10</option>
