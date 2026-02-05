@@ -377,16 +377,21 @@ a:hover {
     border-color: var(--accent);
 }
 
-/* Search within results highlight input */
+/* Search within results highlight input - fixed overlay at top */
 .search-highlight-bar {
     display: none;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 1rem;
+    padding: 0.75rem 1rem;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--accent);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .search-highlight-bar.visible {
@@ -1220,12 +1225,8 @@ JAVASCRIPT = """
             <button type="button" class="search-highlight-close">✕</button>
         `;
         
-        const resultsInfo = document.querySelector('.results-info');
-        if (resultsInfo) {
-            resultsInfo.parentNode.insertBefore(bar, resultsInfo.nextSibling);
-        } else {
-            mainContainer.insertBefore(bar, mainContainer.firstChild);
-        }
+        // Append to body for fixed positioning overlay
+        document.body.appendChild(bar);
         
         const highlightInput = bar.querySelector('.search-highlight-input');
         const closeBtn = bar.querySelector('.search-highlight-close');
