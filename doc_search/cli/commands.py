@@ -15,12 +15,21 @@ API Usage:
     Note: The deprecated search_simple() method is NOT used by the CLI.
 """
 
+import atexit
 import getpass
 import json
 import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple
+
+# readline enables command history (up/down arrows) in interactive mode
+# Not available on all platforms (e.g., Windows without pyreadline)
+try:
+    import readline
+    READLINE_AVAILABLE = True
+except ImportError:
+    READLINE_AVAILABLE = False
 
 from ..crawler import Crawler
 from ..indexer import BM25Index
@@ -432,7 +441,19 @@ def cmd_interactive(args):
     print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
     print(style_info("  Tip: Use \"quotes\" for phrase search"))
     print(style_info("  Filters: :type pdf|html|clear  :cat <category>|clear  :filters"))
+    if READLINE_AVAILABLE:
+        print(style_info("  History: Use ↑/↓ arrow keys to cycle through previous commands"))
     print()
+    
+    # Set up command history with readline
+    if READLINE_AVAILABLE:
+        history_file = site_dir / '.history'
+        try:
+            readline.read_history_file(history_file)
+        except FileNotFoundError:
+            pass  # No history file yet, that's fine
+        readline.set_history_length(100)  # Keep last 100 commands
+        atexit.register(readline.write_history_file, history_file)
     
     prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
     page_prompt = f"{Colors.BRIGHT_CYAN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
