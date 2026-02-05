@@ -102,9 +102,9 @@ def _add_index_parser(subparsers):
     """Add the index command parser."""
     index_parser = subparsers.add_parser('index', help='Build search index')
     index_parser.add_argument('site_dir', help='Site data directory or original URL')
-    index_parser.add_argument('--k1', type=float, default=1.5,
+    index_parser.add_argument('--k1', '-k', type=float, default=1.5,
                              help='BM25 k1 parameter (default: 1.5)')
-    index_parser.add_argument('--b', type=float, default=0.75,
+    index_parser.add_argument('--b', '-b', type=float, default=0.75,
                              help='BM25 b parameter (default: 0.75)')
     index_parser.add_argument('--no-compress', action='store_true',
                              help='Don\'t compress the index file')
