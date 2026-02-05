@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-02-05
+
+### Added
+- **Interactive mode command history** - Use ↑/↓ arrow keys to cycle through previous commands (#183)
+- History persists across sessions (stored in `.history` file per site)
+- Keeps last 100 commands
+
+## [1.15.0] - 2026-02-05
+
+### Added
+- **Instant search** - Results update as you type with 200ms debounce (#172, #173)
+- **Search history** - Last 10 searches stored in localStorage (#174)
+- **Keyboard navigation** - ↑/↓ to navigate results, Enter to open, Escape to close (#175)
+- **Infinite scroll** - Automatically loads more results as you scroll (#176)
+- **Result previews** - Expandable content snippets (#177)
+- **Faceted filtering** - Filter by category with live counts (#178)
+- **Search within results** - Cmd+F overlay to highlight matching text (#179)
+- **Dark/light mode toggle** - iOS-style theme switcher (#180)
+- **Copy link button** - Quick copy result URLs to clipboard
+- **/api/search endpoint** - JSON API for programmatic access
+
+### Changed
+- Fixed overlay search bar at top of screen
+- Hide "Results" dropdown when JavaScript is enabled
+
+## [1.14.2] - 2026-02-04
+
+### Added
+- **`--no-javascript` flag** for serve command - Serve pure HTML/CSS UI without JS enhancements
+
+### Fixed
+- Improved `--password` help text for special characters (use single quotes for `$`)
+
+## [1.14.1] - 2026-02-04
+
+### Fixed
+- Added `-b` and `-k` short options for index command (previously only `--b` and `--k1` worked)
+
+## [1.14.0] - 2026-02-04
+
+### Added
+- **Search result caching** - LRU cache with configurable TTL (#142)
+- **Persistent cache** - SQLite-based cache at `<site_dir>/.cache.db` (enabled by default)
+- **Auto-invalidation** - Cache clears automatically when index is rebuilt (mtime-based)
+- **Interactive mode pagination** - Navigate results with `[n]ext`/`[p]rev` commands
+- **Interactive mode caching** - Search results cached for faster repeat queries
+
 ## [1.13.1] - 2026-02-04
 
 ### Added
