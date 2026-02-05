@@ -50,7 +50,8 @@ class BM25Index:
         self.doc_freqs: Dict[str, int] = defaultdict(int)  # term -> number of docs containing term
     
     def add_document(self, doc_id: int, url: str, title: str, text: str, 
-                     description: str = '', headings: List[tuple] = None):
+                     description: str = '', headings: List[tuple] = None,
+                     doc_type: str = 'html'):
         """
         Add a document to the index.
         
@@ -61,12 +62,14 @@ class BM25Index:
             text: Document text content
             description: Optional meta description
             headings: Optional list of (level, text) tuples
+            doc_type: Document type ('html', 'pdf', etc.)
         """
         # Store document metadata
         self.documents[doc_id] = {
             'url': url,
             'title': title,
-            'description': description
+            'description': description,
+            'doc_type': doc_type
         }
         self.url_to_id[url] = doc_id
         
@@ -165,7 +168,8 @@ class BM25Index:
                     title=title,
                     text=text,
                     description=description,
-                    headings=headings
+                    headings=headings,
+                    doc_type=page.get('doc_type', 'html')
                 )
                 
                 doc_id += 1
@@ -264,7 +268,8 @@ class BM25Index:
                 'url': doc['url'],
                 'title': doc['title'],
                 'description': doc['description'],
-                'score': round(score, 4)
+                'score': round(score, 4),
+                'doc_type': doc.get('doc_type', 'html')
             })
         
         return results

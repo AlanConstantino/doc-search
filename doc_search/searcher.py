@@ -888,7 +888,8 @@ class EnhancedSearchEngine(SearchEngine):
                 'title': r.get('title', ''),
                 'snippet': snippet,
                 'description': r.get('description', ''),
-                'score': r.get('score', 0)
+                'score': r.get('score', 0),
+                'doc_type': r.get('doc_type', 'html')
             }
             
             # Add facets for this result

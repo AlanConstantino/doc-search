@@ -548,6 +548,27 @@ a:hover {
     color: var(--accent-hover);
 }
 
+.doc-type-badge {
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    border-radius: 3px;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+
+.doc-type-badge.pdf {
+    background: #dc2626;
+    color: white;
+}
+
+.doc-type-badge.html {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+}
+
 .result-score {
     display: inline-flex;
     align-items: center;
@@ -1578,12 +1599,15 @@ JAVASCRIPT = """
     function renderResult(r) {
         const scoreClass = getScoreClass(r.score_pct);
         const snippet = r.snippet ? '<div class="result-snippet">' + highlightSnippet(r.snippet) + '</div>' : '';
+        const docType = r.doc_type || 'html';
+        const docTypeBadge = `<span class="doc-type-badge ${docType}">${docType}</span>`;
         
         return `
             <div class="result" data-url="${escapeHtml(r.url)}">
                 <div class="result-header">
                     <span class="result-number">${r.rank}</span>
                     <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
+                    ${docTypeBadge}
                     <span class="result-score" title="Score: ${r.score.toFixed(2)}">
                         <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
@@ -2022,6 +2046,7 @@ def render_page(
                 url = escape(r['url'])
                 snippet = highlight_snippet(r.get('snippet', '') or r.get('description', ''))
                 score = r.get('score', 0)
+                doc_type = r.get('doc_type', 'html')
                 
                 # Visual score bar (normalize relative to max score in results)
                 score_pct = int((score / max_score) * 100) if max_score > 0 else 0
@@ -2037,6 +2062,7 @@ def render_page(
                     <span class="result-score-pct {score_color}">{score_pct}%</span>
                 </span>''' if show_scores else ''
                 
+                doc_type_badge = f'<span class="doc-type-badge {doc_type}">{doc_type}</span>'
                 snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
                 
                 results_html += f'''
@@ -2044,6 +2070,7 @@ def render_page(
                     <div class="result-header">
                         <span class="result-number">{i}</span>
                         <a href="{url}" class="result-title" target="_blank" rel="noopener">{title}</a>
+                        {doc_type_badge}
                         {score_html}
                     </div>
                     <div class="result-url">{url}</div>
@@ -2622,7 +2649,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                     'snippet': r.get('snippet', '') or r.get('description', ''),
                     'score': round(score, 4),
                     'score_pct': score_pct,
-                    'facets': r.get('facets', {})
+                    'facets': r.get('facets', {}),
+                    'doc_type': r.get('doc_type', 'html')
                 })
             
             # Build response
