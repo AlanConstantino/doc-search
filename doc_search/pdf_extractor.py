@@ -132,6 +132,62 @@ class PDFExtractor:
         
         return result
     
+    def extract_from_bytes(self, pdf_bytes: bytes, title_fallback: str = '') -> Dict[str, Any]:
+        """
+        Extract text from PDF bytes (already fetched content).
+        
+        Args:
+            pdf_bytes: Raw PDF bytes
+            title_fallback: Fallback title if no metadata title found
+            
+        Returns:
+            dict with 'text', 'title', 'pages', 'metadata', 'error'
+        """
+        result = {
+            'text': '',
+            'title': '',
+            'pages': 0,
+            'metadata': {},
+            'error': None
+        }
+        
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            result['pages'] = len(reader.pages)
+            
+            # Extract metadata
+            if reader.metadata:
+                result['metadata'] = {
+                    'title': reader.metadata.get('/Title', ''),
+                    'author': reader.metadata.get('/Author', ''),
+                    'subject': reader.metadata.get('/Subject', ''),
+                    'creator': reader.metadata.get('/Creator', ''),
+                }
+                result['title'] = result['metadata'].get('title', '')
+            
+            # Extract text from all pages
+            text_parts = []
+            for i, page in enumerate(reader.pages):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+                except Exception:
+                    text_parts.append(f"[Page {i+1}: extraction failed]")
+            
+            result['text'] = '\n\n'.join(text_parts)
+            
+            # Use fallback title if no metadata title
+            if not result['title'] and title_fallback:
+                result['title'] = title_fallback
+                
+        except PdfReadError as e:
+            result['error'] = f"PDF read error: {e}"
+        except Exception as e:
+            result['error'] = f"Extraction error: {e}"
+        
+        return result
+    
     def extract_from_url(self, url: str) -> Dict[str, Any]:
         """
         Extract text from a PDF at a URL.

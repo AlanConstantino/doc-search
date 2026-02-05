@@ -310,9 +310,14 @@ class Crawler:
         content = fetch_result.content
         content_type = fetch_result.content_type or ''
         
-        # Skip non-HTML content
+        # Handle non-HTML content
         from ..utils import is_html_content
         if not is_html_content(content_type):
+            # Check if it's a PDF (Content-Type based detection)
+            if self.extract_docs and 'application/pdf' in content_type.lower():
+                self._log(f"  Detected PDF by Content-Type, extracting...")
+                return self._process_pdf_content(url, content, depth)
+            
             self._log(f"  Skipping non-HTML: {content_type}")
             self.state.increment_stat('pages_skipped')
             return []
@@ -385,6 +390,44 @@ class Crawler:
         # DOCX/XLSX extraction not yet implemented
         self._log(f"  Skipping unsupported document type: {path}")
         self.state.increment_stat('pages_skipped')
+        return []
+    
+    def _process_pdf_content(self, url: str, content: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """
+        Process PDF content that was already fetched (Content-Type based detection).
+        
+        This is used when a URL doesn't have a .pdf extension but returns
+        application/pdf Content-Type (e.g., arxiv.org/pdf/1234.5678).
+        
+        Returns empty list (documents don't contain links to crawl).
+        """
+        parsed = urlparse(url)
+        
+        result = self._pdf_extractor.extract_from_bytes(content)
+        
+        if result['error']:
+            self._log(f"  PDF extraction failed: {result['error']}")
+            self.state.record_error(url, 'parse', f"PDF extraction failed: {result['error']}")
+            self.state.mark_failed(url, depth)
+            return None
+        
+        # Build and save document data
+        page_data = build_document_data(
+            url=url,
+            title=result['title'] or Path(parsed.path).stem,
+            text=result['text'],
+            depth=depth,
+            doc_type='pdf',
+            doc_pages=result['pages'],
+            doc_metadata=result['metadata'],
+        )
+        self._processor.save_page(url, page_data)
+        
+        # Update stats
+        self.state.increment_stat('pages_crawled')
+        self.state.increment_stat('docs_extracted')
+        
+        self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars")
         return []
     
     # -------------------------------------------------------------------------
