@@ -2,6 +2,7 @@
 Tests for the web server module.
 """
 
+import re
 import socket
 import tempfile
 import threading
@@ -11,6 +12,15 @@ from http.client import HTTPConnection
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from unittest.mock import MagicMock, Mock
+
+
+def strip_script_content(html: str) -> str:
+    """Remove content between <script> tags for testing visible content only.
+    
+    This is needed because the JavaScript code may contain template strings
+    that match content we're testing for (e.g., "Did you mean:").
+    """
+    return re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
 
 from doc_search.server import (
     SearchHandler, run_server, render_page, escape, highlight_snippet
@@ -851,9 +861,11 @@ class TestRenderPageSpellSuggestion(unittest.TestCase):
             suggestion=None
         )
         
-        self.assertNotIn('Did you mean', html)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_html = strip_script_content(html)
+        self.assertNotIn('Did you mean', visible_html)
         # Check for the div element, not just the CSS class name
-        self.assertNotIn('<div class="spell-suggestion">', html)
+        self.assertNotIn('<div class="spell-suggestion">', visible_html)
     
     def test_suggestion_escapes_special_chars(self):
         """Suggestion should be HTML escaped."""
@@ -933,10 +945,12 @@ class TestServerSpellCheckNoSuggestion(ServerTestCase):
         status, headers, body = self.make_request('/?q=xyzabc123')
         
         self.assertEqual(status, 200)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
         # Should still show no results message
-        self.assertIn('No results found', body)
+        self.assertIn('No results found', visible_body)
 
 
 class TestServerSpellCheckWithResults(ServerTestCase):
@@ -967,8 +981,10 @@ class TestServerSpellCheckWithResults(ServerTestCase):
         # Should show results
         self.assertIn('Test Page', body)
         # Should NOT show spell suggestion (results were found)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
 
 
 class TestServerWithBasicEngine(ServerTestCase):
@@ -993,8 +1009,10 @@ class TestServerWithBasicEngine(ServerTestCase):
         # Should show no results without crashing
         self.assertIn('No results found', body)
         # No spell suggestion shown (engine doesn't have the method)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
 
 
 # ============================================================================
@@ -1161,6 +1179,124 @@ class TestSuggestEndpointNoSupport(ServerTestCase):
         
         self.assertIn('error', data)
         self.assertIn('not available', data['error'].lower())
+
+
+# ============================================================================
+# Issue #172: API Search Endpoint Tests
+# ============================================================================
+
+class TestApiSearchEndpoint(ServerTestCase):
+    """Tests for /api/search endpoint (instant search)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with mock engine."""
+        cls.mock_results = [
+            {'url': 'https://example.com/1', 'title': 'Result 1', 'score': 1.0, 'snippet': 'First result'},
+            {'url': 'https://example.com/2', 'title': 'Result 2', 'score': 0.8, 'snippet': 'Second result'},
+        ]
+        cls.engine = MockSearchEngine(results=cls.mock_results)
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_api_search_returns_200(self):
+        """GET /api/search should return 200 OK."""
+        status, headers, body = self.make_request('/api/search?q=test')
+        self.assertEqual(status, 200)
+    
+    def test_api_search_returns_json(self):
+        """GET /api/search should return JSON content type."""
+        status, headers, body = self.make_request('/api/search?q=test')
+        content_type = headers.get('Content-Type', '')
+        self.assertIn('application/json', content_type)
+    
+    def test_api_search_returns_results(self):
+        """GET /api/search should return results array."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test')
+        data = json.loads(body)
+        
+        self.assertIn('results', data)
+        self.assertIsInstance(data['results'], list)
+        self.assertEqual(len(data['results']), 2)
+    
+    def test_api_search_result_structure(self):
+        """API search results should have expected fields."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test')
+        data = json.loads(body)
+        
+        result = data['results'][0]
+        self.assertIn('rank', result)
+        self.assertIn('title', result)
+        self.assertIn('url', result)
+        self.assertIn('snippet', result)
+        self.assertIn('score', result)
+        self.assertIn('score_pct', result)
+    
+    def test_api_search_metadata(self):
+        """API search should return metadata."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test')
+        data = json.loads(body)
+        
+        self.assertIn('query', data)
+        self.assertIn('total', data)
+        self.assertIn('page', data)
+        self.assertIn('per_page', data)
+        self.assertIn('elapsed_ms', data)
+        self.assertEqual(data['query'], 'test')
+    
+    def test_api_search_empty_query(self):
+        """Empty query should return empty results."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=')
+        data = json.loads(body)
+        
+        self.assertEqual(status, 200)
+        self.assertEqual(data['results'], [])
+        self.assertEqual(data['total'], 0)
+    
+    def test_api_search_pagination(self):
+        """API search should support page parameter."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test&page=1')
+        data = json.loads(body)
+        
+        self.assertEqual(data['page'], 1)
+        self.assertIn('total_pages', data)
+
+
+class TestApiSearchNoResults(ServerTestCase):
+    """Tests for /api/search when no results found."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with engine returning no results."""
+        cls.engine = MockEnhancedSearchEngine(
+            results=[],
+            spelling_suggestion='python'
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_api_search_returns_suggestion(self):
+        """API search should return spelling suggestion when no results."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=pyhton')
+        data = json.loads(body)
+        
+        self.assertEqual(status, 200)
+        self.assertEqual(data['results'], [])
+        self.assertEqual(data['suggestion'], 'python')
 
 
 # ============================================================================

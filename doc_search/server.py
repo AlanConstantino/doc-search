@@ -1,7 +1,8 @@
 """
-Web server for doc-search with pure HTML/CSS interface.
+Web server for doc-search with interactive JavaScript UI.
 
-No JavaScript - all server-side rendering with form submissions.
+Features instant search, keyboard navigation, and dynamic filtering.
+Falls back to pure HTML/CSS with form submissions when --no-javascript is used.
 Uses only Python standard library (http.server).
 """
 
@@ -717,6 +718,344 @@ def highlight_snippet(snippet: str) -> str:
     return result
 
 
+def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: str) -> str:
+    """Render the JavaScript block for instant search (or empty if disabled)."""
+    if no_javascript:
+        return ""
+    
+    return '''
+<script>
+(function() {
+    'use strict';
+    
+    // State
+    let currentRequest = null;
+    let searchTimeout = null;
+    const DEBOUNCE_MS = 200;
+    
+    // DOM elements
+    const form = document.querySelector('.search-form');
+    const input = document.querySelector('.search-input');
+    const resultsContainer = document.querySelector('.main');
+    const searchButton = document.querySelector('.search-button');
+    
+    if (!form || !input) return;
+    
+    // Get current options from form
+    function getSearchOptions() {
+        const sortSelect = document.querySelector('select[name="sort"]');
+        const limitSelect = document.querySelector('select[name="limit"]');
+        const exactCheckbox = document.querySelector('input[name="exact"]');
+        
+        return {
+            sort: sortSelect ? sortSelect.value : 'relevance',
+            limit: limitSelect ? limitSelect.value : '10',
+            exact: exactCheckbox ? (exactCheckbox.checked ? '1' : '') : ''
+        };
+    }
+    
+    // Build search URL
+    function buildSearchUrl(query, page = 1) {
+        const opts = getSearchOptions();
+        const params = new URLSearchParams();
+        params.set('q', query);
+        if (page > 1) params.set('page', page);
+        if (opts.sort !== 'relevance') params.set('sort', opts.sort);
+        if (opts.limit !== '10') params.set('limit', opts.limit);
+        if (opts.exact) params.set('exact', '1');
+        
+        // Get active facet if any
+        const activeFacet = document.querySelector('.facet-btn.active[href*="category="]');
+        if (activeFacet) {
+            const url = new URL(activeFacet.href);
+            const category = url.searchParams.get('category');
+            if (category) params.set('category', category);
+        }
+        
+        return params;
+    }
+    
+    // Escape HTML
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Convert **term** to <mark>term</mark>
+    function highlightSnippet(text) {
+        if (!text) return '';
+        return escapeHtml(text).replace(/\\*\\*([^*]+)\\*\\*/g, '<mark>$1</mark>');
+    }
+    
+    // Get score color class
+    function getScoreClass(pct) {
+        if (pct >= 70) return 'score-high';
+        if (pct >= 40) return 'score-medium';
+        return 'score-low';
+    }
+    
+    // Render a single result
+    function renderResult(r) {
+        const scoreClass = getScoreClass(r.score_pct);
+        const snippet = r.snippet ? `<div class="result-snippet">${highlightSnippet(r.snippet)}</div>` : '';
+        
+        return `
+            <div class="result">
+                <div class="result-header">
+                    <span class="result-number">${r.rank}</span>
+                    <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
+                    <span class="result-score" title="Score: ${r.score.toFixed(2)}">
+                        <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
+                        <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
+                    </span>
+                </div>
+                <div class="result-url">${escapeHtml(r.url)}</div>
+                ${snippet}
+            </div>
+        `;
+    }
+    
+    // Render pagination
+    function renderPagination(data) {
+        if (data.total_pages <= 1) return '';
+        
+        const page = data.page;
+        const totalPages = data.total_pages;
+        const params = buildSearchUrl(data.query, 1);
+        
+        let html = '<div class="pagination">';
+        
+        // First/Prev
+        if (page > 1) {
+            params.set('page', '1');
+            html += `<a href="#" data-page="1">« First</a>`;
+            html += `<a href="#" data-page="${page - 1}">← Prev</a>`;
+        } else {
+            html += '<span class="disabled">« First</span>';
+            html += '<span class="disabled">← Prev</span>';
+        }
+        
+        // Page numbers
+        const startPage = Math.max(1, page - 3);
+        const endPage = Math.min(totalPages, page + 3);
+        
+        if (startPage > 1) {
+            html += `<a href="#" data-page="1">1</a>`;
+            if (startPage > 2) html += '<span class="page-info">...</span>';
+        }
+        
+        for (let p = startPage; p <= endPage; p++) {
+            if (p === page) {
+                html += `<span class="current">${p}</span>`;
+            } else {
+                html += `<a href="#" data-page="${p}">${p}</a>`;
+            }
+        }
+        
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += '<span class="page-info">...</span>';
+            html += `<a href="#" data-page="${totalPages}">${totalPages}</a>`;
+        }
+        
+        // Next/Last
+        if (page < totalPages) {
+            html += `<a href="#" data-page="${page + 1}">Next →</a>`;
+            html += `<a href="#" data-page="${totalPages}">Last »</a>`;
+        } else {
+            html += '<span class="disabled">Next →</span>';
+            html += '<span class="disabled">Last »</span>';
+        }
+        
+        html += '</div>';
+        return html;
+    }
+    
+    // Render results
+    function renderResults(data) {
+        const formHtml = form.outerHTML;
+        const datalist = document.getElementById('search-suggestions');
+        const datalistHtml = datalist ? datalist.outerHTML : '';
+        
+        if (!data.results || data.results.length === 0) {
+            // No results
+            let suggestionHtml = '';
+            if (data.suggestion) {
+                suggestionHtml = `
+                    <div class="spell-suggestion">
+                        <span class="spell-suggestion-icon">💡</span>
+                        <span class="spell-suggestion-text">Did you mean:</span>
+                        <a href="#" class="spell-suggestion-link" data-suggestion="${escapeHtml(data.suggestion)}">${escapeHtml(data.suggestion)}</a>?
+                    </div>
+                `;
+            }
+            
+            resultsContainer.innerHTML = `
+                ${formHtml}
+                ${datalistHtml}
+                ${suggestionHtml}
+                <div class="no-results">
+                    <div class="no-results-icon">🔍</div>
+                    <div>No results found. Try different keywords.</div>
+                </div>
+            `;
+        } else {
+            // Has results
+            const startNum = (data.page - 1) * data.per_page + 1;
+            const endNum = Math.min(data.page * data.per_page, data.total);
+            
+            const resultsHtml = data.results.map(renderResult).join('');
+            const paginationHtml = renderPagination(data);
+            
+            resultsContainer.innerHTML = `
+                ${formHtml}
+                ${datalistHtml}
+                <div class="results-info">
+                    <span class="results-count">✓ Found ${data.total} result${data.total !== 1 ? 's' : ''}</span>
+                    <span class="results-time">in ${data.elapsed_ms.toFixed(1)}ms</span>
+                    <span class="results-query">showing ${startNum}-${endNum} for "${escapeHtml(data.query)}"</span>
+                </div>
+                <div class="results">
+                    ${resultsHtml}
+                </div>
+                ${paginationHtml}
+            `;
+        }
+        
+        // Re-bind event listeners after DOM update
+        bindEventListeners();
+    }
+    
+    // Show loading state
+    function showLoading() {
+        searchButton.textContent = '...';
+        searchButton.disabled = true;
+    }
+    
+    // Hide loading state
+    function hideLoading() {
+        searchButton.textContent = 'Search';
+        searchButton.disabled = false;
+    }
+    
+    // Perform search
+    function doSearch(query, page = 1) {
+        if (!query.trim()) {
+            // Reload page to show welcome state
+            window.location.href = '/';
+            return;
+        }
+        
+        // Cancel pending request
+        if (currentRequest) {
+            currentRequest.abort();
+        }
+        
+        showLoading();
+        
+        // Build API URL
+        const params = buildSearchUrl(query, page);
+        const apiUrl = '/api/search?' + params.toString();
+        
+        // Update browser URL
+        const browserUrl = '/?' + params.toString();
+        window.history.pushState({ query, page }, '', browserUrl);
+        
+        // Create abort controller
+        const controller = new AbortController();
+        currentRequest = controller;
+        
+        fetch(apiUrl, { signal: controller.signal })
+            .then(response => {
+                if (!response.ok) throw new Error('Search failed');
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                renderResults(data);
+            })
+            .catch(err => {
+                hideLoading();
+                if (err.name !== 'AbortError') {
+                    console.error('Search error:', err);
+                }
+            })
+            .finally(() => {
+                currentRequest = null;
+            });
+    }
+    
+    // Debounced search for typing
+    function debouncedSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            doSearch(input.value, 1);
+        }, DEBOUNCE_MS);
+    }
+    
+    // Bind event listeners
+    function bindEventListeners() {
+        const newForm = document.querySelector('.search-form');
+        const newInput = document.querySelector('.search-input');
+        
+        if (newForm) {
+            newForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                clearTimeout(searchTimeout);
+                doSearch(newInput.value, 1);
+            });
+        }
+        
+        if (newInput) {
+            newInput.addEventListener('input', debouncedSearch);
+        }
+        
+        // Pagination links
+        document.querySelectorAll('.pagination a[data-page]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const page = parseInt(link.dataset.page);
+                doSearch(newInput.value, page);
+            });
+        });
+        
+        // Spelling suggestion links
+        document.querySelectorAll('.spell-suggestion-link[data-suggestion]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const suggestion = link.dataset.suggestion;
+                newInput.value = suggestion;
+                doSearch(suggestion, 1);
+            });
+        });
+        
+        // Clear button
+        const clearBtn = document.querySelector('.search-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                newInput.value = '';
+                newInput.focus();
+            });
+        }
+    }
+    
+    // Handle back/forward navigation
+    window.addEventListener('popstate', (e) => {
+        if (e.state && e.state.query) {
+            input.value = e.state.query;
+            doSearch(e.state.query, e.state.page || 1);
+        } else {
+            // Go back to home
+            window.location.reload();
+        }
+    });
+    
+    // Initial binding
+    bindEventListeners();
+})();
+</script>'''
+
+
 def render_page(
     query: str = "",
     results: Optional[List[Dict[str, Any]]] = None,
@@ -734,7 +1073,8 @@ def render_page(
     exact_match: bool = False,
     theme: str = "dark",
     autocomplete_terms: Optional[List[str]] = None,
-    global_max_score: Optional[float] = None
+    global_max_score: Optional[float] = None,
+    no_javascript: bool = False
 ) -> str:
     """Render the full HTML page."""
     
@@ -1035,6 +1375,7 @@ def render_page(
         </div>
         <div>doc-search v{__version__}</div>
     </footer>
+{_render_javascript(no_javascript, query, per_page, theme)}
 </body>
 </html>'''
 
@@ -1091,6 +1432,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Handle /suggest endpoint for autocomplete
         if parsed.path == '/suggest':
             self.handle_suggest(parsed.query)
+            return
+        
+        # Handle /api/search endpoint for JSON results (instant search)
+        if parsed.path == '/api/search':
+            self.handle_api_search(parsed.query)
             return
         
         query_params = urllib.parse.parse_qs(parsed.query)
@@ -1217,7 +1563,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                 exact_match=exact_match,
                 theme=theme,
                 autocomplete_terms=autocomplete_terms,
-                global_max_score=global_max
+                global_max_score=global_max,
+                no_javascript=self.no_javascript
             )
         else:
             # Welcome page
@@ -1231,7 +1578,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 # Get general suggestions for empty search
                 autocomplete_terms = self.engine.get_autocomplete_suggestions('', max_suggestions=100)
             
-            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms)
+            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms, no_javascript=self.no_javascript)
         
         self.send_html(html_content)
     
@@ -1270,6 +1617,149 @@ class SearchHandler(BaseHTTPRequestHandler):
         try:
             suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
             self.send_json({'suggestions': suggestions})
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+    
+    def handle_api_search(self, query_string: str):
+        """Handle /api/search endpoint for instant search.
+        
+        Returns JSON with search results for JavaScript-driven UI.
+        Query params:
+            q: search query
+            page: page number (default 1)
+            limit: results per page (10, 25, or 50)
+            category: facet filter
+            exact: 1 for exact match
+        """
+        import inspect
+        
+        query_params = urllib.parse.parse_qs(query_string)
+        
+        # Get search query
+        query = query_params.get('q', [''])[0].strip()
+        
+        if not query:
+            self.send_json({
+                'query': '',
+                'results': [],
+                'total': 0,
+                'page': 1,
+                'per_page': self.per_page,
+                'elapsed_ms': 0,
+                'suggestion': None,
+                'facets': None
+            })
+            return
+        
+        # Get page number (default 1, minimum 1)
+        try:
+            page = max(1, int(query_params.get('page', ['1'])[0]))
+        except ValueError:
+            page = 1
+        
+        # Get facet filter (category)
+        category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
+        
+        # Get results limit (per page)
+        try:
+            per_page = int(query_params.get('limit', [str(self.per_page)])[0])
+            if per_page not in (10, 25, 50):
+                per_page = self.per_page
+        except ValueError:
+            per_page = self.per_page
+        
+        # Get exact match toggle
+        exact_match = query_params.get('exact', [''])[0] == '1'
+        
+        max_results = self.max_results
+        
+        try:
+            # Perform search
+            search_start = time.perf_counter()
+            
+            # For exact match, wrap query in quotes
+            search_query = query
+            if exact_match and not (query.startswith('"') and query.endswith('"')):
+                search_query = f'"{query}"'
+            
+            # Pass expand_synonyms if enabled
+            use_synonyms = self.enable_synonyms and not exact_match
+            if use_synonyms and hasattr(self.engine, 'search'):
+                sig = inspect.signature(self.engine.search)
+                if 'expand_synonyms' in sig.parameters:
+                    all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
+                else:
+                    all_results = self.engine.search(search_query, top_k=max_results)
+            else:
+                all_results = self.engine.search(search_query, top_k=max_results)
+            elapsed_ms = (time.perf_counter() - search_start) * 1000
+            
+            # Get facet counts before filtering
+            facets = None
+            total_unfiltered = len(all_results)
+            if self.enable_facets and hasattr(self.engine, 'get_facet_counts'):
+                facets = self.engine.get_facet_counts(all_results)
+            
+            # Apply facet filter if specified
+            filtered_results = all_results
+            if category_filter and facets and 'category' in facets:
+                filtered_results = [
+                    r for r in all_results 
+                    if r.get('facets', {}).get('category') == category_filter
+                ]
+            
+            total_results = len(filtered_results)
+            
+            # Slice for current page
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            page_results = filtered_results[start_idx:end_idx]
+            
+            # Check for spelling suggestions when results are low
+            suggestion = None
+            if total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+                suggestion = self.engine.get_spelling_suggestion(query)
+                if suggestion and suggestion.lower() == query.lower():
+                    suggestion = None
+            
+            # Calculate max score for normalization
+            global_max_score = filtered_results[0].get('score', 1) if filtered_results else 1
+            
+            # Format results for JSON
+            json_results = []
+            start_num = (page - 1) * per_page + 1
+            for i, r in enumerate(page_results, start_num):
+                score = r.get('score', 0)
+                score_pct = int((score / global_max_score) * 100) if global_max_score > 0 else 0
+                
+                json_results.append({
+                    'rank': i,
+                    'title': r.get('title', 'Untitled') or 'Untitled',
+                    'url': r['url'],
+                    'snippet': r.get('snippet', '') or r.get('description', ''),
+                    'score': round(score, 4),
+                    'score_pct': score_pct,
+                    'facets': r.get('facets', {})
+                })
+            
+            # Build response
+            response = {
+                'query': query,
+                'results': json_results,
+                'total': total_results,
+                'total_unfiltered': total_unfiltered,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (total_results + per_page - 1) // per_page if total_results > 0 else 1,
+                'elapsed_ms': round(elapsed_ms, 2),
+                'suggestion': suggestion,
+                'facets': facets,
+                'active_facet': category_filter if category_filter else None,
+                'global_max_score': round(global_max_score, 4)
+            }
+            
+            self.send_json(response)
+            
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     
