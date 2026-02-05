@@ -730,8 +730,10 @@ def cmd_serve(args):
     log_requests = getattr(args, 'log_requests', False)
     per_page = getattr(args, 'per_page', 10)
     max_results = getattr(args, 'max_results', 100)
+    no_javascript = getattr(args, 'no_javascript', False)
     server = run_server(engine, host=args.host, port=args.port, version=__version__, 
-                       log_requests=log_requests, per_page=per_page, max_results=max_results)
+                       log_requests=log_requests, per_page=per_page, max_results=max_results,
+                       no_javascript=no_javascript)
     
     url = f"http://{args.host}:{args.port}"
     

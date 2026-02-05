@@ -228,4 +228,6 @@ def _add_serve_parser(subparsers):
                              help='Cache TTL in seconds (default: 0 = never expire, only evict when full)')
     serve_parser.add_argument('--cache-file', type=str, default=None,
                              help='Path to cache file (default: <site_dir>/.cache.db)')
+    serve_parser.add_argument('--no-javascript', action='store_true',
+                             help='Serve pure HTML/CSS UI without JavaScript')
     serve_parser.set_defaults(func=cmd_serve)
