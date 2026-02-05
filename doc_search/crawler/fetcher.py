@@ -16,22 +16,24 @@ from ..constants import DEFAULT_RATE_LIMIT_BACKOFF
 class FetchResult:
     """Result of a fetch operation."""
     
-    __slots__ = ('content', 'content_type', 'metadata')
+    __slots__ = ('content', 'content_type', 'metadata', 'raw_bytes')
     
     def __init__(
         self,
         content: Optional[str] = None,
         content_type: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        raw_bytes: Optional[bytes] = None
     ):
         self.content = content
         self.content_type = content_type
         self.metadata = metadata or {}
+        self.raw_bytes = raw_bytes  # Raw bytes for binary content (PDFs, etc.)
     
     @property
     def success(self) -> bool:
-        """True if fetch succeeded with content."""
-        return self.content is not None
+        """True if fetch succeeded with content (text or binary)."""
+        return self.content is not None or self.raw_bytes is not None
     
     @property
     def not_modified(self) -> bool:
@@ -265,9 +267,6 @@ class Fetcher:
             content_encoding = response.headers.get('Content-Encoding', '')
             content_type = response.headers.get('Content-Type', '')
             
-            # Decode content
-            content = self._decode_content(content_bytes, content_type, content_encoding)
-            
             # Update stats
             self._update_stat('bytes_downloaded', len(content_bytes))
             
@@ -276,6 +275,22 @@ class Fetcher:
                 'etag': response.headers.get('ETag'),
                 'last_modified': response.headers.get('Last-Modified'),
             }
+            
+            # Check if binary content (PDF, etc.) - keep raw bytes
+            is_binary = 'application/pdf' in content_type.lower() or \
+                        'application/octet-stream' in content_type.lower()
+            
+            if is_binary:
+                # For binary content, store raw bytes and skip decoding
+                return FetchResult(
+                    content=None,
+                    content_type=content_type,
+                    metadata=metadata,
+                    raw_bytes=content_bytes
+                )
+            
+            # Decode text content
+            content = self._decode_content(content_bytes, content_type, content_encoding)
             
             return FetchResult(content=content, content_type=content_type, metadata=metadata)
             

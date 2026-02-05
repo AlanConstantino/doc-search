@@ -12,7 +12,7 @@ import json
 import time
 import threading
 from pathlib import Path
-from typing import Optional, Set, Dict, Any, Callable, Tuple, List, Union
+from typing import Optional, Set, Dict, Any, Callable, Tuple, List
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
@@ -310,14 +310,19 @@ class Crawler:
         content = fetch_result.content
         content_type = fetch_result.content_type or ''
         
-        # Handle non-HTML content
-        from ..utils import is_html_content
-        if not is_html_content(content_type):
-            # Check if it's a PDF (Content-Type based detection)
+        # Handle binary content (PDF, etc.) - use raw_bytes
+        if fetch_result.raw_bytes is not None:
             if self.extract_docs and 'application/pdf' in content_type.lower():
                 self._log(f"  Detected PDF by Content-Type, extracting...")
-                return self._process_pdf_content(url, content, depth)
+                return self._process_pdf_content(url, fetch_result.raw_bytes, depth)
             
+            self._log(f"  Skipping binary content: {content_type}")
+            self.state.increment_stat('pages_skipped')
+            return []
+        
+        # Handle non-HTML text content
+        from ..utils import is_html_content
+        if not is_html_content(content_type):
             self._log(f"  Skipping non-HTML: {content_type}")
             self.state.increment_stat('pages_skipped')
             return []
@@ -392,7 +397,7 @@ class Crawler:
         self.state.increment_stat('pages_skipped')
         return []
     
-    def _process_pdf_content(self, url: str, content: Union[str, bytes], depth: int) -> Optional[List[Tuple[str, int]]]:
+    def _process_pdf_content(self, url: str, content_bytes: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
         Process PDF content that was already fetched (Content-Type based detection).
         
@@ -403,12 +408,7 @@ class Crawler:
         """
         parsed = urlparse(url)
         
-        # Convert string content back to bytes if needed
-        # (fetcher decodes all content as string, but PDFs need bytes)
-        if isinstance(content, str):
-            content = content.encode('latin-1')
-        
-        result = self._pdf_extractor.extract_from_bytes(content)
+        result = self._pdf_extractor.extract_from_bytes(content_bytes)
         
         if result['error']:
             self._log(f"  PDF extraction failed: {result['error']}")
