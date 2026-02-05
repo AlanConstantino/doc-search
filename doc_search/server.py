@@ -608,8 +608,32 @@ a:hover {
     font-size: 0.875rem;
     color: var(--text-secondary);
     line-height: 1.7;
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
+}
+
+.preview-snippet {
+    margin-bottom: 1rem;
+}
+
+.preview-meta {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+}
+
+.preview-url {
+    word-break: break-all;
+    margin-bottom: 0.25rem;
+}
+
+.preview-url a {
+    color: var(--text-muted);
+}
+
+.preview-url a:hover {
+    color: var(--accent);
 }
 
 .result-preview-toggle {
@@ -1367,15 +1391,33 @@ JAVASCRIPT = """
         if (!preview) {
             preview = document.createElement('div');
             preview.className = 'result-preview';
-            preview.innerHTML = '<div class="result-preview-content">Loading...</div>';
-            result.appendChild(preview);
             
-            // Fetch full content (placeholder - would need API endpoint)
-            const url = result.querySelector('.result-title')?.href;
-            if (url) {
-                preview.querySelector('.result-preview-content').textContent = 
-                    'Full preview content would be fetched from: ' + url;
+            // Get data from the result element
+            const url = result.querySelector('.result-title')?.href || '';
+            const snippet = result.querySelector('.result-snippet');
+            const scoreEl = result.querySelector('.result-score');
+            
+            // Build preview content with metadata
+            let content = '<div class="result-preview-content">';
+            
+            // Show full snippet (un-truncated)
+            if (snippet) {
+                content += '<div class="preview-snippet">' + snippet.innerHTML + '</div>';
             }
+            
+            // Show metadata
+            content += '<div class="preview-meta">';
+            if (url) {
+                content += '<div class="preview-url"><strong>URL:</strong> <a href="' + escapeHtml(url) + '" target="_blank">' + escapeHtml(url) + '</a></div>';
+            }
+            if (scoreEl) {
+                content += '<div class="preview-score">' + scoreEl.textContent + '</div>';
+            }
+            content += '</div>';
+            content += '</div>';
+            
+            preview.innerHTML = content;
+            result.appendChild(preview);
         }
         
         const isVisible = preview.classList.toggle('visible');
