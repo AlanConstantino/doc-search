@@ -1,12 +1,15 @@
 """
-Web server for doc-search with pure HTML/CSS interface.
+Web server for doc-search with interactive JavaScript UI.
 
-No JavaScript - all server-side rendering with form submissions.
+Features instant search, keyboard navigation, and dynamic filtering.
+Falls back to pure HTML/CSS with form submissions when --no-javascript is used.
 Uses only Python standard library (http.server).
 """
 
 import html
+import json
 import os
+import re
 import time
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -39,7 +42,7 @@ def _e(name: str) -> str:
 
 
 # ============================================================================
-# CSS Styles - Beautiful dark theme, pure CSS
+# CSS Styles - Beautiful dark theme with light mode support
 # ============================================================================
 
 CSS = """
@@ -230,6 +233,59 @@ a:hover {
     transform: scale(0.98);
 }
 
+/* Search history dropdown */
+.search-history-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+}
+
+.search-history-dropdown.visible {
+    display: block;
+}
+
+.history-header {
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.history-clear-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0.25rem;
+}
+
+.history-clear-btn:hover {
+    color: var(--accent);
+}
+
+.history-item {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.history-item:hover {
+    background: var(--bg-tertiary);
+}
+
 /* Search options row */
 .search-options {
     display: flex;
@@ -273,33 +329,119 @@ a:hover {
     cursor: pointer;
 }
 
-/* Theme toggle */
+/* Theme toggle - iOS style switch */
 .theme-toggle {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.5rem;
 }
 
-.theme-btn {
-    padding: 0.35rem 0.5rem;
+.theme-toggle-label {
+    font-size: 1rem;
+    opacity: 0.6;
+}
+
+.theme-switch {
+    position: relative;
+    width: 50px;
+    height: 26px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s;
+}
+
+.theme-switch:hover {
+    border-color: var(--accent);
+}
+
+.theme-switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.theme-switch.light .theme-switch-knob {
+    transform: translateX(24px);
+}
+
+.theme-switch.light {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Search within results highlight input - fixed overlay at top */
+.search-highlight-bar {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
+    border-bottom: 2px solid var(--accent);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.search-highlight-bar.visible {
+    display: flex;
+}
+
+.search-highlight-input {
+    flex: 1;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    text-decoration: none;
-    font-size: 1rem;
-    line-height: 1;
-    opacity: 0.5;
-    transition: opacity 0.15s;
+    color: var(--text-primary);
+    font-size: 0.875rem;
 }
 
-.theme-btn:hover {
-    opacity: 0.8;
-}
-
-.theme-btn.active {
-    opacity: 1;
+.search-highlight-input:focus {
+    outline: none;
     border-color: var(--accent);
+}
+
+.search-highlight-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 60px;
+}
+
+.search-highlight-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1rem;
+    padding: 0.25rem;
+}
+
+.search-highlight-close:hover {
+    color: var(--text-primary);
+}
+
+/* Cmd+F highlight style */
+.cmd-f-highlight {
+    background: #ffff00;
+    color: #000;
+    padding: 0.1em 0.15em;
+    border-radius: 2px;
+}
+
+.cmd-f-highlight.current {
+    background: #ff9632;
 }
 
 /* Results info */
@@ -325,6 +467,32 @@ a:hover {
     font-style: italic;
 }
 
+/* Loading indicator */
+.loading-indicator {
+    display: none;
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.loading-indicator.visible {
+    display: block;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Results list */
 .results {
     display: flex;
@@ -337,12 +505,17 @@ a:hover {
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 1.25rem;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.2s, background 0.2s, outline 0.1s;
 }
 
 .result:hover {
     border-color: var(--accent);
     background: var(--bg-tertiary);
+}
+
+.result.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 
 .result-header {
@@ -441,6 +614,29 @@ a:hover {
     line-height: 1.6;
 }
 
+/* Copy link button */
+.copy-link-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.875rem;
+    padding: 0.25rem;
+    margin-top: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: color 0.15s;
+}
+
+.copy-link-btn:hover {
+    color: var(--accent);
+}
+
+.copy-link-btn.copied {
+    color: #22c55e;
+}
+
 /* HTML5 <mark> element for semantic highlighting */
 mark {
     background: var(--highlight-bg);
@@ -512,6 +708,7 @@ mark {
     color: var(--accent);
     font-weight: 600;
     text-decoration: none;
+    cursor: pointer;
 }
 
 .spell-suggestion-link:hover {
@@ -609,6 +806,7 @@ mark {
     color: var(--text-primary);
     text-decoration: none;
     transition: border-color 0.2s, background 0.2s;
+    cursor: pointer;
 }
 
 .pagination a:hover {
@@ -630,6 +828,12 @@ mark {
 .pagination .page-info {
     color: var(--text-secondary);
     font-size: 0.875rem;
+}
+
+/* Infinite scroll sentinel */
+.scroll-sentinel {
+    height: 1px;
+    margin-top: 1rem;
 }
 
 /* Facet filters */
@@ -665,6 +869,7 @@ mark {
     color: var(--text-secondary);
     text-decoration: none;
     transition: all 0.2s;
+    cursor: pointer;
 }
 
 .facet-btn:hover {
@@ -693,6 +898,1015 @@ mark {
 .facet-btn:not(.active) .facet-count {
     background: var(--bg-primary);
 }
+
+/* Clear filters link */
+.facet-clear {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: 0.5rem;
+    cursor: pointer;
+}
+
+.facet-clear:hover {
+    color: var(--accent);
+}
+"""
+
+
+# ============================================================================
+# JavaScript for instant search, history, keyboard nav, infinite scroll, etc.
+# ============================================================================
+
+JAVASCRIPT = """
+(function() {
+    'use strict';
+    
+    // ========================================================================
+    // State
+    // ========================================================================
+    let currentRequest = null;
+    let searchTimeout = null;
+    const DEBOUNCE_MS = 200;
+    const HISTORY_KEY = 'doc-search-history';
+    const THEME_KEY = 'doc-search-theme';
+    const MAX_HISTORY = 10;
+    
+    let selectedResultIndex = -1;
+    let currentPage = 1;
+    let totalPages = 1;
+    let isLoadingMore = false;
+    let allLoadedResults = [];
+    let currentQuery = '';
+    let currentFacet = null;
+    
+    // Cmd+F highlighting state
+    let highlightMatches = [];
+    let currentHighlightIndex = -1;
+    
+    // ========================================================================
+    // DOM Elements
+    // ========================================================================
+    const form = document.querySelector('.search-form');
+    const input = document.querySelector('.search-input');
+    const searchButton = document.querySelector('.search-button');
+    const resultsContainer = document.querySelector('.results');
+    const mainContainer = document.querySelector('.main');
+    
+    if (!form || !input) return;
+    
+    // Hide Results dropdown when JS is enabled (infinite scroll makes it redundant)
+    const limitOption = document.querySelector('.limit-option');
+    if (limitOption) limitOption.style.display = 'none';
+    
+    // ========================================================================
+    // Theme Management (#180)
+    // ========================================================================
+    function getStoredTheme() {
+        try {
+            return localStorage.getItem(THEME_KEY);
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    function setStoredTheme(theme) {
+        try {
+            localStorage.setItem(THEME_KEY, theme);
+        } catch (e) {}
+    }
+    
+    function applyTheme(theme) {
+        document.body.classList.toggle('light', theme === 'light');
+        // Update theme buttons
+        document.querySelectorAll('.theme-btn').forEach(btn => {
+            const isLight = btn.getAttribute('data-theme') === 'light';
+            const isDark = btn.getAttribute('data-theme') === 'dark';
+            if ((theme === 'light' && isLight) || (theme !== 'light' && isDark)) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+    
+    function initTheme() {
+        // Check localStorage first
+        let theme = getStoredTheme();
+        
+        // Fall back to prefers-color-scheme
+        if (!theme) {
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                theme = 'light';
+            } else {
+                theme = 'dark';
+            }
+        }
+        
+        applyTheme(theme);
+        
+        // Listen for system theme changes
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+                if (!getStoredTheme()) {
+                    applyTheme(e.matches ? 'light' : 'dark');
+                }
+            });
+        }
+    }
+    
+    function setupThemeToggle() {
+        const toggle = document.querySelector('.theme-switch');
+        if (!toggle) return;
+        
+        // Remove href for JS mode
+        toggle.removeAttribute('href');
+        
+        toggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            const isLight = toggle.classList.contains('light');
+            const newTheme = isLight ? 'dark' : 'light';
+            setStoredTheme(newTheme);
+            applyTheme(newTheme);
+            toggle.classList.toggle('light', newTheme === 'light');
+        });
+    }
+    
+    // ========================================================================
+    // Search History (#174)
+    // ========================================================================
+    function getSearchHistory() {
+        try {
+            const stored = localStorage.getItem(HISTORY_KEY);
+            return stored ? JSON.parse(stored) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    
+    function saveSearchHistory(history) {
+        try {
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        } catch (e) {}
+    }
+    
+    function addToHistory(query) {
+        if (!query || !query.trim()) return;
+        query = query.trim();
+        
+        let history = getSearchHistory();
+        history = history.filter(q => q.toLowerCase() !== query.toLowerCase());
+        history.unshift(query);
+        if (history.length > MAX_HISTORY) {
+            history = history.slice(0, MAX_HISTORY);
+        }
+        saveSearchHistory(history);
+    }
+    
+    function clearHistory() {
+        saveSearchHistory([]);
+        hideHistoryDropdown();
+    }
+    
+    let historyDropdown = null;
+    
+    function createHistoryDropdown() {
+        if (historyDropdown) return historyDropdown;
+        
+        const dropdown = document.createElement('div');
+        dropdown.className = 'search-history-dropdown';
+        
+        const wrapper = document.querySelector('.search-input-wrapper');
+        if (wrapper) {
+            wrapper.appendChild(dropdown);
+        }
+        
+        historyDropdown = dropdown;
+        return dropdown;
+    }
+    
+    function showHistoryDropdown() {
+        const history = getSearchHistory();
+        if (history.length === 0) return;
+        
+        const dropdown = createHistoryDropdown();
+        
+        let html = '<div class="history-header">';
+        html += '<span>Recent searches</span>';
+        html += '<button type="button" class="history-clear-btn">Clear</button>';
+        html += '</div>';
+        
+        history.forEach((q) => {
+            html += '<div class="history-item" data-query="' + escapeHtml(q) + '">' + escapeHtml(q) + '</div>';
+        });
+        
+        dropdown.innerHTML = html;
+        dropdown.classList.add('visible');
+        
+        dropdown.querySelectorAll('.history-item').forEach(item => {
+            item.addEventListener('click', () => {
+                input.value = item.dataset.query;
+                hideHistoryDropdown();
+                doSearch(item.dataset.query, 1);
+            });
+        });
+        
+        const clearBtn = dropdown.querySelector('.history-clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                clearHistory();
+            });
+        }
+    }
+    
+    function hideHistoryDropdown() {
+        if (historyDropdown) {
+            historyDropdown.classList.remove('visible');
+        }
+    }
+    
+    // ========================================================================
+    // Keyboard Navigation (#175)
+    // ========================================================================
+    function getResultElements() {
+        return document.querySelectorAll('.result');
+    }
+    
+    function highlightResult(index) {
+        const results = getResultElements();
+        results.forEach(r => r.classList.remove('selected'));
+        
+        if (index >= 0 && index < results.length) {
+            selectedResultIndex = index;
+            const result = results[index];
+            result.classList.add('selected');
+            result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            selectedResultIndex = -1;
+        }
+    }
+    
+    function openSelectedResult(newTab = false) {
+        const results = getResultElements();
+        if (selectedResultIndex >= 0 && selectedResultIndex < results.length) {
+            const link = results[selectedResultIndex].querySelector('.result-title');
+            if (link) {
+                if (newTab) {
+                    window.open(link.href, '_blank');
+                } else {
+                    window.location.href = link.href;
+                }
+            }
+        }
+    }
+    
+    function handleKeyboardNavigation(e) {
+        const results = getResultElements();
+        
+        // Cmd+F / Ctrl+F for search within results
+        if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+            if (results.length > 0) {
+                e.preventDefault();
+                showHighlightBar();
+                return;
+            }
+        }
+        
+        // Escape to clear
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            highlightResult(-1);
+            hideHistoryDropdown();
+            hideHighlightBar();
+            input.focus();
+            return;
+        }
+        
+        if (results.length === 0) return;
+        
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                if (selectedResultIndex < results.length - 1) {
+                    highlightResult(selectedResultIndex + 1);
+                }
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                if (selectedResultIndex > 0) {
+                    highlightResult(selectedResultIndex - 1);
+                } else if (selectedResultIndex === 0) {
+                    highlightResult(-1);
+                    input.focus();
+                }
+                break;
+            case 'Enter':
+                if (selectedResultIndex >= 0 && document.activeElement !== input) {
+                    e.preventDefault();
+                    openSelectedResult(e.ctrlKey || e.metaKey);
+                }
+                break;
+        }
+    }
+    
+    // ========================================================================
+    // Search Within Results - Cmd+F Highlighting (#179)
+    // ========================================================================
+    let highlightBar = null;
+    
+    function createHighlightBar() {
+        if (highlightBar) return highlightBar;
+        
+        const bar = document.createElement('div');
+        bar.className = 'search-highlight-bar';
+        bar.innerHTML = `
+            <input type="text" class="search-highlight-input" placeholder="Search within results...">
+            <span class="search-highlight-count"></span>
+            <button type="button" class="search-highlight-close">✕</button>
+        `;
+        
+        // Append to body for fixed positioning overlay
+        document.body.appendChild(bar);
+        
+        const highlightInput = bar.querySelector('.search-highlight-input');
+        const closeBtn = bar.querySelector('.search-highlight-close');
+        
+        let highlightTimeout = null;
+        highlightInput.addEventListener('input', () => {
+            clearTimeout(highlightTimeout);
+            highlightTimeout = setTimeout(() => {
+                highlightInResults(highlightInput.value);
+            }, 100);
+        });
+        
+        highlightInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    navigateHighlight(-1);
+                } else {
+                    navigateHighlight(1);
+                }
+            } else if (e.key === 'Escape') {
+                hideHighlightBar();
+            }
+        });
+        
+        closeBtn.addEventListener('click', hideHighlightBar);
+        
+        highlightBar = bar;
+        return bar;
+    }
+    
+    function showHighlightBar() {
+        const bar = createHighlightBar();
+        bar.classList.add('visible');
+        const highlightInput = bar.querySelector('.search-highlight-input');
+        highlightInput.focus();
+        highlightInput.select();
+    }
+    
+    function hideHighlightBar() {
+        if (highlightBar) {
+            highlightBar.classList.remove('visible');
+            clearHighlights();
+        }
+    }
+    
+    function highlightInResults(text) {
+        clearHighlights();
+        if (!text || text.length < 2) {
+            updateHighlightCount(0, 0);
+            return;
+        }
+        
+        const snippets = document.querySelectorAll('.result-snippet');
+        let totalMatches = 0;
+        
+        snippets.forEach(snippet => {
+            const html = snippet.innerHTML;
+            const regex = new RegExp('(' + escapeRegex(text) + ')', 'gi');
+            let matchCount = 0;
+            
+            const newHtml = html.replace(regex, (match) => {
+                matchCount++;
+                totalMatches++;
+                return '<span class="cmd-f-highlight" data-match-index="' + (totalMatches - 1) + '">' + match + '</span>';
+            });
+            
+            if (matchCount > 0) {
+                snippet.innerHTML = newHtml;
+            }
+        });
+        
+        highlightMatches = document.querySelectorAll('.cmd-f-highlight');
+        currentHighlightIndex = -1;
+        updateHighlightCount(0, totalMatches);
+        
+        if (totalMatches > 0) {
+            navigateHighlight(1);
+        }
+    }
+    
+    function clearHighlights() {
+        document.querySelectorAll('.cmd-f-highlight').forEach(el => {
+            const text = el.textContent;
+            el.replaceWith(document.createTextNode(text));
+        });
+        highlightMatches = [];
+        currentHighlightIndex = -1;
+    }
+    
+    function navigateHighlight(direction) {
+        if (highlightMatches.length === 0) return;
+        
+        if (currentHighlightIndex >= 0) {
+            highlightMatches[currentHighlightIndex].classList.remove('current');
+        }
+        
+        currentHighlightIndex += direction;
+        if (currentHighlightIndex >= highlightMatches.length) {
+            currentHighlightIndex = 0;
+        } else if (currentHighlightIndex < 0) {
+            currentHighlightIndex = highlightMatches.length - 1;
+        }
+        
+        const current = highlightMatches[currentHighlightIndex];
+        current.classList.add('current');
+        current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        updateHighlightCount(currentHighlightIndex + 1, highlightMatches.length);
+    }
+    
+    function updateHighlightCount(current, total) {
+        const countEl = highlightBar?.querySelector('.search-highlight-count');
+        if (countEl) {
+            countEl.textContent = total > 0 ? current + ' of ' + total : '';
+        }
+    }
+    
+    function escapeRegex(string) {
+        return string.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+    }
+    
+    // ========================================================================
+    // Result Previews (#177)
+    // ========================================================================
+    // Copy Link Button
+    // ========================================================================
+    function setupCopyLinkButtons() {
+        document.querySelectorAll('.result').forEach(result => {
+            // Add copy link button if not exists
+            if (!result.querySelector('.copy-link-btn')) {
+                const url = result.querySelector('.result-title')?.href;
+                if (url) {
+                    const btn = document.createElement('button');
+                    btn.className = 'copy-link-btn';
+                    btn.innerHTML = 'Copy link';
+                    btn.addEventListener('click', () => copyLink(btn, url));
+                    
+                    // Add after snippet or at end of result
+                    const snippet = result.querySelector('.result-snippet');
+                    if (snippet) {
+                        snippet.parentNode.insertBefore(btn, snippet.nextSibling);
+                    } else {
+                        result.appendChild(btn);
+                    }
+                }
+            }
+        });
+    }
+    
+    function copyLink(btn, url) {
+        navigator.clipboard.writeText(url).then(() => {
+            btn.innerHTML = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerHTML = 'Copy link';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(() => {
+            // Fallback for older browsers
+            const input = document.createElement('input');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            btn.innerHTML = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerHTML = 'Copy link';
+                btn.classList.remove('copied');
+            }, 2000);
+        });
+    }
+    
+    // ========================================================================
+    // Infinite Scroll (#176)
+    // ========================================================================
+    let scrollObserver = null;
+    let scrollSentinel = null;
+    
+    function setupInfiniteScroll() {
+        if (!('IntersectionObserver' in window)) return;
+        
+        scrollObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !isLoadingMore && currentPage < totalPages) {
+                    loadMoreResults();
+                }
+            });
+        }, { rootMargin: '100px' });
+    }
+    
+    function createScrollSentinel() {
+        if (scrollSentinel) {
+            scrollSentinel.remove();
+        }
+        
+        scrollSentinel = document.createElement('div');
+        scrollSentinel.className = 'scroll-sentinel';
+        
+        const results = document.querySelector('.results');
+        if (results) {
+            results.parentNode.insertBefore(scrollSentinel, results.nextSibling);
+        }
+        
+        if (scrollObserver && currentPage < totalPages) {
+            scrollObserver.observe(scrollSentinel);
+        }
+    }
+    
+    function removeScrollSentinel() {
+        if (scrollSentinel) {
+            if (scrollObserver) {
+                scrollObserver.unobserve(scrollSentinel);
+            }
+            scrollSentinel.remove();
+            scrollSentinel = null;
+        }
+    }
+    
+    function loadMoreResults() {
+        if (isLoadingMore || currentPage >= totalPages) return;
+        
+        isLoadingMore = true;
+        showLoadingIndicator();
+        
+        const nextPage = currentPage + 1;
+        const params = buildSearchParams(currentQuery, nextPage);
+        
+        fetch('/api/search?' + params.toString(), { signal: currentRequest?.signal })
+            .then(response => response.json())
+            .then(data => {
+                hideLoadingIndicator();
+                isLoadingMore = false;
+                currentPage = data.page;
+                totalPages = data.total_pages;
+                
+                appendResults(data.results);
+                allLoadedResults = allLoadedResults.concat(data.results);
+                
+                if (currentPage < totalPages) {
+                    createScrollSentinel();
+                } else {
+                    removeScrollSentinel();
+                }
+            })
+            .catch(err => {
+                hideLoadingIndicator();
+                isLoadingMore = false;
+                if (err.name !== 'AbortError') {
+                    console.error('Load more error:', err);
+                }
+            });
+    }
+    
+    function showLoadingIndicator() {
+        let indicator = document.querySelector('.loading-indicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.className = 'loading-indicator';
+            indicator.innerHTML = '<div class="loading-spinner"></div> Loading more results...';
+            const results = document.querySelector('.results');
+            if (results) {
+                results.parentNode.insertBefore(indicator, results.nextSibling);
+            }
+        }
+        indicator.classList.add('visible');
+    }
+    
+    function hideLoadingIndicator() {
+        const indicator = document.querySelector('.loading-indicator');
+        if (indicator) {
+            indicator.classList.remove('visible');
+        }
+    }
+    
+    // ========================================================================
+    // Faceted Filtering (#178)
+    // ========================================================================
+    function setupFacetButtons() {
+        document.querySelectorAll('.facet-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                const href = btn.getAttribute('href');
+                if (!href) return;
+                
+                const url = new URL(href, window.location.origin);
+                const category = url.searchParams.get('category') || null;
+                
+                currentFacet = category;
+                currentPage = 1;
+                allLoadedResults = [];
+                
+                doSearch(currentQuery, 1, category);
+                
+                // Update active state
+                document.querySelectorAll('.facet-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    }
+    
+    // ========================================================================
+    // Search API (#172, #173)
+    // ========================================================================
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function highlightSnippet(text) {
+        if (!text) return '';
+        return escapeHtml(text).replace(/\\*\\*([^*]+)\\*\\*/g, '<mark>$1</mark>');
+    }
+    
+    function getScoreClass(pct) {
+        if (pct >= 70) return 'score-high';
+        if (pct >= 40) return 'score-medium';
+        return 'score-low';
+    }
+    
+    function getSearchOptions() {
+        const sortSelect = document.querySelector('select[name="sort"]');
+        const limitSelect = document.querySelector('select[name="limit"]');
+        const exactCheckbox = document.querySelector('input[name="exact"]');
+        
+        return {
+            sort: sortSelect ? sortSelect.value : 'relevance',
+            limit: limitSelect ? limitSelect.value : '10',
+            exact: exactCheckbox ? (exactCheckbox.checked ? '1' : '') : ''
+        };
+    }
+    
+    function buildSearchParams(query, page = 1, category = null) {
+        const opts = getSearchOptions();
+        const params = new URLSearchParams();
+        params.set('q', query);
+        if (page > 1) params.set('page', page);
+        if (opts.sort !== 'relevance') params.set('sort', opts.sort);
+        if (opts.limit !== '10') params.set('limit', opts.limit);
+        if (opts.exact) params.set('exact', '1');
+        if (category) params.set('category', category);
+        return params;
+    }
+    
+    function renderResult(r) {
+        const scoreClass = getScoreClass(r.score_pct);
+        const snippet = r.snippet ? '<div class="result-snippet">' + highlightSnippet(r.snippet) + '</div>' : '';
+        
+        return `
+            <div class="result" data-url="${escapeHtml(r.url)}">
+                <div class="result-header">
+                    <span class="result-number">${r.rank}</span>
+                    <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
+                    <span class="result-score" title="Score: ${r.score.toFixed(2)}">
+                        <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
+                        <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
+                    </span>
+                </div>
+                <div class="result-url">${escapeHtml(r.url)}</div>
+                ${snippet}
+            </div>
+        `;
+    }
+    
+    function renderFacets(facets, activeFacet, totalUnfiltered) {
+        if (!facets || !facets.category || Object.keys(facets.category).length <= 1) {
+            return '';
+        }
+        
+        let html = '<div class="facet-filters"><span class="facet-label">Filter by:</span>';
+        
+        const allClass = !activeFacet ? 'facet-btn active' : 'facet-btn';
+        html += '<a href="/?q=' + encodeURIComponent(currentQuery) + '" class="' + allClass + '">All <span class="facet-count">' + totalUnfiltered + '</span></a>';
+        
+        const sorted = Object.entries(facets.category).sort((a, b) => b[1] - a[1]);
+        for (const [category, count] of sorted) {
+            const isActive = activeFacet === category;
+            const btnClass = isActive ? 'facet-btn active' : 'facet-btn';
+            html += '<a href="/?q=' + encodeURIComponent(currentQuery) + '&category=' + encodeURIComponent(category) + '" class="' + btnClass + '">' + escapeHtml(category) + ' <span class="facet-count">' + count + '</span></a>';
+        }
+        
+        if (activeFacet) {
+            html += '<span class="facet-clear" onclick="window.docSearch.clearFacet()">Clear filter</span>';
+        }
+        
+        html += '</div>';
+        return html;
+    }
+    
+    function appendResults(results) {
+        const container = document.querySelector('.results');
+        if (!container) return;
+        
+        results.forEach(r => {
+            container.insertAdjacentHTML('beforeend', renderResult(r));
+        });
+        
+        setupCopyLinkButtons();
+    }
+    
+    function renderResults(data) {
+        selectedResultIndex = -1;
+        hideHighlightBar();
+        
+        // Find or create results container
+        let container = document.querySelector('.results');
+        const facetsContainer = document.querySelector('.facet-filters');
+        const resultsInfo = document.querySelector('.results-info');
+        const pagination = document.querySelector('.pagination');
+        const noResults = document.querySelector('.no-results');
+        const welcome = document.querySelector('.welcome');
+        const tips = document.querySelector('.tips');
+        const spellSuggestion = document.querySelector('.spell-suggestion');
+        
+        // Remove old elements
+        if (facetsContainer) facetsContainer.remove();
+        if (pagination) pagination.remove();
+        if (noResults) noResults.remove();
+        if (welcome) welcome.remove();
+        if (tips) tips.remove();
+        if (spellSuggestion) spellSuggestion.remove();
+        removeScrollSentinel();
+        
+        if (!data.results || data.results.length === 0) {
+            // No results
+            if (resultsInfo) resultsInfo.remove();
+            if (container) container.innerHTML = '';
+            
+            let html = '';
+            if (data.suggestion) {
+                html += '<div class="spell-suggestion">';
+                html += '<span class="spell-suggestion-icon">💡</span>';
+                html += '<span class="spell-suggestion-text">Did you mean:</span>';
+                html += '<span class="spell-suggestion-link" data-suggestion="' + escapeHtml(data.suggestion) + '">' + escapeHtml(data.suggestion) + '</span>?';
+                html += '</div>';
+            }
+            
+            html += '<div class="no-results">';
+            html += '<div class="no-results-icon">🔍</div>';
+            html += '<div>No results found. Try different keywords.</div>';
+            html += '</div>';
+            
+            if (container) {
+                container.insertAdjacentHTML('beforebegin', html);
+            } else {
+                mainContainer.insertAdjacentHTML('beforeend', html);
+            }
+            
+            // Setup suggestion click
+            const suggestionLink = document.querySelector('.spell-suggestion-link');
+            if (suggestionLink) {
+                suggestionLink.addEventListener('click', () => {
+                    const suggestion = suggestionLink.dataset.suggestion;
+                    input.value = suggestion;
+                    doSearch(suggestion, 1);
+                });
+            }
+            
+            return;
+        }
+        
+        // Has results
+        const startNum = (data.page - 1) * data.per_page + 1;
+        const endNum = Math.min(data.page * data.per_page, data.total);
+        
+        // Update or create results info
+        if (resultsInfo) {
+            resultsInfo.innerHTML = `
+                <span class="results-count">✓ Found ${data.total} result${data.total !== 1 ? 's' : ''}</span>
+                <span class="results-time">in ${data.elapsed_ms.toFixed(1)}ms</span>
+                <span class="results-query">showing ${startNum}-${endNum} for "${escapeHtml(data.query)}"</span>
+            `;
+        }
+        
+        // Render facets
+        const facetsHtml = renderFacets(data.facets, data.active_facet, data.total_unfiltered);
+        if (facetsHtml && resultsInfo) {
+            resultsInfo.insertAdjacentHTML('afterend', facetsHtml);
+            setupFacetButtons();
+        }
+        
+        // Render results
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'results';
+            mainContainer.appendChild(container);
+        }
+        
+        container.innerHTML = data.results.map(renderResult).join('');
+        
+        allLoadedResults = data.results;
+        currentPage = data.page;
+        totalPages = data.total_pages;
+        
+        // Setup infinite scroll for more results
+        if (currentPage < totalPages) {
+            createScrollSentinel();
+        }
+        
+        setupCopyLinkButtons();
+    }
+    
+    function showButtonLoading() {
+        searchButton.textContent = '...';
+        searchButton.disabled = true;
+    }
+    
+    function hideButtonLoading() {
+        searchButton.textContent = 'Search';
+        searchButton.disabled = false;
+    }
+    
+    function doSearch(query, page = 1, category = null) {
+        if (!query || !query.trim()) {
+            window.location.href = '/';
+            return;
+        }
+        
+        // Cancel pending request
+        if (currentRequest) {
+            currentRequest.abort();
+        }
+        
+        showButtonLoading();
+        hideHistoryDropdown();
+        
+        // Save to history on first page
+        if (page === 1) {
+            addToHistory(query);
+        }
+        
+        currentQuery = query;
+        if (category !== undefined) {
+            currentFacet = category;
+        }
+        
+        const params = buildSearchParams(query, page, currentFacet);
+        const apiUrl = '/api/search?' + params.toString();
+        
+        // Update browser URL
+        const browserParams = new URLSearchParams(params);
+        // Add theme to browser URL
+        const theme = getStoredTheme() || (document.body.classList.contains('light') ? 'light' : 'dark');
+        if (theme === 'light') browserParams.set('theme', 'light');
+        const browserUrl = '/?' + browserParams.toString();
+        window.history.pushState({ query, page, facet: currentFacet }, '', browserUrl);
+        
+        // Create abort controller
+        const controller = new AbortController();
+        currentRequest = controller;
+        
+        fetch(apiUrl, { signal: controller.signal })
+            .then(response => {
+                if (!response.ok) throw new Error('Search failed');
+                return response.json();
+            })
+            .then(data => {
+                hideButtonLoading();
+                renderResults(data);
+            })
+            .catch(err => {
+                hideButtonLoading();
+                if (err.name !== 'AbortError') {
+                    console.error('Search error:', err);
+                }
+            })
+            .finally(() => {
+                currentRequest = null;
+            });
+    }
+    
+    // Debounced search (#173)
+    function debouncedSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            currentFacet = null;
+            doSearch(input.value, 1);
+        }, DEBOUNCE_MS);
+    }
+    
+    // ========================================================================
+    // Event Bindings
+    // ========================================================================
+    function bindEvents() {
+        // Form submit
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            clearTimeout(searchTimeout);
+            currentFacet = null;
+            doSearch(input.value, 1);
+        });
+        
+        // Input events for instant search
+        input.addEventListener('input', debouncedSearch);
+        
+        // History dropdown
+        input.addEventListener('focus', () => {
+            if (input.value.length < 3) {
+                showHistoryDropdown();
+            }
+        });
+        
+        input.addEventListener('blur', () => {
+            setTimeout(hideHistoryDropdown, 200);
+        });
+        
+        // Clear button
+        const clearBtn = document.querySelector('.search-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                input.value = '';
+                input.focus();
+                hideHistoryDropdown();
+            });
+        }
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', handleKeyboardNavigation);
+        
+        // Browser back/forward
+        window.addEventListener('popstate', (e) => {
+            if (e.state && e.state.query) {
+                input.value = e.state.query;
+                currentFacet = e.state.facet || null;
+                doSearch(e.state.query, e.state.page || 1, currentFacet);
+            } else {
+                window.location.reload();
+            }
+        });
+        
+        // Option changes trigger search
+        document.querySelectorAll('select[name="sort"], select[name="limit"]').forEach(select => {
+            select.addEventListener('change', () => {
+                if (currentQuery) {
+                    doSearch(currentQuery, 1, currentFacet);
+                }
+            });
+        });
+        
+        const exactCheckbox = document.querySelector('input[name="exact"]');
+        if (exactCheckbox) {
+            exactCheckbox.addEventListener('change', () => {
+                if (currentQuery) {
+                    doSearch(currentQuery, 1, currentFacet);
+                }
+            });
+        }
+    }
+    
+    // ========================================================================
+    // Initialization
+    // ========================================================================
+    function init() {
+        initTheme();
+        setupThemeToggle();
+        setupInfiniteScroll();
+        setupFacetButtons();
+        setupCopyLinkButtons();
+        bindEvents();
+        
+        // Get initial state from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        currentQuery = urlParams.get('q') || '';
+        currentFacet = urlParams.get('category') || null;
+        
+        // Expose some functions globally for onclick handlers
+        window.docSearch = {
+            clearFacet: () => {
+                currentFacet = null;
+                doSearch(currentQuery, 1, null);
+            }
+        };
+    }
+    
+    init();
+})();
 """
 
 
@@ -708,7 +1922,6 @@ def highlight_snippet(snippet: str) -> str:
     
     result = escape(snippet)
     # Replace **term** with <mark> elements
-    import re
     result = re.sub(
         r'\*\*([^*]+)\*\*',
         r'<mark>\1</mark>',
@@ -734,7 +1947,8 @@ def render_page(
     exact_match: bool = False,
     theme: str = "dark",
     autocomplete_terms: Optional[List[str]] = None,
-    global_max_score: Optional[float] = None
+    global_max_score: Optional[float] = None,
+    no_javascript: bool = False
 ) -> str:
     """Render the full HTML page."""
     
@@ -938,10 +2152,8 @@ def render_page(
     if active_facet:
         theme_params.append(f"category={urllib.parse.quote(active_facet)}")
     base_params = "&".join(theme_params)
-    dark_url = "/?" + (base_params + "&theme=dark" if base_params else "theme=dark")
-    light_url = "/?" + (base_params + "&theme=light" if base_params else "theme=light")
-    dark_class = "theme-btn active" if theme == "dark" else "theme-btn"
-    light_class = "theme-btn active" if theme == "light" else "theme-btn"
+    # light_url used for no-JS fallback toggle (switches theme via page reload)
+    light_url = "/?" + (base_params + "&theme=light" if base_params else "theme=light") if theme == "dark" else "/?" + (base_params + "&theme=dark" if base_params else "theme=dark")
     
     search_options_html = f'''
             <div class="search-options">
@@ -952,7 +2164,7 @@ def render_page(
                         <option value="date" {sort_date_sel}>Newest</option>
                     </select>
                 </div>
-                <div class="search-option">
+                <div class="search-option limit-option">
                     <label for="limit">Results:</label>
                     <select name="limit" id="limit">
                         <option value="10" {limit_10_sel}>10</option>
@@ -967,11 +2179,17 @@ def render_page(
                     </label>
                 </div>
                 <div class="theme-toggle">
-                    <a href="{dark_url}" class="{dark_class}" title="Dark theme">{_e('moon')}</a>
-                    <a href="{light_url}" class="{light_class}" title="Light theme">{_e('sun')}</a>
+                    <span class="theme-toggle-label">{_e('moon')}</span>
+                    <a href="{light_url}" class="theme-switch {theme}" title="Toggle theme">
+                        <span class="theme-switch-knob"></span>
+                    </a>
+                    <span class="theme-toggle-label">{_e('sun')}</span>
                 </div>
             </div>
     '''
+    
+    # JavaScript block (only if not disabled)
+    js_html = '' if no_javascript else f'<script>{JAVASCRIPT}</script>'
     
     return f'''<!DOCTYPE html>
 <html lang="en">
@@ -1009,7 +2227,7 @@ def render_page(
                         accesskey="s"
                         autofocus
                     >
-                    <button type="button" class="search-clear" onclick="this.previousElementSibling.value='';this.previousElementSibling.focus();" aria-label="Clear search">✕</button>
+                    <button type="button" class="search-clear" aria-label="Clear search">✕</button>
                 </div>
                 <button type="submit" class="search-button">Search</button>
             </div>
@@ -1035,6 +2253,7 @@ def render_page(
         </div>
         <div>doc-search v{__version__}</div>
     </footer>
+{js_html}
 </body>
 </html>'''
 
@@ -1071,7 +2290,6 @@ class SearchHandler(BaseHTTPRequestHandler):
     
     def send_json(self, data: dict, status: int = 200):
         """Send JSON response."""
-        import json
         body = json.dumps(data).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -1081,6 +2299,8 @@ class SearchHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         """Handle GET requests."""
+        import inspect
+        
         parsed = urllib.parse.urlparse(self.path)
         
         # Handle /health endpoint
@@ -1091,6 +2311,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Handle /suggest endpoint for autocomplete
         if parsed.path == '/suggest':
             self.handle_suggest(parsed.query)
+            return
+        
+        # Handle /api/search endpoint for instant search (JSON)
+        if parsed.path == '/api/search':
+            self.handle_api_search(parsed.query)
             return
         
         query_params = urllib.parse.parse_qs(parsed.query)
@@ -1147,7 +2372,6 @@ class SearchHandler(BaseHTTPRequestHandler):
             # Exact match disables synonym expansion
             use_synonyms = self.enable_synonyms and not exact_match
             if use_synonyms and hasattr(self.engine, 'search'):
-                import inspect
                 sig = inspect.signature(self.engine.search)
                 if 'expand_synonyms' in sig.parameters:
                     all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
@@ -1217,7 +2441,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                 exact_match=exact_match,
                 theme=theme,
                 autocomplete_terms=autocomplete_terms,
-                global_max_score=global_max
+                global_max_score=global_max,
+                no_javascript=self.no_javascript
             )
         else:
             # Welcome page
@@ -1231,7 +2456,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 # Get general suggestions for empty search
                 autocomplete_terms = self.engine.get_autocomplete_suggestions('', max_suggestions=100)
             
-            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms)
+            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms, no_javascript=self.no_javascript)
         
         self.send_html(html_content)
     
@@ -1270,6 +2495,154 @@ class SearchHandler(BaseHTTPRequestHandler):
         try:
             suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
             self.send_json({'suggestions': suggestions})
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+    
+    def handle_api_search(self, query_string: str):
+        """Handle /api/search endpoint for instant search (JSON response).
+        
+        Returns JSON with search results for JavaScript-driven UI.
+        Query params:
+            q: search query
+            page: page number (default 1)
+            limit: results per page (10, 25, or 50)
+            category: facet filter
+            exact: 1 for exact match
+            sort: relevance or date
+        """
+        import inspect
+        
+        query_params = urllib.parse.parse_qs(query_string)
+        
+        # Get search query
+        query = query_params.get('q', [''])[0].strip()
+        
+        if not query:
+            self.send_json({
+                'query': '',
+                'results': [],
+                'total': 0,
+                'total_unfiltered': 0,
+                'page': 1,
+                'per_page': self.per_page,
+                'total_pages': 1,
+                'elapsed_ms': 0,
+                'suggestion': None,
+                'facets': None,
+                'active_facet': None,
+                'global_max_score': 0
+            })
+            return
+        
+        # Get page number (default 1, minimum 1)
+        try:
+            page = max(1, int(query_params.get('page', ['1'])[0]))
+        except ValueError:
+            page = 1
+        
+        # Get facet filter (category)
+        category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
+        
+        # Get results limit (per page)
+        try:
+            per_page = int(query_params.get('limit', [str(self.per_page)])[0])
+            if per_page not in (10, 25, 50):
+                per_page = self.per_page
+        except ValueError:
+            per_page = self.per_page
+        
+        # Get exact match toggle
+        exact_match = query_params.get('exact', [''])[0] == '1'
+        
+        max_results = self.max_results
+        
+        try:
+            # Perform search
+            search_start = time.perf_counter()
+            
+            # For exact match, wrap query in quotes
+            search_query = query
+            if exact_match and not (query.startswith('"') and query.endswith('"')):
+                search_query = f'"{query}"'
+            
+            # Pass expand_synonyms if enabled
+            use_synonyms = self.enable_synonyms and not exact_match
+            if use_synonyms and hasattr(self.engine, 'search'):
+                sig = inspect.signature(self.engine.search)
+                if 'expand_synonyms' in sig.parameters:
+                    all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
+                else:
+                    all_results = self.engine.search(search_query, top_k=max_results)
+            else:
+                all_results = self.engine.search(search_query, top_k=max_results)
+            elapsed_ms = (time.perf_counter() - search_start) * 1000
+            
+            # Get facet counts before filtering
+            facets = None
+            total_unfiltered = len(all_results)
+            if self.enable_facets and hasattr(self.engine, 'get_facet_counts'):
+                facets = self.engine.get_facet_counts(all_results)
+            
+            # Apply facet filter if specified
+            filtered_results = all_results
+            if category_filter and facets and 'category' in facets:
+                filtered_results = [
+                    r for r in all_results 
+                    if r.get('facets', {}).get('category') == category_filter
+                ]
+            
+            total_results = len(filtered_results)
+            
+            # Slice for current page
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            page_results = filtered_results[start_idx:end_idx]
+            
+            # Check for spelling suggestions when results are low
+            suggestion = None
+            if total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+                suggestion = self.engine.get_spelling_suggestion(query)
+                if suggestion and suggestion.lower() == query.lower():
+                    suggestion = None
+            
+            # Calculate max score for normalization
+            global_max_score = filtered_results[0].get('score', 1) if filtered_results else 1
+            
+            # Format results for JSON
+            json_results = []
+            start_num = (page - 1) * per_page + 1
+            for i, r in enumerate(page_results, start_num):
+                score = r.get('score', 0)
+                score_pct = int((score / global_max_score) * 100) if global_max_score > 0 else 0
+                
+                json_results.append({
+                    'rank': i,
+                    'title': r.get('title', 'Untitled') or 'Untitled',
+                    'url': r['url'],
+                    'snippet': r.get('snippet', '') or r.get('description', ''),
+                    'score': round(score, 4),
+                    'score_pct': score_pct,
+                    'facets': r.get('facets', {})
+                })
+            
+            # Build response
+            response = {
+                'query': query,
+                'results': json_results,
+                'total': total_results,
+                'total_unfiltered': total_unfiltered,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (total_results + per_page - 1) // per_page if total_results > 0 else 1,
+                'elapsed_ms': round(elapsed_ms, 2),
+                'suggestion': suggestion,
+                'facets': facets,
+                'active_facet': category_filter if category_filter else None,
+                'global_max_score': round(global_max_score, 4)
+            }
+            
+            self.send_json(response)
+            
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     
