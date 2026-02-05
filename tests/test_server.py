@@ -2,6 +2,7 @@
 Tests for the web server module.
 """
 
+import re
 import socket
 import tempfile
 import threading
@@ -15,6 +16,15 @@ from unittest.mock import MagicMock, Mock
 from doc_search.server import (
     SearchHandler, run_server, render_page, escape, highlight_snippet
 )
+
+
+def strip_script_content(html: str) -> str:
+    """Remove content between <script> tags for testing visible content only.
+    
+    This is needed because the JavaScript code may contain template strings
+    that match content we're testing for (e.g., "Did you mean:", facet HTML).
+    """
+    return re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
 
 
 # ============================================================================
@@ -851,9 +861,11 @@ class TestRenderPageSpellSuggestion(unittest.TestCase):
             suggestion=None
         )
         
-        self.assertNotIn('Did you mean', html)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_html = strip_script_content(html)
+        self.assertNotIn('Did you mean', visible_html)
         # Check for the div element, not just the CSS class name
-        self.assertNotIn('<div class="spell-suggestion">', html)
+        self.assertNotIn('<div class="spell-suggestion">', visible_html)
     
     def test_suggestion_escapes_special_chars(self):
         """Suggestion should be HTML escaped."""
@@ -933,10 +945,12 @@ class TestServerSpellCheckNoSuggestion(ServerTestCase):
         status, headers, body = self.make_request('/?q=xyzabc123')
         
         self.assertEqual(status, 200)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
         # Should still show no results message
-        self.assertIn('No results found', body)
+        self.assertIn('No results found', visible_body)
 
 
 class TestServerSpellCheckWithResults(ServerTestCase):
@@ -967,8 +981,10 @@ class TestServerSpellCheckWithResults(ServerTestCase):
         # Should show results
         self.assertIn('Test Page', body)
         # Should NOT show spell suggestion (results were found)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
 
 
 class TestServerWithBasicEngine(ServerTestCase):
@@ -990,11 +1006,13 @@ class TestServerWithBasicEngine(ServerTestCase):
         status, headers, body = self.make_request('/?q=test')
         
         self.assertEqual(status, 200)
+        # Strip script content since JS templates contain "Did you mean"
+        visible_body = strip_script_content(body)
         # Should show no results without crashing
-        self.assertIn('No results found', body)
+        self.assertIn('No results found', visible_body)
         # No spell suggestion shown (engine doesn't have the method)
-        self.assertNotIn('Did you mean', body)
-        self.assertNotIn('<div class="spell-suggestion">', body)
+        self.assertNotIn('Did you mean', visible_body)
+        self.assertNotIn('<div class="spell-suggestion">', visible_body)
 
 
 # ============================================================================
@@ -1251,8 +1269,10 @@ class TestRenderPageFacets(unittest.TestCase):
             total_results=10
         )
         
+        # Strip script content since JS templates contain facet rendering code
+        visible_html = strip_script_content(html)
         # Shouldn't show facet bar div with only one category
-        self.assertNotIn('<div class="facet-filters">', html)
+        self.assertNotIn('<div class="facet-filters">', visible_html)
     
     def test_no_facets_when_none(self):
         """Should not show facets when None."""
@@ -1263,7 +1283,9 @@ class TestRenderPageFacets(unittest.TestCase):
             total_results=1
         )
         
-        self.assertNotIn('<div class="facet-filters">', html)
+        # Strip script content since JS templates contain facet rendering code
+        visible_html = strip_script_content(html)
+        self.assertNotIn('<div class="facet-filters">', visible_html)
     
     def test_pagination_preserves_facet(self):
         """Pagination links should preserve active facet."""
@@ -1350,7 +1372,9 @@ class TestServerFacetsDisabled(ServerTestCase):
         status, headers, body = self.make_request('/?q=test')
         
         self.assertEqual(status, 200)
-        self.assertNotIn('<div class="facet-filters">', body)
+        # Strip script content since JS templates contain facet rendering code
+        visible_body = strip_script_content(body)
+        self.assertNotIn('<div class="facet-filters">', visible_body)
     
     def test_facet_param_ignored_when_disabled(self):
         """Facet parameter should be ignored when disabled."""
@@ -1384,7 +1408,9 @@ class TestServerFacetsNoSupport(ServerTestCase):
         
         self.assertEqual(status, 200)
         self.assertIn('Test 1', body)
-        self.assertNotIn('<div class="facet-filters">', body)
+        # Strip script content since JS templates contain facet rendering code
+        visible_body = strip_script_content(body)
+        self.assertNotIn('<div class="facet-filters">', visible_body)
 
 
 # ============================================================================
@@ -1477,6 +1503,104 @@ class TestServerSynonymsBasicEngine(ServerTestCase):
     
     def test_works_without_expand_synonyms_support(self):
         """Server should work when engine search() lacks expand_synonyms."""
+        status, headers, body = self.make_request('/?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('Test', body)
+
+
+# ============================================================================
+# Issue #172-180: JavaScript UI API Tests
+# ============================================================================
+
+class TestApiSearchEndpoint(ServerTestCase):
+    """Tests for /api/search JSON endpoint (instant search)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with mock engine."""
+        cls.engine = MockSearchEngine(
+            results=[
+                {'url': 'http://test1', 'title': 'Test One', 'score': 1.0, 'snippet': 'First result'},
+                {'url': 'http://test2', 'title': 'Test Two', 'score': 0.9, 'snippet': 'Second result'},
+            ]
+        )
+        cls.start_server(engine=cls.engine)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_api_search_returns_json(self):
+        """API endpoint should return JSON content type."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test')
+        
+        self.assertEqual(status, 200)
+        self.assertIn('application/json', headers.get('Content-Type', ''))
+        
+        # Should be valid JSON
+        data = json.loads(body)
+        self.assertIn('results', data)
+        self.assertIn('total', data)
+    
+    def test_api_search_returns_results(self):
+        """API endpoint should return search results."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test')
+        
+        data = json.loads(body)
+        self.assertEqual(len(data['results']), 2)
+        self.assertEqual(data['results'][0]['title'], 'Test One')
+        self.assertEqual(data['results'][1]['title'], 'Test Two')
+    
+    def test_api_search_empty_query(self):
+        """API endpoint should handle empty query."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=')
+        
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['results'], [])
+        self.assertEqual(data['total'], 0)
+    
+    def test_api_search_pagination(self):
+        """API endpoint should support pagination."""
+        import json
+        status, headers, body = self.make_request('/api/search?q=test&page=1&limit=10')
+        
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('page', data)
+        self.assertIn('total_pages', data)
+
+
+class TestNoJavaScriptFlag(ServerTestCase):
+    """Tests for --no-javascript flag (graceful degradation)."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Start test server with no_javascript=True."""
+        cls.engine = MockSearchEngine(
+            results=[{'url': 'http://test', 'title': 'Test', 'score': 1.0}]
+        )
+        cls.start_server(engine=cls.engine, no_javascript=True)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Stop test server."""
+        cls.stop_server()
+    
+    def test_no_script_tags_when_disabled(self):
+        """Should not include <script> tags when --no-javascript is set."""
+        status, headers, body = self.make_request('/')
+        
+        self.assertEqual(status, 200)
+        self.assertNotIn('<script>', body)
+    
+    def test_form_still_works(self):
+        """Search form should still work without JavaScript."""
         status, headers, body = self.make_request('/?q=test')
         
         self.assertEqual(status, 200)
