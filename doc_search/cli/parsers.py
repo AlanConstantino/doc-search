@@ -65,7 +65,7 @@ def _add_crawl_parser(subparsers):
     crawl_parser = subparsers.add_parser('crawl', help='Crawl a documentation site')
     crawl_parser.add_argument('url', help='Base URL to crawl')
     crawl_parser.add_argument('--user', '-u', help='Username for HTTP Basic Auth')
-    crawl_parser.add_argument('--password', '-p', help='Password (will prompt if not provided)')
+    crawl_parser.add_argument('--password', '-p', help="Password (will prompt securely if not provided). Use single quotes for special chars: --password 'my$pass'")
     crawl_parser.add_argument('--token', help='Pre-encoded Base64 auth token (alternative to user/password)')
     crawl_parser.add_argument('--delay', '-d', type=float, default=1.0,
                              help='Delay between requests in seconds (default: 1.0)')
