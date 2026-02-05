@@ -2666,24 +2666,50 @@ class SearchHandler(BaseHTTPRequestHandler):
                 all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
             
-            # Get facet counts before filtering
+            # Get facet counts with cross-filtering
+            # When type is filtered, category facets only count items of that type
+            # When category is filtered, type facets only count items in that category
             facets = None
             total_unfiltered = len(all_results)
-            if self.enable_facets and hasattr(self.engine, 'get_facet_counts'):
-                facets = self.engine.get_facet_counts(all_results)
             
-            # Apply facet filters if specified
+            # Apply filters and compute cross-filtered facet counts
             filtered_results = all_results
-            if category_filter and facets and 'category' in facets:
-                filtered_results = [
-                    r for r in filtered_results 
-                    if r.get('facets', {}).get('category') == category_filter
-                ]
+            
+            # Filter by type first if specified
             if type_filter:
                 filtered_results = [
                     r for r in filtered_results 
                     if r.get('doc_type', 'html') == type_filter
                 ]
+            
+            # Filter by category if specified
+            if category_filter:
+                filtered_results = [
+                    r for r in filtered_results 
+                    if r.get('facets', {}).get('category') == category_filter
+                ]
+            
+            # Compute facets from the filtered results (cross-filtered counts)
+            if self.enable_facets:
+                # Type facets: count from category-filtered results (or all if no category filter)
+                type_base = [r for r in all_results if r.get('facets', {}).get('category') == category_filter] if category_filter else all_results
+                type_counts = {}
+                for r in type_base:
+                    doc_type = r.get('doc_type', 'html')
+                    type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
+                
+                # Category facets: count from type-filtered results (or all if no type filter)
+                cat_base = [r for r in all_results if r.get('doc_type', 'html') == type_filter] if type_filter else all_results
+                cat_counts = {}
+                for r in cat_base:
+                    category = r.get('facets', {}).get('category')
+                    if category:
+                        cat_counts[category] = cat_counts.get(category, 0) + 1
+                
+                facets = {
+                    'type': type_counts if len(type_counts) > 1 else {},
+                    'category': cat_counts if len(cat_counts) > 1 else {}
+                }
             
             total_results = len(filtered_results)
             
