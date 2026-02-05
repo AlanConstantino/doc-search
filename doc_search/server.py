@@ -1564,16 +1564,6 @@ JAVASCRIPT = """
         });
     }
     
-    // Clear all facets
-    window.docSearch = window.docSearch || {};
-    window.docSearch.clearFacets = function() {
-        currentFacet = null;
-        currentType = null;
-        currentPage = 1;
-        allLoadedResults = [];
-        doSearch(currentQuery, 1);
-    };
-    
     // ========================================================================
     // Search API (#172, #173)
     // ========================================================================
@@ -1973,7 +1963,17 @@ JAVASCRIPT = """
         window.docSearch = {
             clearFacet: () => {
                 currentFacet = null;
-                doSearch(currentQuery, 1, null);
+                currentType = null;
+                currentPage = 1;
+                allLoadedResults = [];
+                doSearch(currentQuery, 1);
+            },
+            clearFacets: () => {
+                currentFacet = null;
+                currentType = null;
+                currentPage = 1;
+                allLoadedResults = [];
+                doSearch(currentQuery, 1);
             }
         };
     }
