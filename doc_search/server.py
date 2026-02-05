@@ -329,34 +329,51 @@ a:hover {
     cursor: pointer;
 }
 
-/* Theme toggle */
+/* Theme toggle - iOS style switch */
 .theme-toggle {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.5rem;
 }
 
-.theme-btn {
-    padding: 0.35rem 0.5rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    text-decoration: none;
+.theme-toggle-label {
     font-size: 1rem;
-    line-height: 1;
-    opacity: 0.5;
-    transition: opacity 0.15s;
+    opacity: 0.6;
+}
+
+.theme-switch {
+    position: relative;
+    width: 50px;
+    height: 26px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 13px;
     cursor: pointer;
+    transition: background 0.3s, border-color 0.3s;
 }
 
-.theme-btn:hover {
-    opacity: 0.8;
-    text-decoration: none;
+.theme-switch:hover {
+    border-color: var(--accent);
 }
 
-.theme-btn.active {
-    opacity: 1;
+.theme-switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.theme-switch.light .theme-switch-knob {
+    transform: translateX(24px);
+}
+
+.theme-switch.light {
+    background: var(--accent);
     border-color: var(--accent);
 }
 
@@ -993,18 +1010,19 @@ JAVASCRIPT = """
     }
     
     function setupThemeToggle() {
-        // Convert theme links to buttons for JS mode
-        document.querySelectorAll('.theme-btn').forEach(btn => {
-            const href = btn.getAttribute('href');
-            const theme = href && href.includes('theme=light') ? 'light' : 'dark';
-            btn.setAttribute('data-theme', theme);
-            btn.removeAttribute('href');
-            
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                setStoredTheme(theme);
-                applyTheme(theme);
-            });
+        const toggle = document.querySelector('.theme-switch');
+        if (!toggle) return;
+        
+        // Remove href for JS mode
+        toggle.removeAttribute('href');
+        
+        toggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            const isLight = toggle.classList.contains('light');
+            const newTheme = isLight ? 'dark' : 'light';
+            setStoredTheme(newTheme);
+            applyTheme(newTheme);
+            toggle.classList.toggle('light', newTheme === 'light');
         });
     }
     
@@ -1343,7 +1361,7 @@ JAVASCRIPT = """
                 if (url) {
                     const btn = document.createElement('button');
                     btn.className = 'copy-link-btn';
-                    btn.innerHTML = '📋 Copy link';
+                    btn.innerHTML = 'Copy link';
                     btn.addEventListener('click', () => copyLink(btn, url));
                     
                     // Add after snippet or at end of result
@@ -1363,7 +1381,7 @@ JAVASCRIPT = """
             btn.innerHTML = '✓ Copied!';
             btn.classList.add('copied');
             setTimeout(() => {
-                btn.innerHTML = '📋 Copy link';
+                btn.innerHTML = 'Copy link';
                 btn.classList.remove('copied');
             }, 2000);
         }).catch(() => {
@@ -1377,7 +1395,7 @@ JAVASCRIPT = """
             btn.innerHTML = '✓ Copied!';
             btn.classList.add('copied');
             setTimeout(() => {
-                btn.innerHTML = '📋 Copy link';
+                btn.innerHTML = 'Copy link';
                 btn.classList.remove('copied');
             }, 2000);
         });
@@ -2133,10 +2151,8 @@ def render_page(
     if active_facet:
         theme_params.append(f"category={urllib.parse.quote(active_facet)}")
     base_params = "&".join(theme_params)
-    dark_url = "/?" + (base_params + "&theme=dark" if base_params else "theme=dark")
-    light_url = "/?" + (base_params + "&theme=light" if base_params else "theme=light")
-    dark_class = "theme-btn active" if theme == "dark" else "theme-btn"
-    light_class = "theme-btn active" if theme == "light" else "theme-btn"
+    # light_url used for no-JS fallback toggle (switches theme via page reload)
+    light_url = "/?" + (base_params + "&theme=light" if base_params else "theme=light") if theme == "dark" else "/?" + (base_params + "&theme=dark" if base_params else "theme=dark")
     
     search_options_html = f'''
             <div class="search-options">
@@ -2162,8 +2178,11 @@ def render_page(
                     </label>
                 </div>
                 <div class="theme-toggle">
-                    <a href="{dark_url}" class="{dark_class}" title="Dark theme">{_e('moon')}</a>
-                    <a href="{light_url}" class="{light_class}" title="Light theme">{_e('sun')}</a>
+                    <span class="theme-toggle-label">{_e('moon')}</span>
+                    <a href="{light_url}" class="theme-switch {theme}" title="Toggle theme">
+                        <span class="theme-switch-knob"></span>
+                    </a>
+                    <span class="theme-toggle-label">{_e('sun')}</span>
                 </div>
             </div>
     '''
