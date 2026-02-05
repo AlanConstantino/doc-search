@@ -651,7 +651,8 @@ class EnhancedSearchEngine(SearchEngine):
                     doc_id=doc_id,
                     url=doc['url'],
                     title=doc.get('title', ''),
-                    headings=headings
+                    headings=headings,
+                    doc_type=doc.get('doc_type', 'html')
                 )
         
         if self._synonyms_enabled:

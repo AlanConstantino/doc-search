@@ -113,19 +113,22 @@ class FacetIndex:
         self.doc_facets: Dict[int, Dict[str, str]] = {}
     
     def add_document(self, doc_id: int, url: str, title: str, 
-                     headings: List[Tuple[int, str]] = None):
+                     headings: List[Tuple[int, str]] = None,
+                     doc_type: str = 'html'):
         """
         Add a document and extract its facets.
         
         Facets are extracted from:
         - URL path segments (domain-agnostic)
         - Document title
+        - Document type (html, pdf, etc.)
         
         Args:
             doc_id: Document identifier
             url: Document URL
             title: Document title
             headings: List of (level, text) tuples
+            doc_type: Document type ('html', 'pdf', etc.)
         """
         headings = headings or []
         
@@ -136,6 +139,7 @@ class FacetIndex:
         # Store facets - use path segments as primary categorization
         facet_dict = {
             'section': section,
+            'type': doc_type,  # File type facet
         }
         
         # Use first path segment as category, second as subcategory
@@ -148,6 +152,7 @@ class FacetIndex:
         
         # Update facet index
         self.facets['section'][section].add(doc_id)
+        self.facets['type'][doc_type].add(doc_id)  # File type facet
         
         if len(path_facets) >= 1:
             self.facets['category'][path_facets[0]].add(doc_id)

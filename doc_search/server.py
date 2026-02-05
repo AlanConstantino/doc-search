@@ -931,6 +931,11 @@ mark {
 .facet-clear:hover {
     color: var(--accent);
 }
+
+.facet-separator {
+    color: var(--border);
+    margin: 0 0.5rem;
+}
 """
 
 
@@ -959,6 +964,7 @@ JAVASCRIPT = """
     let allLoadedResults = [];
     let currentQuery = '';
     let currentFacet = null;
+    let currentType = null;
     
     // Cmd+F highlighting state
     let highlightMatches = [];
@@ -1533,24 +1539,40 @@ JAVASCRIPT = """
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 
-                const href = btn.getAttribute('href');
-                if (!href) return;
+                // Check if it's a type or category filter
+                const typeValue = btn.dataset.type;
+                const categoryValue = btn.dataset.category;
                 
-                const url = new URL(href, window.location.origin);
-                const category = url.searchParams.get('category') || null;
+                if (typeValue !== undefined) {
+                    // Type filter clicked
+                    currentType = typeValue || null;
+                    // Update active state for type buttons only
+                    document.querySelectorAll('.facet-btn[data-type]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                } else if (categoryValue !== undefined) {
+                    // Category filter clicked
+                    currentFacet = categoryValue || null;
+                    // Update active state for category buttons only
+                    document.querySelectorAll('.facet-btn[data-category]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                }
                 
-                currentFacet = category;
                 currentPage = 1;
                 allLoadedResults = [];
-                
-                doSearch(currentQuery, 1, category);
-                
-                // Update active state
-                document.querySelectorAll('.facet-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
+                doSearch(currentQuery, 1);
             });
         });
     }
+    
+    // Clear all facets
+    window.docSearch = window.docSearch || {};
+    window.docSearch.clearFacets = function() {
+        currentFacet = null;
+        currentType = null;
+        currentPage = 1;
+        allLoadedResults = [];
+        doSearch(currentQuery, 1);
+    };
     
     // ========================================================================
     // Search API (#172, #173)
@@ -1584,7 +1606,7 @@ JAVASCRIPT = """
         };
     }
     
-    function buildSearchParams(query, page = 1, category = null) {
+    function buildSearchParams(query, page = 1) {
         const opts = getSearchOptions();
         const params = new URLSearchParams();
         params.set('q', query);
@@ -1592,7 +1614,8 @@ JAVASCRIPT = """
         if (opts.sort !== 'relevance') params.set('sort', opts.sort);
         if (opts.limit !== '10') params.set('limit', opts.limit);
         if (opts.exact) params.set('exact', '1');
-        if (category) params.set('category', category);
+        if (currentFacet) params.set('category', currentFacet);
+        if (currentType) params.set('type', currentType);
         return params;
     }
     
@@ -1619,25 +1642,50 @@ JAVASCRIPT = """
         `;
     }
     
-    function renderFacets(facets, activeFacet, totalUnfiltered) {
-        if (!facets || !facets.category || Object.keys(facets.category).length <= 1) {
+    function renderFacets(facets, activeFacet, activeType, totalUnfiltered) {
+        const hasCategory = facets && facets.category && Object.keys(facets.category).length > 1;
+        const hasType = facets && facets.type && Object.keys(facets.type).length > 1;
+        
+        if (!hasCategory && !hasType) {
             return '';
         }
         
-        let html = '<div class="facet-filters"><span class="facet-label">Filter by:</span>';
+        let html = '<div class="facet-filters">';
         
-        const allClass = !activeFacet ? 'facet-btn active' : 'facet-btn';
-        html += '<a href="/?q=' + encodeURIComponent(currentQuery) + '" class="' + allClass + '">All <span class="facet-count">' + totalUnfiltered + '</span></a>';
-        
-        const sorted = Object.entries(facets.category).sort((a, b) => b[1] - a[1]);
-        for (const [category, count] of sorted) {
-            const isActive = activeFacet === category;
-            const btnClass = isActive ? 'facet-btn active' : 'facet-btn';
-            html += '<a href="/?q=' + encodeURIComponent(currentQuery) + '&category=' + encodeURIComponent(category) + '" class="' + btnClass + '">' + escapeHtml(category) + ' <span class="facet-count">' + count + '</span></a>';
+        // File type filter (PDF/HTML)
+        if (hasType) {
+            html += '<span class="facet-label">Type:</span>';
+            const allTypeClass = !activeType ? 'facet-btn active' : 'facet-btn';
+            html += '<button class="' + allTypeClass + '" data-type="">All <span class="facet-count">' + totalUnfiltered + '</span></button>';
+            
+            const typeSorted = Object.entries(facets.type).sort((a, b) => b[1] - a[1]);
+            for (const [type, count] of typeSorted) {
+                const isActive = activeType === type;
+                const btnClass = isActive ? 'facet-btn active' : 'facet-btn';
+                html += '<button class="' + btnClass + '" data-type="' + escapeHtml(type) + '">' + escapeHtml(type.toUpperCase()) + ' <span class="facet-count">' + count + '</span></button>';
+            }
+            
+            if (hasCategory) {
+                html += '<span class="facet-separator">|</span>';
+            }
         }
         
-        if (activeFacet) {
-            html += '<span class="facet-clear" onclick="window.docSearch.clearFacet()">Clear filter</span>';
+        // Category filter (URL path based)
+        if (hasCategory) {
+            html += '<span class="facet-label">Category:</span>';
+            const allClass = !activeFacet ? 'facet-btn active' : 'facet-btn';
+            html += '<button class="' + allClass + '" data-category="">All</button>';
+            
+            const sorted = Object.entries(facets.category).sort((a, b) => b[1] - a[1]);
+            for (const [category, count] of sorted) {
+                const isActive = activeFacet === category;
+                const btnClass = isActive ? 'facet-btn active' : 'facet-btn';
+                html += '<button class="' + btnClass + '" data-category="' + escapeHtml(category) + '">' + escapeHtml(category) + ' <span class="facet-count">' + count + '</span></button>';
+            }
+        }
+        
+        if (activeFacet || activeType) {
+            html += '<span class="facet-clear" onclick="window.docSearch.clearFacets()">Clear filters</span>';
         }
         
         html += '</div>';
@@ -1730,7 +1778,7 @@ JAVASCRIPT = """
         }
         
         // Render facets
-        const facetsHtml = renderFacets(data.facets, data.active_facet, data.total_unfiltered);
+        const facetsHtml = renderFacets(data.facets, data.active_facet, data.active_type, data.total_unfiltered);
         if (facetsHtml && resultsInfo) {
             resultsInfo.insertAdjacentHTML('afterend', facetsHtml);
             setupFacetButtons();
@@ -1767,7 +1815,7 @@ JAVASCRIPT = """
         searchButton.disabled = false;
     }
     
-    function doSearch(query, page = 1, category = null) {
+    function doSearch(query, page = 1) {
         if (!query || !query.trim()) {
             window.location.href = '/';
             return;
@@ -1787,11 +1835,8 @@ JAVASCRIPT = """
         }
         
         currentQuery = query;
-        if (category !== undefined) {
-            currentFacet = category;
-        }
         
-        const params = buildSearchParams(query, page, currentFacet);
+        const params = buildSearchParams(query, page);
         const apiUrl = '/api/search?' + params.toString();
         
         // Update browser URL
@@ -1800,7 +1845,7 @@ JAVASCRIPT = """
         const theme = getStoredTheme() || (document.body.classList.contains('light') ? 'light' : 'dark');
         if (theme === 'light') browserParams.set('theme', 'light');
         const browserUrl = '/?' + browserParams.toString();
-        window.history.pushState({ query, page, facet: currentFacet }, '', browserUrl);
+        window.history.pushState({ query, page, facet: currentFacet, type: currentType }, '', browserUrl);
         
         // Create abort controller
         const controller = new AbortController();
@@ -2567,8 +2612,9 @@ class SearchHandler(BaseHTTPRequestHandler):
         except ValueError:
             page = 1
         
-        # Get facet filter (category)
+        # Get facet filters (category and type)
         category_filter = query_params.get('category', [''])[0].strip() if self.enable_facets else ''
+        type_filter = query_params.get('type', [''])[0].strip() if self.enable_facets else ''
         
         # Get results limit (per page)
         try:
@@ -2610,12 +2656,17 @@ class SearchHandler(BaseHTTPRequestHandler):
             if self.enable_facets and hasattr(self.engine, 'get_facet_counts'):
                 facets = self.engine.get_facet_counts(all_results)
             
-            # Apply facet filter if specified
+            # Apply facet filters if specified
             filtered_results = all_results
             if category_filter and facets and 'category' in facets:
                 filtered_results = [
-                    r for r in all_results 
+                    r for r in filtered_results 
                     if r.get('facets', {}).get('category') == category_filter
+                ]
+            if type_filter:
+                filtered_results = [
+                    r for r in filtered_results 
+                    if r.get('doc_type', 'html') == type_filter
                 ]
             
             total_results = len(filtered_results)
@@ -2666,6 +2717,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 'suggestion': suggestion,
                 'facets': facets,
                 'active_facet': category_filter if category_filter else None,
+                'active_type': type_filter if type_filter else None,
                 'global_max_score': round(global_max_score, 4)
             }
             
