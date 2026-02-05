@@ -431,6 +431,7 @@ def cmd_interactive(args):
     print()
     print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
     print(style_info("  Tip: Use \"quotes\" for phrase search"))
+    print(style_info("  Filters: :type pdf|html|clear  :cat <category>|clear  :filters"))
     print()
     
     prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
@@ -446,6 +447,11 @@ def cmd_interactive(args):
     current_page = 0
     elapsed_ms = 0
     
+    # Filter state
+    type_filter = None  # 'pdf', 'html', etc.
+    category_filter = None  # URL path category
+    last_query = None  # For re-running with new filters
+    
     def show_page(page_num):
         """Display a single page of results."""
         start_idx = page_num * per_page
@@ -455,6 +461,16 @@ def cmd_interactive(args):
         total_pages = (len(current_results) + per_page - 1) // per_page
         
         print()
+        
+        # Show active filters on first page
+        if page_num == 0 and (type_filter or category_filter):
+            filter_parts = []
+            if type_filter:
+                filter_parts.append(f"type={type_filter}")
+            if category_filter:
+                filter_parts.append(f"category={category_filter}")
+            print(style_info(f'{_e("filter")} Filters: {", ".join(filter_parts)}'))
+            print()
         
         # Show suggestion only on first page
         if page_num == 0 and current_suggestion:
@@ -518,15 +534,61 @@ def cmd_interactive(args):
             print(style_info("\nGoodbye! 👋"))
             break
         
+        # Handle filter commands
+        if user_input.startswith(':type '):
+            filter_val = user_input[6:].strip().lower()
+            if filter_val == 'clear':
+                type_filter = None
+                print(style_info("  Type filter cleared"))
+            elif filter_val in ('pdf', 'html'):
+                type_filter = filter_val
+                print(style_success(f"  Type filter set to: {type_filter}"))
+            else:
+                print(style_error(f"  Unknown type: {filter_val} (use pdf, html, or clear)"))
+            # Re-run last query with new filter if we have one
+            if last_query:
+                user_input = last_query
+            else:
+                continue
+        elif user_input.startswith(':cat '):
+            filter_val = user_input[5:].strip()
+            if filter_val.lower() == 'clear':
+                category_filter = None
+                print(style_info("  Category filter cleared"))
+            else:
+                category_filter = filter_val
+                print(style_success(f"  Category filter set to: {category_filter}"))
+            # Re-run last query with new filter if we have one
+            if last_query:
+                user_input = last_query
+            else:
+                continue
+        elif user_input == ':filters':
+            print(style_info(f"  Type filter: {type_filter or 'none'}"))
+            print(style_info(f"  Category filter: {category_filter or 'none'}"))
+            continue
+        elif user_input.startswith(':'):
+            print(style_error(f"  Unknown command: {user_input}"))
+            print(style_info("  Commands: :type pdf|html|clear, :cat <category>|clear, :filters"))
+            continue
+        
         # New search query
         query = user_input
+        last_query = query
         
         # Time the search (use search_enhanced for dict response with metadata)
         start_time = time.perf_counter()
         response = engine.search_enhanced(query, top_k=max_results)
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         
-        current_results = response['results']
+        # Apply filters
+        results = response['results']
+        if type_filter:
+            results = [r for r in results if r.get('doc_type', 'html') == type_filter]
+        if category_filter:
+            results = [r for r in results if r.get('facets', {}).get('category') == category_filter]
+        
+        current_results = results
         current_suggestion = response.get('suggestion')
         current_page = 0
         
