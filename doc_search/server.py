@@ -732,6 +732,202 @@ def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: st
     let currentRequest = null;
     let searchTimeout = null;
     const DEBOUNCE_MS = 200;
+    const HISTORY_KEY = 'doc-search-history';
+    const MAX_HISTORY = 10;
+    let historyDropdown = null;
+    
+    // Search history functions
+    function getSearchHistory() {
+        try {
+            const stored = localStorage.getItem(HISTORY_KEY);
+            return stored ? JSON.parse(stored) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    
+    function saveSearchHistory(history) {
+        try {
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        } catch (e) {
+            // localStorage not available
+        }
+    }
+    
+    function addToHistory(query) {
+        if (!query || !query.trim()) return;
+        query = query.trim();
+        
+        let history = getSearchHistory();
+        // Remove if already exists (will re-add at top)
+        history = history.filter(q => q.toLowerCase() !== query.toLowerCase());
+        // Add to beginning
+        history.unshift(query);
+        // Limit size
+        if (history.length > MAX_HISTORY) {
+            history = history.slice(0, MAX_HISTORY);
+        }
+        saveSearchHistory(history);
+    }
+    
+    function clearHistory() {
+        saveSearchHistory([]);
+        hideHistoryDropdown();
+    }
+    
+    function createHistoryDropdown() {
+        if (historyDropdown) return historyDropdown;
+        
+        const dropdown = document.createElement('div');
+        dropdown.className = 'search-history-dropdown';
+        dropdown.style.cssText = `
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+        `;
+        
+        const wrapper = document.querySelector('.search-input-wrapper');
+        if (wrapper) {
+            wrapper.style.position = 'relative';
+            wrapper.appendChild(dropdown);
+        }
+        
+        historyDropdown = dropdown;
+        return dropdown;
+    }
+    
+    function showHistoryDropdown() {
+        const history = getSearchHistory();
+        if (history.length === 0) return;
+        
+        const dropdown = createHistoryDropdown();
+        
+        let html = '<div style="padding: 0.5rem 0;">';
+        html += '<div style="padding: 0.25rem 1rem; font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">';
+        html += '<span>Recent searches</span>';
+        html += '<button type="button" class="history-clear-btn" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.75rem; padding: 0.25rem;">Clear</button>';
+        html += '</div>';
+        
+        history.forEach((q, i) => {
+            html += `<div class="history-item" data-query="${escapeHtml(q)}" style="padding: 0.5rem 1rem; cursor: pointer; transition: background 0.1s;" 
+                onmouseover="this.style.background='var(--bg-tertiary)'" 
+                onmouseout="this.style.background='transparent'">${escapeHtml(q)}</div>`;
+        });
+        
+        html += '</div>';
+        dropdown.innerHTML = html;
+        dropdown.style.display = 'block';
+        
+        // Bind click handlers
+        dropdown.querySelectorAll('.history-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const query = item.dataset.query;
+                const newInput = document.querySelector('.search-input');
+                if (newInput) {
+                    newInput.value = query;
+                    hideHistoryDropdown();
+                    doSearch(query, 1);
+                }
+            });
+        });
+        
+        const clearBtn = dropdown.querySelector('.history-clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                clearHistory();
+            });
+        }
+    }
+    
+    function hideHistoryDropdown() {
+        if (historyDropdown) {
+            historyDropdown.style.display = 'none';
+        }
+    }
+    
+    // Keyboard navigation state
+    let selectedResultIndex = -1;
+    
+    function getResultElements() {
+        return document.querySelectorAll('.result');
+    }
+    
+    function highlightResult(index) {
+        const results = getResultElements();
+        // Remove previous highlight
+        results.forEach(r => r.style.outline = '');
+        
+        if (index >= 0 && index < results.length) {
+            selectedResultIndex = index;
+            const result = results[index];
+            result.style.outline = '2px solid var(--accent)';
+            result.style.outlineOffset = '-2px';
+            // Scroll into view if needed
+            result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            selectedResultIndex = -1;
+        }
+    }
+    
+    function openSelectedResult(newTab = false) {
+        const results = getResultElements();
+        if (selectedResultIndex >= 0 && selectedResultIndex < results.length) {
+            const link = results[selectedResultIndex].querySelector('.result-title');
+            if (link) {
+                if (newTab) {
+                    window.open(link.href, '_blank');
+                } else {
+                    window.location.href = link.href;
+                }
+            }
+        }
+    }
+    
+    function handleKeyboardNavigation(e) {
+        const results = getResultElements();
+        if (results.length === 0) return;
+        
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                if (selectedResultIndex < results.length - 1) {
+                    highlightResult(selectedResultIndex + 1);
+                }
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                if (selectedResultIndex > 0) {
+                    highlightResult(selectedResultIndex - 1);
+                } else if (selectedResultIndex === 0) {
+                    // Move back to input
+                    highlightResult(-1);
+                    document.querySelector('.search-input')?.focus();
+                }
+                break;
+            case 'Enter':
+                if (selectedResultIndex >= 0) {
+                    e.preventDefault();
+                    openSelectedResult(e.ctrlKey || e.metaKey);
+                }
+                break;
+            case 'Escape':
+                e.preventDefault();
+                highlightResult(-1);
+                document.querySelector('.search-input')?.focus();
+                hideHistoryDropdown();
+                break;
+        }
+    }
     
     // DOM elements
     const form = document.querySelector('.search-form');
@@ -873,6 +1069,9 @@ def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: st
     
     // Render results
     function renderResults(data) {
+        // Reset keyboard selection when results change
+        selectedResultIndex = -1;
+        
         const formHtml = form.outerHTML;
         const datalist = document.getElementById('search-suggestions');
         const datalistHtml = datalist ? datalist.outerHTML : '';
@@ -952,6 +1151,12 @@ def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: st
         }
         
         showLoading();
+        hideHistoryDropdown();
+        
+        // Save to history (only on page 1, i.e., new searches)
+        if (page === 1) {
+            addToHistory(query);
+        }
         
         // Build API URL
         const params = buildSearchUrl(query, page);
@@ -1008,6 +1213,18 @@ def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: st
         
         if (newInput) {
             newInput.addEventListener('input', debouncedSearch);
+            
+            // Show history on focus (if input is empty or very short)
+            newInput.addEventListener('focus', () => {
+                if (newInput.value.length < 3) {
+                    showHistoryDropdown();
+                }
+            });
+            
+            // Hide history on blur (with delay for click handling)
+            newInput.addEventListener('blur', () => {
+                setTimeout(hideHistoryDropdown, 200);
+            });
         }
         
         // Pagination links
@@ -1049,6 +1266,9 @@ def _render_javascript(no_javascript: bool, query: str, per_page: int, theme: st
             window.location.reload();
         }
     });
+    
+    // Keyboard navigation
+    document.addEventListener('keydown', handleKeyboardNavigation);
     
     // Initial binding
     bindEventListeners();
