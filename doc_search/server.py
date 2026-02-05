@@ -1536,25 +1536,36 @@ JAVASCRIPT = """
     // ========================================================================
     function setupFacetButtons() {
         document.querySelectorAll('.facet-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            // Remove old listeners to avoid duplicates
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
+                
+                // Guard: don't search if no query
+                if (!currentQuery || !currentQuery.trim()) {
+                    console.warn('No search query to filter');
+                    return;
+                }
                 
                 // Check if it's a type or category filter
-                const typeValue = btn.dataset.type;
-                const categoryValue = btn.dataset.category;
+                const typeValue = newBtn.dataset.type;
+                const categoryValue = newBtn.dataset.category;
                 
                 if (typeValue !== undefined) {
                     // Type filter clicked
                     currentType = typeValue || null;
                     // Update active state for type buttons only
                     document.querySelectorAll('.facet-btn[data-type]').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
+                    newBtn.classList.add('active');
                 } else if (categoryValue !== undefined) {
                     // Category filter clicked
                     currentFacet = categoryValue || null;
                     // Update active state for category buttons only
                     document.querySelectorAll('.facet-btn[data-category]').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
+                    newBtn.classList.add('active');
                 }
                 
                 currentPage = 1;
@@ -1958,6 +1969,7 @@ JAVASCRIPT = """
         const urlParams = new URLSearchParams(window.location.search);
         currentQuery = urlParams.get('q') || '';
         currentFacet = urlParams.get('category') || null;
+        currentType = urlParams.get('type') || null;
         
         // Expose some functions globally for onclick handlers
         window.docSearch = {
