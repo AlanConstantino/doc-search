@@ -12,7 +12,7 @@ import json
 import time
 import threading
 from pathlib import Path
-from typing import Optional, Set, Dict, Any, Callable, Tuple, List
+from typing import Optional, Set, Dict, Any, Callable, Tuple, List, Union
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
@@ -392,7 +392,7 @@ class Crawler:
         self.state.increment_stat('pages_skipped')
         return []
     
-    def _process_pdf_content(self, url: str, content: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
+    def _process_pdf_content(self, url: str, content: Union[str, bytes], depth: int) -> Optional[List[Tuple[str, int]]]:
         """
         Process PDF content that was already fetched (Content-Type based detection).
         
@@ -402,6 +402,11 @@ class Crawler:
         Returns empty list (documents don't contain links to crawl).
         """
         parsed = urlparse(url)
+        
+        # Convert string content back to bytes if needed
+        # (fetcher decodes all content as string, but PDFs need bytes)
+        if isinstance(content, str):
+            content = content.encode('latin-1')
         
         result = self._pdf_extractor.extract_from_bytes(content)
         
