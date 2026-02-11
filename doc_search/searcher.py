@@ -1129,7 +1129,12 @@ class EnhancedSearchEngine(SearchEngine):
                 self.last_suggestion = metadata.get('suggestion')
                 self.last_facets = metadata.get('facets', {})
                 self.last_expanded_query = metadata.get('expanded_query')
-                self.last_rerank_metrics = metadata.get('rerank_metrics')
+                # Convert dict back to RerankMetrics
+                rerank_dict = metadata.get('rerank_metrics')
+                if rerank_dict:
+                    self.last_rerank_metrics = RerankMetrics(**rerank_dict)
+                else:
+                    self.last_rerank_metrics = None
                 return results
         
         # Parse query
@@ -1314,11 +1319,16 @@ class EnhancedSearchEngine(SearchEngine):
         
         # Store in cache
         if self._cache:
+            # Convert RerankMetrics to dict for JSON serialization
+            rerank_metrics_dict = None
+            if self.last_rerank_metrics:
+                from dataclasses import asdict
+                rerank_metrics_dict = asdict(self.last_rerank_metrics)
             metadata = {
                 'suggestion': self.last_suggestion,
                 'facets': self.last_facets,
                 'expanded_query': self.last_expanded_query,
-                'rerank_metrics': self.last_rerank_metrics
+                'rerank_metrics': rerank_metrics_dict
             }
             self._cache.set(
                 query, (results, metadata),
