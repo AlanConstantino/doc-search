@@ -569,6 +569,18 @@ a:hover {
     color: var(--text-muted);
 }
 
+.pdf-location {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+    font-family: var(--font-mono, monospace);
+}
+
 .result-score {
     display: inline-flex;
     align-items: center;
@@ -1626,12 +1638,26 @@ JAVASCRIPT = """
         const docType = r.doc_type || 'html';
         const docTypeBadge = `<span class="doc-type-badge ${docType}">${docType}</span>`;
         
+        // PDF page/section location info
+        let pdfLocation = '';
+        if (docType === 'pdf' && (r.pdf_page || r.pdf_section)) {
+            const parts = [];
+            if (r.pdf_page) parts.push('p.' + r.pdf_page);
+            if (r.pdf_section) {
+                let section = r.pdf_section;
+                if (section.length > 35) section = section.substring(0, 32) + '...';
+                parts.push('§' + section);
+            }
+            pdfLocation = `<span class="pdf-location">${escapeHtml(parts.join(', '))}</span>`;
+        }
+        
         return `
             <div class="result" data-url="${escapeHtml(r.url)}">
                 <div class="result-header">
                     <span class="result-number">${r.rank}</span>
                     <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
                     ${docTypeBadge}
+                    ${pdfLocation}
                     <span class="result-score" title="Score: ${r.score.toFixed(2)}">
                         <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
@@ -2126,12 +2152,26 @@ def render_page(
                 doc_type_badge = f'<span class="doc-type-badge {doc_type}">{doc_type}</span>'
                 snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
                 
+                # PDF page/section location
+                pdf_location_html = ''
+                if doc_type == 'pdf' and (r.get('pdf_page') or r.get('pdf_section')):
+                    parts = []
+                    if r.get('pdf_page'):
+                        parts.append(f"p.{r['pdf_page']}")
+                    if r.get('pdf_section'):
+                        section = r['pdf_section']
+                        if len(section) > 35:
+                            section = section[:32] + '...'
+                        parts.append(f"§{escape(section)}")
+                    pdf_location_html = f'<span class="pdf-location">{", ".join(parts)}</span>'
+                
                 results_html += f'''
                 <div class="result">
                     <div class="result-header">
                         <span class="result-number">{i}</span>
                         <a href="{url}" class="result-title" target="_blank" rel="noopener">{title}</a>
                         {doc_type_badge}
+                        {pdf_location_html}
                         {score_html}
                     </div>
                     <div class="result-url">{url}</div>
