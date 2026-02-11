@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.19.0] - 2026-02-11
+## [1.18.0] - 2026-02-11
 
 ### ⚠️ BREAKING CHANGES
 - **Python 3.9+ now required** (previously 3.7+) - needed for pypdf library
@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Extracts PDF outline/TOC as additional headings
   - Headings used for field-aware search ranking (headings weighted 2-3x higher)
 
-## [1.18.0] - 2026-02-11
+## [1.17.0] - 2026-02-11
 
 ### Added
 - **Two-stage retrieval with reranking** (#190)
@@ -33,13 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Results with query terms closer together ranked higher
 - **Weighted term expansion** (#187)
   - Synonym and fuzzy matches weighted lower than exact matches
-
-### Fixed
-- RerankMetrics JSON serialization for web UI cache
-
-## [1.17.0] - 2026-02-10
-
-### Added
 - **SymSpell fuzzy search** - Fast "Did you mean?" suggestions using Symmetric Delete algorithm (#185)
   - Enabled by default, use `--no-symspell` to disable
   - Pure Python implementation, no dependencies
@@ -50,12 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **2.6x faster snippet generation** - Optimized `find_best_snippet` for wildcard queries
-  - Pre-lowercase words once instead of per-window
-  - Only check windows around actual term matches
 
 ### Fixed
+- RerankMetrics JSON serialization for web UI cache
 - Wildcard `*` character preserved in queries (was being stripped by tokenizer)
-- Expanded terms now highlighted in snippets (was showing raw wildcard)
+- Expanded terms now highlighted in snippets
 
 ## [1.16.1] - 2026-02-10
 
