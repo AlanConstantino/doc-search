@@ -636,6 +636,7 @@ class EnhancedSearchEngine(SearchEngine):
     - Faceted search (filter by section/type)
     - Query expansion with synonyms (disabled by default)
     - Fuzzy search with SymSpell (enabled by default if index exists)
+    - Levenshtein automaton for efficient fuzzy matching
     
     Note: The search() method returns List[Dict[str, Any]] for LSP compliance
     with SearchEngine. Enhanced metadata (suggestion, facets, etc.) is stored
@@ -650,6 +651,7 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_synonyms: bool = False,
                  enable_symspell: bool = True,
                  enable_ngram: bool = True,
+                 enable_levenshtein: bool = True,
                  synonym_groups: Optional[List[Set[str]]] = None,
                  symspell_index: Optional[SymSpell] = None,
                  ngram_index: Optional[NGramIndex] = None,
@@ -669,6 +671,7 @@ class EnhancedSearchEngine(SearchEngine):
             enable_synonyms: Enable query expansion with synonyms (default: False)
             enable_symspell: Enable SymSpell for suggestions (default: True)
             enable_ngram: Enable n-gram index for prefix/substring search (default: True)
+            enable_levenshtein: Enable Levenshtein automaton for fuzzy matching (default: True)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
             symspell_index: Pre-loaded SymSpell index (if None, will try to load from disk)
             ngram_index: Pre-loaded NGram index (if None, will try to load from disk)
@@ -686,6 +689,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._synonyms_enabled = enable_synonyms
         self._symspell_enabled = enable_symspell
         self._ngram_enabled = enable_ngram
+        self._levenshtein_enabled = enable_levenshtein
         self._custom_synonym_groups = synonym_groups
         self._index_path = index_path
         
@@ -696,6 +700,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._synonyms: Optional[SynonymExpander] = None
         self._symspell: Optional[SymSpell] = symspell_index
         self._ngram: Optional[NGramIndex] = ngram_index
+        self._levenshtein_matcher = None  # Will be initialized lazily
         
         # Last search metadata (populated after each search() call)
         self.last_suggestion: Optional[str] = None
@@ -795,6 +800,42 @@ class EnhancedSearchEngine(SearchEngine):
         """Check if n-gram index is enabled and available."""
         return self._ngram_enabled and self._ngram is not None
     
+    @property
+    def levenshtein_enabled(self) -> bool:
+        """Check if Levenshtein automaton is enabled."""
+        return self._levenshtein_enabled
+    
+    def _get_levenshtein_matcher(self):
+        """Get or create Levenshtein matcher (lazy initialization)."""
+        if self._levenshtein_matcher is None and self._levenshtein_enabled:
+            from .levenshtein import LevenshteinMatcher
+            vocabulary = list(self.index.index.keys())
+            self._levenshtein_matcher = LevenshteinMatcher(vocabulary)
+            # Set term frequencies for better ranking
+            self._levenshtein_matcher.set_frequencies(dict(self.index.doc_freqs))
+        return self._levenshtein_matcher
+    
+    def find_fuzzy_matches(self, term: str, max_distance: int = 1, 
+                           max_results: int = 5) -> List[Tuple[str, int]]:
+        """
+        Find vocabulary terms within edit distance using Levenshtein automaton.
+        
+        This is more efficient than SymSpell for single-term lookups and
+        provides exact edit distances.
+        
+        Args:
+            term: Query term to match
+            max_distance: Maximum edit distance (default: 1)
+            max_results: Maximum results to return (default: 5)
+            
+        Returns:
+            List of (term, distance) tuples, sorted by distance then frequency
+        """
+        matcher = self._get_levenshtein_matcher()
+        if matcher is None:
+            return []
+        return matcher.find_similar(term, max_distance, max_results)
+    
     def _expand_ngram_terms(self, terms: List[str]) -> List[str]:
         """
         Expand terms using n-gram index.
@@ -887,8 +928,10 @@ class EnhancedSearchEngine(SearchEngine):
         """
         Get spelling suggestion for a query.
         
-        Uses SymSpell if available (faster, better suggestions), otherwise
-        falls back to traditional edit-distance spellchecker.
+        Priority order:
+        1. SymSpell (fastest, pre-computed deletions)
+        2. Levenshtein automaton (efficient NFA-based matching)
+        3. Traditional edit-distance spellchecker (fallback)
         
         Args:
             query: The search query
@@ -900,11 +943,12 @@ class EnhancedSearchEngine(SearchEngine):
         if not terms:
             return None
         
-        # Use SymSpell if available (preferred)
+        vocabulary = set(self.index.index.keys())
+        
+        # Use SymSpell if available (preferred - fastest)
         if self._symspell_enabled and self._symspell:
             corrected_terms = []
             has_correction = False
-            vocabulary = set(self.index.index.keys())
             
             for term in terms:
                 # Skip if term exists in vocabulary
@@ -932,6 +976,42 @@ class EnhancedSearchEngine(SearchEngine):
             if has_correction:
                 # Reconstruct query with corrections
                 # Preserve phrases in the suggestion
+                suggestion_parts = corrected_terms[:]
+                for phrase in phrases:
+                    suggestion_parts.append(f'"{" ".join(phrase)}"')
+                return ' '.join(suggestion_parts)
+            
+            return None
+        
+        # Try Levenshtein automaton (second priority)
+        if self._levenshtein_enabled:
+            corrected_terms = []
+            has_correction = False
+            
+            for term in terms:
+                # Skip if term exists in vocabulary
+                if term.lower() in vocabulary:
+                    corrected_terms.append(term)
+                    continue
+                
+                # Skip very short terms
+                if len(term) < 3:
+                    corrected_terms.append(term)
+                    continue
+                
+                # Find fuzzy matches using Levenshtein automaton
+                matches = self.find_fuzzy_matches(term, max_distance=2, max_results=1)
+                if matches:
+                    best_match, distance = matches[0]
+                    if distance > 0:
+                        corrected_terms.append(best_match)
+                        has_correction = True
+                    else:
+                        corrected_terms.append(term)
+                else:
+                    corrected_terms.append(term)
+            
+            if has_correction:
                 suggestion_parts = corrected_terms[:]
                 for phrase in phrases:
                     suggestion_parts.append(f'"{" ".join(phrase)}"')
