@@ -2775,7 +2775,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 score = r.get('score', 0)
                 score_pct = int((score / global_max_score) * 100) if global_max_score > 0 else 0
                 
-                json_results.append({
+                result_obj = {
                     'rank': i,
                     'title': r.get('title', 'Untitled') or 'Untitled',
                     'url': r['url'],
@@ -2784,7 +2784,15 @@ class SearchHandler(BaseHTTPRequestHandler):
                     'score_pct': score_pct,
                     'facets': r.get('facets', {}),
                     'doc_type': r.get('doc_type', 'html')
-                })
+                }
+                # Include PDF page/section if available
+                if r.get('pdf_page'):
+                    result_obj['pdf_page'] = r['pdf_page']
+                if r.get('pdf_section'):
+                    result_obj['pdf_section'] = r['pdf_section']
+                if r.get('doc_pages'):
+                    result_obj['doc_pages'] = r['doc_pages']
+                json_results.append(result_obj)
             
             # Build response
             response = {
