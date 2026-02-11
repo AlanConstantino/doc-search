@@ -605,7 +605,8 @@ class Reranker:
         original_terms: List[str],
         phrases: List[List[str]],
         load_text_fn: Optional[callable] = None,
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        term_weights: Optional[Dict[str, float]] = None
     ) -> List[Dict[str, Any]]:
         """
         Rerank candidates using multiple signals.
@@ -616,6 +617,7 @@ class Reranker:
             phrases: Phrase groups extracted from query
             load_text_fn: Function to load page text given URL
             top_k: Maximum results to return (None = all)
+            term_weights: Optional dict of term -> weight for weighted scoring
             
         Returns:
             Reranked list of results with 'final_score' added
@@ -648,7 +650,8 @@ class Reranker:
                 doc=doc,
                 body_text=body_text,
                 original_terms=original_terms,
-                phrases=phrases
+                phrases=phrases,
+                term_weights=term_weights
             )
             
             doc['final_score'] = final_score

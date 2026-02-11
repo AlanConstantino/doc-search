@@ -716,6 +716,56 @@ class TestCreateReranker(unittest.TestCase):
         self.assertAlmostEqual(reranker.config.weight_bm25, 0.6)
 
 
+class TestWeightedTermExpansion(unittest.TestCase):
+    """Tests for weighted term expansion in reranking."""
+    
+    def setUp(self):
+        self.reranker = Reranker()
+    
+    def _make_doc(self, url: str, title: str, score: float) -> Dict[str, Any]:
+        return {'url': url, 'title': title, 'score': score}
+    
+    def test_rerank_with_term_weights(self):
+        """Should accept and use term_weights."""
+        doc = self._make_doc("http://example.com", "Python Guide", 5.0)
+        
+        weights = {'python': 1.0, 'guide': 1.0, 'tutorial': 0.5}
+        
+        result = self.reranker.rerank(
+            candidates=[doc],
+            original_terms=["python", "guide"],
+            phrases=[],
+            load_text_fn=None,
+            term_weights=weights
+        )
+        
+        self.assertEqual(len(result), 1)
+        self.assertIn('final_score', result[0])
+    
+    def test_weighted_coverage_vs_unweighted(self):
+        """Weighted coverage should differ from unweighted."""
+        # Document matching the lower-weight term
+        doc = self._make_doc("http://example.com", "Tutorial Guide", 5.0)
+        
+        # Unweighted coverage
+        unweighted_score = self.reranker._compute_coverage_score(
+            "tutorial basics",
+            ["python", "tutorial"],
+            beta=0.4
+        )
+        
+        # Weighted coverage (python=1.0, tutorial=0.3)
+        weighted_score = self.reranker._compute_coverage_score(
+            "tutorial basics",
+            ["python", "tutorial"],
+            beta=0.4,
+            term_weights={"python": 1.0, "tutorial": 0.3}
+        )
+        
+        # Weighted should be different (lower because tutorial has low weight)
+        self.assertNotEqual(unweighted_score, weighted_score)
+
+
 class TestBM25Normalization(unittest.TestCase):
     """Tests for BM25 score normalization."""
     
