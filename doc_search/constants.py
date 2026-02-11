@@ -147,3 +147,20 @@ FIELD_WEIGHT_BODY = 1.0        # Body is the baseline
 
 # Maximum field score (normalized to prevent field domination)
 FIELD_MAX_SCORE = 1.0
+
+
+# =============================================================================
+# Phrase Proximity Configuration
+# =============================================================================
+
+# Maximum word distance for proximity matching (slop)
+PHRASE_MAX_SLOP = 3
+
+# Phrase match boost values
+PHRASE_EXACT_MATCH_TITLE = 10.0      # Exact phrase in title
+PHRASE_EXACT_MATCH_BODY = 3.0        # Exact phrase in body
+PHRASE_PROXIMITY_MATCH_TITLE = 5.0   # Proximity match in title (within slop)
+PHRASE_PROXIMITY_MATCH_BODY = 1.5    # Proximity match in body
+
+# Whether to hard-filter on phrase (only for quoted phrases)
+PHRASE_HARD_FILTER_QUOTED = True

@@ -41,6 +41,11 @@ from .constants import (
     FIELD_WEIGHT_HEADINGS,
     FIELD_WEIGHT_BODY,
     FIELD_MAX_SCORE,
+    PHRASE_MAX_SLOP,
+    PHRASE_EXACT_MATCH_TITLE,
+    PHRASE_EXACT_MATCH_BODY,
+    PHRASE_PROXIMITY_MATCH_TITLE,
+    PHRASE_PROXIMITY_MATCH_BODY,
 )
 
 
@@ -80,6 +85,12 @@ class RerankConfig:
     title_coverage_beta: float = RERANK_TITLE_COVERAGE_BETA
     full_coverage_bonus: float = RERANK_FULL_COVERAGE_BONUS
     max_coverage_terms: int = RERANK_MAX_COVERAGE_TERMS
+    # Phrase proximity settings
+    phrase_max_slop: int = PHRASE_MAX_SLOP
+    phrase_exact_title: float = PHRASE_EXACT_MATCH_TITLE
+    phrase_exact_body: float = PHRASE_EXACT_MATCH_BODY
+    phrase_proximity_title: float = PHRASE_PROXIMITY_MATCH_TITLE
+    phrase_proximity_body: float = PHRASE_PROXIMITY_MATCH_BODY
 
 
 @dataclass
@@ -344,7 +355,12 @@ class Reranker:
         in_title: bool = False
     ) -> float:
         """
-        Score phrase matches with field-aware boosting.
+        Score phrase matches with field-aware boosting and proximity.
+        
+        Scoring levels:
+        1. Exact phrase match → highest boost
+        2. Proximity match (within slop) → medium boost
+        3. All terms present but far apart → low boost
         
         Args:
             text: Text to search in
@@ -360,75 +376,84 @@ class Reranker:
         text_lower = text.lower()
         score = 0.0
         
+        # Select boost values based on field
+        exact_boost = self.config.phrase_exact_title if in_title else self.config.phrase_exact_body
+        proximity_boost = self.config.phrase_proximity_title if in_title else self.config.phrase_proximity_body
+        
         for phrase in phrases:
             if len(phrase) < 2:
                 continue
             
             phrase_str = ' '.join(phrase).lower()
             
-            # Check for exact phrase match
+            # Check for exact phrase match (highest score)
             if phrase_str in text_lower:
-                score += 1.0 if in_title else 0.3
+                score += exact_boost
             else:
-                # Check for proximity match (words within a window)
-                proximity_score = self._score_proximity(text_lower, phrase)
-                if in_title:
-                    score += proximity_score * 0.5
-                else:
-                    score += proximity_score * 0.15
+                # Check for proximity match with slop
+                min_span = self._find_min_phrase_span(text_lower, phrase)
+                
+                if min_span is not None:
+                    if min_span <= self.config.phrase_max_slop:
+                        # Close proximity - good match
+                        # Score decreases as span increases
+                        proximity_factor = 1.0 - (min_span / (self.config.phrase_max_slop + 1))
+                        score += proximity_boost * proximity_factor
+                    elif min_span <= 10:
+                        # Moderate proximity - okay match
+                        score += proximity_boost * 0.3
+                    else:
+                        # Far apart - minimal score
+                        score += proximity_boost * 0.1
         
         return score
     
-    def _score_proximity(
-        self, 
-        text: str, 
-        phrase_words: List[str],
-        max_window: int = 10
-    ) -> float:
+    def _find_min_phrase_span(
+        self,
+        text: str,
+        phrase_words: List[str]
+    ) -> Optional[int]:
         """
-        Score based on how close phrase terms appear to each other.
+        Find the minimum word span containing all phrase terms.
         
         Args:
             text: Lowercase text to search
             phrase_words: Words that should appear close together
-            max_window: Maximum word distance to consider
             
         Returns:
-            Proximity score (0-1), higher means terms are closer
+            Minimum span (number of words between first and last term),
+            or None if not all terms are found
         """
         if len(phrase_words) < 2:
-            return 0.0
+            return 0
         
         # Find positions of each term
         words = text.split()
         term_positions: Dict[str, List[int]] = {}
         
         for i, word in enumerate(words):
-            # Strip punctuation for matching
             clean_word = re.sub(r'[^\w]', '', word.lower())
             for term in phrase_words:
-                if term.lower() in clean_word or clean_word in term.lower():
+                term_lower = term.lower()
+                if term_lower in clean_word or clean_word == term_lower:
                     if term not in term_positions:
                         term_positions[term] = []
                     term_positions[term].append(i)
         
-        # Check if we found all terms
+        # Check if all terms were found
         if len(term_positions) < len(phrase_words):
-            return 0.0
+            return None
         
         # Find minimum span containing all terms
-        # Use a simplified approach: find the minimum distance between
-        # first term and last term positions
         all_positions = []
         for term, positions in term_positions.items():
             all_positions.extend((pos, term) for pos in positions)
         
         if not all_positions:
-            return 0.0
+            return None
         
         all_positions.sort()
         
-        # Sliding window to find minimum span with all terms
         min_span = float('inf')
         term_set = set(phrase_words)
         
@@ -441,7 +466,34 @@ class Reranker:
                     min_span = min(min_span, span)
                     break
         
-        if min_span == float('inf') or min_span > max_window:
+        return min_span if min_span != float('inf') else None
+    
+    def _score_proximity(
+        self, 
+        text: str, 
+        phrase_words: List[str],
+        max_window: int = 10
+    ) -> float:
+        """
+        Score based on how close phrase terms appear to each other.
+        
+        Uses _find_min_phrase_span to find the minimum span,
+        then converts to a 0-1 score.
+        
+        Args:
+            text: Lowercase text to search
+            phrase_words: Words that should appear close together
+            max_window: Maximum word distance to consider
+            
+        Returns:
+            Proximity score (0-1), higher means terms are closer
+        """
+        if len(phrase_words) < 2:
+            return 0.0
+        
+        min_span = self._find_min_phrase_span(text, phrase_words)
+        
+        if min_span is None or min_span > max_window:
             return 0.0
         
         # Convert span to score (closer = higher)
@@ -615,6 +667,37 @@ class Reranker:
         if top_k is not None:
             return rerank_candidates[:top_k]
         return rerank_candidates
+
+
+def check_phrase_proximity(
+    text: str, 
+    phrase_words: List[str],
+    max_slop: int = PHRASE_MAX_SLOP
+) -> bool:
+    """
+    Check if phrase words appear in text within the allowed slop.
+    
+    This is a softer version of exact phrase matching that allows
+    some words between phrase terms.
+    
+    Args:
+        text: Text to search in
+        phrase_words: Words that should appear close together
+        max_slop: Maximum word distance allowed between terms
+        
+    Returns:
+        True if all phrase words appear within the slop window
+    """
+    if not phrase_words or len(phrase_words) < 2:
+        return True
+    
+    if not text:
+        return False
+    
+    reranker = Reranker()
+    min_span = reranker._find_min_phrase_span(text.lower(), phrase_words)
+    
+    return min_span is not None and min_span <= max_slop
 
 
 def create_reranker(config: Optional[Dict[str, Any]] = None) -> Reranker:
