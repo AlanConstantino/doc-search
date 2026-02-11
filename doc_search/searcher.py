@@ -20,6 +20,7 @@ from .facets import FacetIndex
 from .synonyms import SynonymExpander
 from .symspell import SymSpell
 from .ngram import NGramIndex
+from .reranker import Reranker, RerankConfig, RerankMetrics
 from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
     format_results, check_phrase_match
@@ -697,11 +698,15 @@ class EnhancedSearchEngine(SearchEngine):
         self._symspell: Optional[SymSpell] = symspell_index
         self._ngram: Optional[NGramIndex] = ngram_index
         
+        # Initialize reranker for two-stage retrieval
+        self._reranker: Reranker = Reranker()
+        
         # Last search metadata (populated after each search() call)
         self.last_suggestion: Optional[str] = None
         self.last_facets: Dict[str, Dict[str, int]] = {}
         self.last_query: str = ''
         self.last_expanded_query: Optional[str] = None
+        self.last_rerank_metrics: Optional[RerankMetrics] = None
         
         # Build enhanced features from index
         self._build_enhanced_features()
@@ -1004,14 +1009,19 @@ class EnhancedSearchEngine(SearchEngine):
         highlight: bool = True,
         snippet_length: int = 150,
         facet_filters: Optional[Dict[str, str]] = None,
-        expand_synonyms: bool = True
+        expand_synonyms: bool = True,
+        enable_reranking: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Search the index with enhanced features.
+        Search the index with enhanced features using two-stage retrieval.
+        
+        Two-Stage Architecture:
+            Stage 1 (Recall): Fast BM25 lookup to fetch broad candidate set
+            Stage 2 (Rerank): Combine multiple signals for precise ranking
         
         Returns the same type as SearchEngine.search() for LSP compliance.
-        Enhanced metadata (suggestion, facets, expanded_query) is stored in
-        instance attributes: last_suggestion, last_facets, last_expanded_query.
+        Enhanced metadata (suggestion, facets, expanded_query, rerank_metrics) 
+        is stored in instance attributes.
         
         Use search_enhanced() to get a dict response with all metadata included.
         
@@ -1023,6 +1033,7 @@ class EnhancedSearchEngine(SearchEngine):
             snippet_length: Target snippet length
             facet_filters: Optional facet filters (type -> value)
             expand_synonyms: Whether to expand query with synonyms
+            enable_reranking: Whether to apply two-stage reranking (default: True)
             
         Returns:
             List of result dictionaries (same as SearchEngine.search())
@@ -1032,6 +1043,7 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_facets = {}
         self.last_query = query
         self.last_expanded_query = None
+        self.last_rerank_metrics = None
         
         # Check cache first
         facet_key = tuple(sorted(facet_filters.items())) if facet_filters else None
@@ -1039,7 +1051,8 @@ class EnhancedSearchEngine(SearchEngine):
             cached = self._cache.get(
                 query, top_k=top_k, min_score=min_score, 
                 highlight=highlight, snippet_length=snippet_length,
-                facet_filters=facet_key, expand_synonyms=expand_synonyms
+                facet_filters=facet_key, expand_synonyms=expand_synonyms,
+                enable_reranking=enable_reranking
             )
             if cached is not None:
                 # Restore metadata from cache
@@ -1047,6 +1060,7 @@ class EnhancedSearchEngine(SearchEngine):
                 self.last_suggestion = metadata.get('suggestion')
                 self.last_facets = metadata.get('facets', {})
                 self.last_expanded_query = metadata.get('expanded_query')
+                self.last_rerank_metrics = metadata.get('rerank_metrics')
                 return results
         
         # Parse query
@@ -1080,14 +1094,23 @@ class EnhancedSearchEngine(SearchEngine):
         for phrase in phrases:
             all_terms.extend(phrase)
         
-        # Get initial results from BM25
-        initial_k = top_k * 3 if phrases or facet_filters else top_k
-        bm25_results = self.index.search(' '.join(all_terms), top_k=initial_k)
+        # =====================================================================
+        # STAGE 1: RECALL
+        # Cast wide net with BM25 to find candidates
+        # =====================================================================
+        if enable_reranking:
+            # Fetch more candidates for reranking
+            recall_k = self._reranker.compute_recall_k(top_k)
+        else:
+            # Legacy behavior: just fetch what we need plus some buffer
+            recall_k = top_k * 3 if phrases or facet_filters else top_k
+        
+        bm25_results = self.index.search(' '.join(all_terms), top_k=recall_k)
         
         if min_score > 0:
             bm25_results = [r for r in bm25_results if r['score'] >= min_score]
         
-        # Apply facet filters
+        # Apply facet filters before reranking (reduces candidate set)
         if facet_filters and self._facets:
             filtered_urls = set()
             all_doc_ids = set()
@@ -1104,19 +1127,47 @@ class EnhancedSearchEngine(SearchEngine):
                     filtered_urls.add(doc['url'])
             bm25_results = [r for r in bm25_results if r['url'] in filtered_urls]
         
-        # Process results (phrase matching, snippets, etc.)
+        # =====================================================================
+        # STAGE 2: RERANK
+        # Apply sophisticated scoring to reorder candidates
+        # =====================================================================
+        # Get the original query terms (before expansion) for coverage scoring
+        original_terms = list(terms)
+        # Strip wildcards from original terms for matching
+        original_terms = [t.rstrip('*') for t in original_terms if not t.endswith('*') or len(t) > 1]
+        
+        if enable_reranking and bm25_results:
+            # Rerank candidates using multiple signals
+            reranked = self._reranker.rerank(
+                candidates=bm25_results,
+                original_terms=original_terms,
+                phrases=phrases,
+                load_text_fn=self._load_page_text,
+                top_k=None  # Don't limit yet, we'll process all and limit below
+            )
+            self.last_rerank_metrics = self._reranker.last_metrics
+            
+            # Use reranked results
+            candidates_to_process = reranked
+        else:
+            candidates_to_process = bm25_results
+        
+        # =====================================================================
+        # POST-PROCESSING
+        # Filter by phrases, generate snippets, format results
+        # =====================================================================
         results = []
         # Use expanded terms for highlighting (includes wildcard expansions and synonyms)
         terms_set = set(expanded_terms)
         for phrase in phrases:
             terms_set.update(phrase)
         
-        for r in bm25_results:
+        for r in candidates_to_process:
             page_text = None
             if phrases or (self.pages_dir and snippet_length > 0):
                 page_text = self._load_page_text(r['url'])
             
-            # Check phrase matches
+            # Check phrase matches (still filter for exact phrase matches)
             if phrases and page_text:
                 all_phrases_found = True
                 for phrase in phrases:
@@ -1136,12 +1187,15 @@ class EnhancedSearchEngine(SearchEngine):
             if highlight and snippet:
                 snippet = highlight_terms(snippet, terms_set)
             
+            # Use final_score from reranking if available, otherwise BM25 score
+            score = r.get('final_score', r.get('score', 0))
+            
             result = {
                 'url': r['url'],
                 'title': r.get('title', ''),
                 'snippet': snippet,
                 'description': r.get('description', ''),
-                'score': r.get('score', 0),
+                'score': round(score, 4) if isinstance(score, float) else score,
                 'doc_type': r.get('doc_type', 'html')
             }
             
@@ -1171,13 +1225,15 @@ class EnhancedSearchEngine(SearchEngine):
             metadata = {
                 'suggestion': self.last_suggestion,
                 'facets': self.last_facets,
-                'expanded_query': self.last_expanded_query
+                'expanded_query': self.last_expanded_query,
+                'rerank_metrics': self.last_rerank_metrics
             }
             self._cache.set(
                 query, (results, metadata),
                 top_k=top_k, min_score=min_score,
                 highlight=highlight, snippet_length=snippet_length,
-                facet_filters=facet_key, expand_synonyms=expand_synonyms
+                facet_filters=facet_key, expand_synonyms=expand_synonyms,
+                enable_reranking=enable_reranking
             )
         
         return results
@@ -1190,7 +1246,8 @@ class EnhancedSearchEngine(SearchEngine):
         highlight: bool = True,
         snippet_length: int = 150,
         facet_filters: Optional[Dict[str, str]] = None,
-        expand_synonyms: bool = True
+        expand_synonyms: bool = True,
+        enable_reranking: bool = True
     ) -> Dict[str, Any]:
         """
         Enhanced search that returns a dict with results and metadata.
@@ -1206,9 +1263,11 @@ class EnhancedSearchEngine(SearchEngine):
             snippet_length: Target snippet length
             facet_filters: Optional facet filters (type -> value)
             expand_synonyms: Whether to expand query with synonyms
+            enable_reranking: Whether to apply two-stage reranking (default: True)
             
         Returns:
-            Dict with 'results', 'suggestion', 'facets', 'query', 'expanded_query' keys
+            Dict with 'results', 'suggestion', 'facets', 'query', 'expanded_query',
+            'rerank_metrics' keys
         """
         results = self.search(
             query=query,
@@ -1217,7 +1276,8 @@ class EnhancedSearchEngine(SearchEngine):
             highlight=highlight,
             snippet_length=snippet_length,
             facet_filters=facet_filters,
-            expand_synonyms=expand_synonyms
+            expand_synonyms=expand_synonyms,
+            enable_reranking=enable_reranking
         )
         
         return {
@@ -1225,7 +1285,8 @@ class EnhancedSearchEngine(SearchEngine):
             'suggestion': self.last_suggestion,
             'facets': self.last_facets,
             'query': self.last_query,
-            'expanded_query': self.last_expanded_query
+            'expanded_query': self.last_expanded_query,
+            'rerank_metrics': self.last_rerank_metrics
         }
     
     def search_simple(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
@@ -1257,7 +1318,8 @@ class EnhancedSearchEngine(SearchEngine):
             'facets': self._facets_enabled,
             'synonyms': self._synonyms_enabled,
             'symspell': self.symspell_enabled,
-            'ngram': self.ngram_enabled
+            'ngram': self.ngram_enabled,
+            'reranking': True  # Always available in EnhancedSearchEngine
         }
         
         if self._autocomplete:
@@ -1274,5 +1336,18 @@ class EnhancedSearchEngine(SearchEngine):
         
         if self._ngram:
             stats['ngram_stats'] = self._ngram.get_stats()
+        
+        # Add reranking config
+        stats['rerank_config'] = {
+            'recall_multiplier': self._reranker.config.recall_multiplier,
+            'max_candidates': self._reranker.config.max_candidates,
+            'candidate_limit': self._reranker.config.candidate_limit,
+            'weights': {
+                'bm25': self._reranker.config.weight_bm25,
+                'title_match': self._reranker.config.weight_title_match,
+                'coverage': self._reranker.config.weight_coverage,
+                'phrase': self._reranker.config.weight_phrase,
+            }
+        }
         
         return stats

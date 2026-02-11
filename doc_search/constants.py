@@ -99,3 +99,37 @@ TITLE_WEIGHT = 3
 def heading_weight(level: int) -> int:
     """Calculate weight multiplier for heading level."""
     return max(1, 4 - level)
+
+
+# =============================================================================
+# Reranking Configuration (Two-Stage Retrieval)
+# =============================================================================
+
+# Recall stage: fetch this multiple of top_k candidates
+RERANK_RECALL_MULTIPLIER = 10
+
+# Maximum candidates to fetch in recall stage
+RERANK_MAX_CANDIDATES = 500
+
+# Number of candidates to rerank (balance speed vs quality)
+RERANK_CANDIDATE_LIMIT = 100
+
+# Score component weights (must sum to ~1.0)
+RERANK_WEIGHT_BM25 = 0.4           # Base BM25 relevance
+RERANK_WEIGHT_TITLE_MATCH = 0.25   # Title term matches
+RERANK_WEIGHT_COVERAGE = 0.20     # Query term coverage
+RERANK_WEIGHT_PHRASE = 0.15        # Phrase/proximity matches
+
+# Title match boost: how much more valuable title matches are vs body
+RERANK_TITLE_BOOST = 3.0
+
+# Coverage boost strength (beta parameter)
+# coverage=1.0 (all terms) → boost = 1 + beta
+# coverage=0.5 (half terms) → boost = 1 + 0.5*beta
+RERANK_COVERAGE_BETA = 0.4
+
+# Title-specific coverage boost (stronger because title is more important)
+RERANK_TITLE_COVERAGE_BETA = 0.6
+
+# Full coverage bonus: extra boost when all query terms are present
+RERANK_FULL_COVERAGE_BONUS = 0.2
