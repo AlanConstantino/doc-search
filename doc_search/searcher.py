@@ -836,6 +836,58 @@ class EnhancedSearchEngine(SearchEngine):
             return []
         return matcher.find_similar(term, max_distance, max_results)
     
+    def _expand_fuzzy_terms(self, terms: List[str], max_distance: int = 2,
+                            max_expansions: int = 3) -> List[str]:
+        """
+        Expand terms using Levenshtein automaton (like Lucene's fuzzy search).
+        
+        For each term NOT in vocabulary, find similar terms within edit distance
+        and include them in the search. This allows "pythom" to match documents
+        containing "python".
+        
+        Args:
+            terms: List of query terms
+            max_distance: Maximum edit distance for fuzzy matching (default: 1)
+            max_expansions: Max fuzzy expansions per term (default: 3)
+            
+        Returns:
+            Expanded list of terms including fuzzy matches
+        """
+        if not self._levenshtein_enabled:
+            return terms
+        
+        vocabulary = set(self.index.index.keys())
+        expanded = []
+        
+        for term in terms:
+            term_lower = term.lower()
+            
+            # If term exists in vocabulary, keep it as-is
+            if term_lower in vocabulary:
+                expanded.append(term)
+                continue
+            
+            # Skip very short terms (too many false matches)
+            if len(term) < 3:
+                expanded.append(term)
+                continue
+            
+            # Find fuzzy matches using Levenshtein automaton
+            matches = self.find_fuzzy_matches(term, max_distance, max_expansions)
+            
+            if matches:
+                # Add the original term (might partially match)
+                expanded.append(term)
+                # Add fuzzy matches (these exist in vocabulary)
+                for match_term, distance in matches:
+                    if match_term not in expanded:
+                        expanded.append(match_term)
+            else:
+                # No matches found, keep original
+                expanded.append(term)
+        
+        return expanded
+    
     def _expand_ngram_terms(self, terms: List[str]) -> List[str]:
         """
         Expand terms using n-gram index.
@@ -1142,6 +1194,10 @@ class EnhancedSearchEngine(SearchEngine):
         if self.ngram_enabled or has_wildcards:
             ngram_expanded_terms = self._expand_ngram_terms(terms)
         
+        # Fuzzy expand terms using Levenshtein automaton (like Lucene)
+        # Terms not in vocabulary get expanded to similar terms within edit distance
+        fuzzy_expanded_terms = self._expand_fuzzy_terms(ngram_expanded_terms)
+        
         # Check for spelling suggestions (for "Did you mean?" display)
         # Uses SymSpell if available, falls back to traditional spellchecker
         suggestion = self.get_spelling_suggestion(query)
@@ -1149,7 +1205,7 @@ class EnhancedSearchEngine(SearchEngine):
             self.last_suggestion = suggestion
         
         # Expand query with synonyms
-        expanded_terms = list(ngram_expanded_terms)
+        expanded_terms = list(fuzzy_expanded_terms)
         if expand_synonyms and self._synonyms and ngram_expanded_terms:
             expanded_terms = self._synonyms.expand_terms(ngram_expanded_terms, max_per_term=2)
             if expanded_terms != list(ngram_expanded_terms):
