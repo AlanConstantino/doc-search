@@ -631,7 +631,7 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
-                 enable_fuzzy: bool = True,
+                 enable_symspell: bool = True,
                  synonym_groups: Optional[List[Set[str]]] = None,
                  symspell_index: Optional[SymSpell] = None,
                  cache_size: int = 0,
@@ -648,7 +648,7 @@ class EnhancedSearchEngine(SearchEngine):
             enable_autocomplete: Enable type-ahead suggestions
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
-            enable_fuzzy: Enable fuzzy search with SymSpell (default: True)
+            enable_symspell: Enable SymSpell for suggestions (default: True)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
             symspell_index: Pre-loaded SymSpell index (if None, will try to load from disk)
             cache_size: Max number of queries to cache (0 to disable)
@@ -663,7 +663,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._autocomplete_enabled = enable_autocomplete
         self._facets_enabled = enable_facets
         self._synonyms_enabled = enable_synonyms
-        self._fuzzy_enabled = enable_fuzzy
+        self._symspell_enabled = enable_symspell
         self._custom_synonym_groups = synonym_groups
         self._index_path = index_path
         
@@ -720,7 +720,7 @@ class EnhancedSearchEngine(SearchEngine):
                 # Use built-in programming synonyms
                 self._synonyms = SynonymExpander(include_defaults=True)
         
-        if self._fuzzy_enabled and self._symspell is None:
+        if self._symspell_enabled and self._symspell is None:
             # Try to load SymSpell index from disk
             self._symspell = self._load_symspell_index()
     
@@ -742,9 +742,9 @@ class EnhancedSearchEngine(SearchEngine):
         return None
     
     @property
-    def fuzzy_enabled(self) -> bool:
-        """Check if fuzzy search is enabled and available."""
-        return self._fuzzy_enabled and self._symspell is not None
+    def symspell_enabled(self) -> bool:
+        """Check if SymSpell is enabled and available."""
+        return self._symspell_enabled and self._symspell is not None
     
     @classmethod
     def load(cls, index_path: Path, **kwargs) -> 'EnhancedSearchEngine':
@@ -778,7 +778,7 @@ class EnhancedSearchEngine(SearchEngine):
             return None
         
         # Use SymSpell if available (preferred)
-        if self._fuzzy_enabled and self._symspell:
+        if self._symspell_enabled and self._symspell:
             corrected_terms = []
             has_correction = False
             vocabulary = set(self.index.index.keys())
@@ -1119,7 +1119,7 @@ class EnhancedSearchEngine(SearchEngine):
             'autocomplete': self._autocomplete_enabled,
             'facets': self._facets_enabled,
             'synonyms': self._synonyms_enabled,
-            'fuzzy': self.fuzzy_enabled
+            'symspell': self.symspell_enabled
         }
         
         if self._autocomplete:
