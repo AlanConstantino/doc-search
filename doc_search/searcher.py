@@ -679,7 +679,6 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_facets: Dict[str, Dict[str, int]] = {}
         self.last_query: str = ''
         self.last_expanded_query: Optional[str] = None
-        self.last_fuzzy_expansions: List[Tuple[str, str]] = []  # [(original, expanded), ...]
         
         # Build enhanced features from index
         self._build_enhanced_features()
@@ -742,53 +741,6 @@ class EnhancedSearchEngine(SearchEngine):
         
         return None
     
-    def _expand_fuzzy(self, terms: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
-        """
-        Expand query terms using fuzzy matching.
-        
-        For each term not in the vocabulary, find the closest match
-        using SymSpell and replace it.
-        
-        Args:
-            terms: List of query terms
-            
-        Returns:
-            Tuple of (expanded_terms, expansions) where expansions is a list
-            of (original, replacement) tuples for terms that were replaced.
-        """
-        if not self._symspell:
-            return terms, []
-        
-        expanded = []
-        expansions = []
-        vocabulary = set(self.index.index.keys())
-        
-        for term in terms:
-            # Skip if term exists in vocabulary
-            if term.lower() in vocabulary:
-                expanded.append(term)
-                continue
-            
-            # Skip very short terms
-            if len(term) < 3:
-                expanded.append(term)
-                continue
-            
-            # Look up fuzzy matches
-            matches = self._symspell.lookup(term, max_distance=2, max_results=1)
-            
-            if matches:
-                best_match, distance, _ = matches[0]
-                if distance > 0:  # Only expand if it's actually a fuzzy match
-                    expanded.append(best_match)
-                    expansions.append((term, best_match))
-                else:
-                    expanded.append(term)
-            else:
-                expanded.append(term)
-        
-        return expanded, expansions
-    
     @property
     def fuzzy_enabled(self) -> bool:
         """Check if fuzzy search is enabled and available."""
@@ -812,23 +764,64 @@ class EnhancedSearchEngine(SearchEngine):
         """
         Get spelling suggestion for a query.
         
+        Uses SymSpell if available (faster, better suggestions), otherwise
+        falls back to traditional edit-distance spellchecker.
+        
         Args:
             query: The search query
             
         Returns:
             Suggested corrected query, or None if no correction needed
         """
-        if not self._spellchecker:
-            return None
-        
-        terms, _ = parse_query(query)
+        terms, phrases = parse_query(query)
         if not terms:
             return None
         
-        result = self._spellchecker.suggest_query(terms)
-        if result:
-            _, suggestion = result
-            return suggestion
+        # Use SymSpell if available (preferred)
+        if self._fuzzy_enabled and self._symspell:
+            corrected_terms = []
+            has_correction = False
+            vocabulary = set(self.index.index.keys())
+            
+            for term in terms:
+                # Skip if term exists in vocabulary
+                if term.lower() in vocabulary:
+                    corrected_terms.append(term)
+                    continue
+                
+                # Skip very short terms
+                if len(term) < 3:
+                    corrected_terms.append(term)
+                    continue
+                
+                # Look up fuzzy matches
+                matches = self._symspell.lookup(term, max_distance=2, max_results=1)
+                if matches:
+                    best_match, distance, _ = matches[0]
+                    if distance > 0:
+                        corrected_terms.append(best_match)
+                        has_correction = True
+                    else:
+                        corrected_terms.append(term)
+                else:
+                    corrected_terms.append(term)
+            
+            if has_correction:
+                # Reconstruct query with corrections
+                # Preserve phrases in the suggestion
+                suggestion_parts = corrected_terms[:]
+                for phrase in phrases:
+                    suggestion_parts.append(f'"{" ".join(phrase)}"')
+                return ' '.join(suggestion_parts)
+            
+            return None
+        
+        # Fall back to traditional spellchecker
+        if self._spellchecker:
+            result = self._spellchecker.suggest_query(terms)
+            if result:
+                _, suggestion = result
+                return suggestion
         
         return None
     
@@ -916,7 +909,6 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_facets = {}
         self.last_query = query
         self.last_expanded_query = None
-        self.last_fuzzy_expansions = []
         
         # Check cache first
         facet_key = tuple(sorted(facet_filters.items())) if facet_filters else None
@@ -932,7 +924,6 @@ class EnhancedSearchEngine(SearchEngine):
                 self.last_suggestion = metadata.get('suggestion')
                 self.last_facets = metadata.get('facets', {})
                 self.last_expanded_query = metadata.get('expanded_query')
-                self.last_fuzzy_expansions = metadata.get('fuzzy_expansions', [])
                 return results
         
         # Parse query
@@ -941,22 +932,17 @@ class EnhancedSearchEngine(SearchEngine):
         if not terms and not phrases:
             return []
         
-        # Fuzzy expansion: replace misspelled terms with corrections
-        fuzzy_terms = list(terms)
-        if self._fuzzy_enabled and self._symspell and terms:
-            fuzzy_terms, self.last_fuzzy_expansions = self._expand_fuzzy(terms)
-        
         # Check for spelling suggestions (for "Did you mean?" display)
-        if self._spellchecker:
-            suggestion = self.get_spelling_suggestion(query)
-            if suggestion and suggestion.lower() != query.lower():
-                self.last_suggestion = suggestion
+        # Uses SymSpell if available, falls back to traditional spellchecker
+        suggestion = self.get_spelling_suggestion(query)
+        if suggestion and suggestion.lower() != query.lower():
+            self.last_suggestion = suggestion
         
         # Expand query with synonyms
-        expanded_terms = list(fuzzy_terms)
-        if expand_synonyms and self._synonyms and fuzzy_terms:
-            expanded_terms = self._synonyms.expand_terms(fuzzy_terms, max_per_term=2)
-            if expanded_terms != list(fuzzy_terms):
+        expanded_terms = list(terms)
+        if expand_synonyms and self._synonyms and terms:
+            expanded_terms = self._synonyms.expand_terms(terms, max_per_term=2)
+            if expanded_terms != list(terms):
                 self.last_expanded_query = ' '.join(expanded_terms)
         
         # Flatten phrases into terms for BM25 scoring
@@ -1048,8 +1034,7 @@ class EnhancedSearchEngine(SearchEngine):
             metadata = {
                 'suggestion': self.last_suggestion,
                 'facets': self.last_facets,
-                'expanded_query': self.last_expanded_query,
-                'fuzzy_expansions': self.last_fuzzy_expansions
+                'expanded_query': self.last_expanded_query
             }
             self._cache.set(
                 query, (results, metadata),
@@ -1103,8 +1088,7 @@ class EnhancedSearchEngine(SearchEngine):
             'suggestion': self.last_suggestion,
             'facets': self.last_facets,
             'query': self.last_query,
-            'expanded_query': self.last_expanded_query,
-            'fuzzy_expansions': self.last_fuzzy_expansions
+            'expanded_query': self.last_expanded_query
         }
     
     def search_simple(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
