@@ -99,6 +99,7 @@ def build_document_data(
     doc_type: str,
     doc_pages: int = 0,
     doc_metadata: Optional[Dict[str, Any]] = None,
+    headings: Optional[List[Tuple[int, str]]] = None,
 ) -> Dict[str, Any]:
     """
     Build page data for an extracted document (PDF, DOCX, etc.).
@@ -111,6 +112,7 @@ def build_document_data(
         doc_type: The document type (e.g., 'pdf', 'docx').
         doc_pages: Number of pages in the document.
         doc_metadata: Additional document metadata.
+        headings: List of (level, text) tuples for detected headings.
     
     Returns:
         A dictionary with document data ready for persistence.
@@ -120,7 +122,7 @@ def build_document_data(
         'title': title,
         'description': f"{doc_type.upper()} document, {doc_pages} pages",
         'text': text,
-        'headings': [],  # Documents don't have structured HTML headings
+        'headings': headings or [],  # Now supports PDF headings via font detection
         'depth': depth,
         'crawled_at': time.time(),
         'doc_type': doc_type,
