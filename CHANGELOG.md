@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-02-11
+
+### ⚠️ BREAKING CHANGES
+- **Python 3.9+ now required** (previously 3.7+) - needed for pypdf library
+
+### Added
+- **Enhanced PDF extraction with heading detection** (#198, #199)
+  - Upgraded from PyPDF2 to pypdf for font-aware text extraction
+  - Detects headings via font size, bold fonts, ALL CAPS, and numbered sections
+  - Extracts PDF outline/TOC as additional headings
+  - Headings used for field-aware search ranking (headings weighted 2-3x higher)
+- **Two-stage retrieval with reranking** (#190)
+  - BM25 retrieval followed by feature-based reranking
+  - Configurable via `RerankConfig`
+- **Field-aware ranking** (#188)
+  - Title matches: 5x weight
+  - Heading matches: 2.5x weight
+  - Body matches: 1x weight
+- **Query term coverage boosting** (#191)
+  - Results containing more query terms ranked higher
+- **Phrase proximity boosting** (#189)
+  - Results with query terms closer together ranked higher
+- **Weighted term expansion** (#187)
+  - Synonym and fuzzy matches weighted lower than exact matches
+
+### Fixed
+- RerankMetrics JSON serialization for web UI cache
+
 ## [1.17.0] - 2026-02-10
 
 ### Added
