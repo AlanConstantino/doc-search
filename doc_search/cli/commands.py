@@ -216,6 +216,32 @@ def cmd_index(args):
     print(f"\nIndex saved to: {index_path}")
     print(f"Index size: {format_size(index_path.stat().st_size)}")
     
+    # Build and save fuzzy search index (SymSpell)
+    no_symspell = getattr(args, 'no_symspell', False)
+    if not no_symspell:
+        if not args.quiet:
+            print(f"\nBuilding SymSpell index...")
+        
+        symspell = index.build_symspell(max_distance=2)
+        fuzzy_path = symspell.save(str(site_dir / 'fuzzy'), compress=not args.no_compress)
+        
+        stats = symspell.get_stats()
+        print(f"SymSpell index saved to: {fuzzy_path}")
+        print(f"SymSpell index: {stats['word_count']} words, {stats['unique_deletes']} deletion entries")
+    
+    # Build and save n-gram index for prefix/substring search
+    no_ngram = getattr(args, 'no_ngram', False)
+    if not no_ngram:
+        if not args.quiet:
+            print(f"\nBuilding n-gram index...")
+        
+        ngram_index = index.build_ngram_index(n=3)
+        ngram_path = ngram_index.save(str(site_dir / 'ngram'), compress=not args.no_compress)
+        
+        stats = ngram_index.get_stats()
+        print(f"N-gram index saved to: {ngram_path}")
+        print(f"N-gram index: {stats['term_count']} terms, {stats['ngram_count']} trigrams")
+    
     return 0
 
 
@@ -269,6 +295,8 @@ def cmd_search(args):
             enable_autocomplete=True,
             enable_facets=not getattr(args, 'no_facets', False),
             enable_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None,
+            enable_symspell=not getattr(args, 'no_symspell', False),
+            enable_ngram=not getattr(args, 'no_ngram', False),
             synonym_groups=custom_synonyms
         )
     else:
@@ -416,7 +444,9 @@ def cmd_interactive(args):
     engine = EnhancedSearchEngine.load(
         index_path,
         cache_size=128,
-        cache_path=cache_path
+        cache_path=cache_path,
+        enable_symspell=not getattr(args, 'no_symspell', False),
+        enable_ngram=not getattr(args, 'no_ngram', False)
     )
     
     stats = engine.get_stats()
@@ -911,6 +941,8 @@ def cmd_serve(args):
         enable_autocomplete=True,
         enable_facets=True,
         enable_synonyms=enable_synonyms,
+        enable_symspell=not getattr(args, 'no_symspell', False),
+        enable_ngram=not getattr(args, 'no_ngram', False),
         cache_size=cache_size,
         cache_ttl=cache_ttl,
         cache_path=cache_path

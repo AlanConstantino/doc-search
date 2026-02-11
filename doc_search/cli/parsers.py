@@ -111,6 +111,10 @@ def _add_index_parser(subparsers):
                              help='Don\'t compress the index file')
     index_parser.add_argument('--no-stemming', action='store_true',
                              help='Disable Porter stemming')
+    index_parser.add_argument('--no-symspell', action='store_true',
+                             help='Skip building SymSpell index for suggestions')
+    index_parser.add_argument('--no-ngram', action='store_true',
+                             help='Skip building n-gram index for prefix/substring search')
     index_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     index_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
@@ -150,6 +154,10 @@ def _add_search_parser(subparsers):
                               help='Filter by URL path category (e.g., library, tutorial, api)')
     search_parser.add_argument('--filter-section', metavar='SECTION',
                               help='Filter by section name')
+    search_parser.add_argument('--no-symspell', action='store_true',
+                              help='Disable SymSpell suggestions (use basic spellcheck)')
+    search_parser.add_argument('--no-ngram', action='store_true',
+                              help='Disable n-gram prefix/substring search')
     search_parser.add_argument('--separate-paths', action='store_true',
                               help='Use if site was crawled with --separate-paths')
     search_parser.set_defaults(func=cmd_search)
@@ -177,6 +185,10 @@ def _add_interactive_parser(subparsers):
                                    help='Max results to fetch per query (default: 100)')
     interactive_parser.add_argument('--scores', '-s', action='store_true',
                                    help='Show BM25 scores')
+    interactive_parser.add_argument('--no-symspell', action='store_true',
+                                   help='Disable SymSpell suggestions (use basic spellcheck)')
+    interactive_parser.add_argument('--no-ngram', action='store_true',
+                                   help='Disable n-gram prefix/substring search')
     interactive_parser.add_argument('--separate-paths', action='store_true',
                                    help='Use if site was crawled with --separate-paths')
     interactive_parser.set_defaults(func=cmd_interactive)
@@ -242,4 +254,8 @@ def _add_serve_parser(subparsers):
                              help='Path to cache file (default: <site_dir>/.cache.db)')
     serve_parser.add_argument('--no-javascript', action='store_true',
                              help='Serve pure HTML/CSS UI without JavaScript')
+    serve_parser.add_argument('--no-symspell', action='store_true',
+                             help='Disable SymSpell suggestions (use basic spellcheck)')
+    serve_parser.add_argument('--no-ngram', action='store_true',
+                             help='Disable n-gram prefix/substring search')
     serve_parser.set_defaults(func=cmd_serve)
