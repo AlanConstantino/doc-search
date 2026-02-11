@@ -1106,7 +1106,8 @@ class EnhancedSearchEngine(SearchEngine):
         
         # Process results (phrase matching, snippets, etc.)
         results = []
-        terms_set = set(terms)
+        # Use expanded terms for highlighting (includes wildcard expansions and synonyms)
+        terms_set = set(expanded_terms)
         for phrase in phrases:
             terms_set.update(phrase)
         
