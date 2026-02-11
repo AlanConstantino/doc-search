@@ -753,6 +753,119 @@ def cmd_list(args):
     return 0
 
 
+def cmd_delete(args):
+    """Delete crawled site(s) and their indexes."""
+    import shutil
+    
+    dry_run = getattr(args, 'dry_run', False)
+    delete_all = getattr(args, 'all', False)
+    site_id = getattr(args, 'site', None)
+    
+    if not DEFAULT_DATA_DIR.exists():
+        print("No sites crawled yet.")
+        return 0
+    
+    sites_to_delete = []
+    
+    if delete_all:
+        # Delete all sites
+        for site_dir in DEFAULT_DATA_DIR.iterdir():
+            if site_dir.is_dir():
+                sites_to_delete.append(site_dir)
+    elif site_id:
+        # Find site by URL or hash ID
+        found = False
+        
+        # First, check if it's a direct hash match
+        direct_match = DEFAULT_DATA_DIR / site_id
+        if direct_match.exists() and direct_match.is_dir():
+            sites_to_delete.append(direct_match)
+            found = True
+        
+        # If not a direct hash, check if it's a URL
+        if not found and (site_id.startswith('http://') or site_id.startswith('https://')):
+            # Try to find by URL hash
+            url_hash = site_hash(site_id, include_path=False)
+            hash_match = DEFAULT_DATA_DIR / url_hash
+            if hash_match.exists() and hash_match.is_dir():
+                sites_to_delete.append(hash_match)
+                found = True
+            else:
+                # Also try with include_path=True
+                url_hash_path = site_hash(site_id, include_path=True)
+                hash_path_match = DEFAULT_DATA_DIR / url_hash_path
+                if hash_path_match.exists() and hash_path_match.is_dir():
+                    sites_to_delete.append(hash_path_match)
+                    found = True
+        
+        # If still not found, search metadata files for matching URL
+        if not found:
+            for site_dir in DEFAULT_DATA_DIR.iterdir():
+                if not site_dir.is_dir():
+                    continue
+                metadata_file = site_dir / 'metadata.json'
+                if metadata_file.exists():
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                    url = metadata.get('url', '')
+                    # Match if the site_id is contained in the URL or matches the hash
+                    if site_id in url or site_dir.name.startswith(site_id):
+                        sites_to_delete.append(site_dir)
+                        found = True
+                        break
+        
+        if not found:
+            print(style_error(f"Error: Site not found: {site_id}"))
+            print()
+            print("Use 'doc_search list' to see available sites.")
+            print("You can specify a site by URL or hash ID.")
+            return 1
+    else:
+        print(style_error("Error: Must specify a site or use --all"))
+        return 1
+    
+    if not sites_to_delete:
+        print("No sites to delete.")
+        return 0
+    
+    # Show what will be deleted
+    total_size = 0
+    print(f"{'Would delete' if dry_run else 'Deleting'} {len(sites_to_delete)} site(s):")
+    print()
+    
+    for site_dir in sites_to_delete:
+        # Get site info
+        metadata_file = site_dir / 'metadata.json'
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                metadata = json.load(f)
+            url = metadata.get('url', 'Unknown')
+            pages = metadata.get('stats', {}).get('pages_crawled', 0)
+        else:
+            url = "(no metadata)"
+            pages = 0
+        
+        # Calculate size
+        site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
+        total_size += site_size
+        
+        print(f"  {_e('cross')} {site_dir.name}")
+        print(f"    URL: {url}")
+        print(f"    Pages: {pages}, Size: {format_size(site_size)}")
+        print()
+        
+        if not dry_run:
+            shutil.rmtree(site_dir)
+    
+    if dry_run:
+        print(style_info(f"Dry run: Would free {format_size(total_size)}"))
+        print(style_info("Run without --dry-run to actually delete."))
+    else:
+        print(style_success(f"{_e('check')} Deleted {len(sites_to_delete)} site(s), freed {format_size(total_size)}"))
+    
+    return 0
+
+
 def cmd_serve(args):
     """Start the web UI server for searching."""
     import webbrowser

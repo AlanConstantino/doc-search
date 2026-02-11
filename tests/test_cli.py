@@ -7,8 +7,10 @@ This module provides test infrastructure for CLI testing including:
 - Smoke tests to verify the setup works
 """
 
+import argparse
 import io
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -18,7 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 from doc_search.cli import main, create_parser
-from doc_search.cli.commands import get_site_dir, DEFAULT_DATA_DIR
+from doc_search.cli import commands
+from doc_search.cli.commands import get_site_dir, DEFAULT_DATA_DIR, cmd_delete
 
 
 # ============================================================================
@@ -447,7 +450,7 @@ class TestParserCreation(unittest.TestCase):
     def test_parser_has_subcommands(self):
         """Parser should recognize all expected subcommands."""
         expected_commands = ['crawl', 'index', 'search', 'autocomplete', 
-                           'interactive', 'stats', 'list', 'serve']
+                           'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in expected_commands:
             # Should not raise for valid commands
@@ -3712,6 +3715,233 @@ class TestCmdListIntegration(unittest.TestCase):
 
 
 # ============================================================================
+# Delete Command Tests
+# ============================================================================
+
+class TestCmdDelete(unittest.TestCase):
+    """Tests for cmd_delete function."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.test_dir = tempfile.mkdtemp()
+        self.original_data_dir = commands.DEFAULT_DATA_DIR
+        commands.DEFAULT_DATA_DIR = Path(self.test_dir)
+    
+    def tearDown(self):
+        """Clean up test fixtures."""
+        commands.DEFAULT_DATA_DIR = self.original_data_dir
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+    
+    def _create_test_site(self, site_hash, url, pages=5):
+        """Create a test site with metadata."""
+        site_dir = Path(self.test_dir) / site_hash
+        site_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create metadata
+        metadata = {
+            'url': url,
+            'stats': {'pages_crawled': pages}
+        }
+        with open(site_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+        # Create some dummy files
+        pages_dir = site_dir / 'pages'
+        pages_dir.mkdir(exist_ok=True)
+        for i in range(pages):
+            (pages_dir / f'page_{i}.json').write_text('{}')
+        
+        return site_dir
+    
+    def test_delete_no_sites(self):
+        """Delete with no sites should report no sites."""
+        args = argparse.Namespace(site=None, all=False, dry_run=False)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 1)
+        # Error message goes to stdout via style_error
+        self.assertIn('Must specify a site or use --all', stdout.getvalue())
+    
+    def test_delete_nonexistent_site(self):
+        """Delete nonexistent site should report error."""
+        args = argparse.Namespace(site='nonexistent', all=False, dry_run=False)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 1)
+        # Error message goes to stdout via style_error
+        self.assertIn('Site not found', stdout.getvalue())
+    
+    def test_delete_by_hash_dry_run(self):
+        """Delete by hash with dry-run should not actually delete."""
+        site_dir = self._create_test_site('abc123', 'https://example.com')
+        
+        args = argparse.Namespace(site='abc123', all=False, dry_run=True)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        self.assertTrue(site_dir.exists())  # Should still exist
+        self.assertIn('Would delete', stdout.getvalue())
+        self.assertIn('Dry run', stdout.getvalue())
+    
+    def test_delete_by_hash(self):
+        """Delete by hash should remove the site."""
+        site_dir = self._create_test_site('abc123', 'https://example.com')
+        self.assertTrue(site_dir.exists())
+        
+        args = argparse.Namespace(site='abc123', all=False, dry_run=False)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        self.assertFalse(site_dir.exists())  # Should be deleted
+        self.assertIn('Deleted', stdout.getvalue())
+    
+    def test_delete_by_url_dry_run(self):
+        """Delete by URL with dry-run should find and report site."""
+        from doc_search.utils import site_hash as compute_hash
+        url = 'https://test.example.com'
+        hash_id = compute_hash(url)
+        site_dir = self._create_test_site(hash_id, url)
+        
+        args = argparse.Namespace(site=url, all=False, dry_run=True)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        self.assertTrue(site_dir.exists())
+        self.assertIn('Would delete', stdout.getvalue())
+    
+    def test_delete_all_dry_run(self):
+        """Delete all with dry-run should report all sites."""
+        self._create_test_site('site1', 'https://example1.com', 3)
+        self._create_test_site('site2', 'https://example2.com', 5)
+        self._create_test_site('site3', 'https://example3.com', 2)
+        
+        args = argparse.Namespace(site=None, all=True, dry_run=True)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn('Would delete 3 site(s)', output)
+        self.assertIn('example1.com', output)
+        self.assertIn('example2.com', output)
+        self.assertIn('example3.com', output)
+        
+        # Sites should still exist
+        self.assertTrue((Path(self.test_dir) / 'site1').exists())
+        self.assertTrue((Path(self.test_dir) / 'site2').exists())
+        self.assertTrue((Path(self.test_dir) / 'site3').exists())
+    
+    def test_delete_all(self):
+        """Delete all should remove all sites."""
+        self._create_test_site('site1', 'https://example1.com')
+        self._create_test_site('site2', 'https://example2.com')
+        
+        args = argparse.Namespace(site=None, all=True, dry_run=False)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        self.assertFalse((Path(self.test_dir) / 'site1').exists())
+        self.assertFalse((Path(self.test_dir) / 'site2').exists())
+        self.assertIn('Deleted 2 site(s)', stdout.getvalue())
+    
+    def test_delete_shows_size(self):
+        """Delete should show size of deleted sites."""
+        self._create_test_site('abc123', 'https://example.com', 10)
+        
+        args = argparse.Namespace(site='abc123', all=False, dry_run=True)
+        with capture_output() as (stdout, stderr):
+            code = cmd_delete(args)
+        
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        # Should contain size information
+        self.assertIn('Size:', output)
+
+
+class TestCmdDeleteArgParsing(unittest.TestCase):
+    """Tests for delete command argument parsing."""
+    
+    def test_delete_parser_exists(self):
+        """Delete subparser should exist."""
+        parser = create_parser()
+        # Should not raise when parsing delete command (--help causes SystemExit)
+        try:
+            parser.parse_args(['delete', '--help'])
+        except SystemExit:
+            pass  # Expected - help causes exit
+    
+    def test_delete_requires_site_or_all(self):
+        """Delete without site or --all should fail in command."""
+        parser = create_parser()
+        args = parser.parse_args(['delete'])
+        
+        # site should be None
+        self.assertIsNone(args.site)
+        self.assertFalse(args.all)
+    
+    def test_delete_with_site_arg(self):
+        """Delete with site argument should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', 'abc123'])
+        
+        self.assertEqual(args.site, 'abc123')
+        self.assertFalse(args.all)
+        self.assertFalse(args.dry_run)
+    
+    def test_delete_with_all_flag(self):
+        """Delete with --all flag should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', '--all'])
+        
+        self.assertIsNone(args.site)
+        self.assertTrue(args.all)
+    
+    def test_delete_with_all_short_flag(self):
+        """Delete with -a flag should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', '-a'])
+        
+        self.assertTrue(args.all)
+    
+    def test_delete_with_dry_run_flag(self):
+        """Delete with --dry-run flag should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', 'abc123', '--dry-run'])
+        
+        self.assertEqual(args.site, 'abc123')
+        self.assertTrue(args.dry_run)
+    
+    def test_delete_with_dry_run_short_flag(self):
+        """Delete with -n flag should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', '-n', 'abc123'])
+        
+        self.assertTrue(args.dry_run)
+    
+    def test_delete_all_with_dry_run(self):
+        """Delete with --all and --dry-run should parse correctly."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', '--all', '--dry-run'])
+        
+        self.assertTrue(args.all)
+        self.assertTrue(args.dry_run)
+    
+    def test_delete_has_func(self):
+        """Delete command should have func attribute."""
+        parser = create_parser()
+        args = parser.parse_args(['delete', '--all'])
+        
+        self.assertTrue(hasattr(args, 'func'))
+        self.assertTrue(callable(args.func))
+
+
+# ============================================================================
 # CLI Parsers Module Tests (Phase 1.8)
 # ============================================================================
 
@@ -3751,7 +3981,7 @@ class TestCLIParsersModule(unittest.TestCase):
         """All expected subcommands should be registered."""
         expected_commands = [
             'crawl', 'index', 'search', 'autocomplete',
-            'interactive', 'stats', 'list', 'serve'
+            'interactive', 'stats', 'list', 'delete', 'serve'
         ]
         
         parser = create_parser()
@@ -3770,8 +4000,8 @@ class TestCLIParsersModule(unittest.TestCase):
         for cmd in expected_commands:
             self.assertIn(cmd, registered_commands, f"Command '{cmd}' should be registered")
     
-    def test_subcommand_count_is_exactly_eight(self):
-        """Parser should have exactly 8 subcommands."""
+    def test_subcommand_count_is_exactly_nine(self):
+        """Parser should have exactly 9 subcommands."""
         parser = create_parser()
         
         subparsers_action = None
@@ -3780,14 +4010,14 @@ class TestCLIParsersModule(unittest.TestCase):
                 subparsers_action = action
                 break
         
-        self.assertEqual(len(subparsers_action.choices), 8)
+        self.assertEqual(len(subparsers_action.choices), 9)
     
     def test_each_subcommand_has_func(self):
         """Each subcommand should have a func default set."""
         parser = create_parser()
         
         commands = ['crawl', 'index', 'search', 'autocomplete',
-                   'interactive', 'stats', 'list', 'serve']
+                   'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in commands:
             # Get the subparser for this command
@@ -3851,7 +4081,7 @@ class TestMainParserHelpText(unittest.TestCase):
         
         output = stdout.getvalue()
         commands = ['crawl', 'index', 'search', 'autocomplete',
-                   'interactive', 'stats', 'list', 'serve']
+                   'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in commands:
             self.assertIn(cmd, output, f"Help should mention '{cmd}' command")
