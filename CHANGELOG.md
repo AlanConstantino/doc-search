@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.18.0] - 2026-02-11
+## [1.19.0] - 2026-02-11
 
 ### ⚠️ BREAKING CHANGES
 - **Python 3.9+ now required** (previously 3.7+) - needed for pypdf library
@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Detects headings via font size, bold fonts, ALL CAPS, and numbered sections
   - Extracts PDF outline/TOC as additional headings
   - Headings used for field-aware search ranking (headings weighted 2-3x higher)
+
+## [1.18.0] - 2026-02-11
+
+### Added
 - **Two-stage retrieval with reranking** (#190)
   - BM25 retrieval followed by feature-based reranking
   - Configurable via `RerankConfig`
