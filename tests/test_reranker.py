@@ -23,22 +23,28 @@ class TestRerankConfig(unittest.TestCase):
         self.assertEqual(config.recall_multiplier, 10)
         self.assertEqual(config.max_candidates, 500)
         self.assertEqual(config.candidate_limit, 100)
-        self.assertAlmostEqual(config.weight_bm25, 0.4)
-        self.assertAlmostEqual(config.weight_title_match, 0.25)
+        self.assertAlmostEqual(config.weight_bm25, 0.35)
+        self.assertAlmostEqual(config.weight_field, 0.30)
         self.assertAlmostEqual(config.weight_coverage, 0.20)
         self.assertAlmostEqual(config.weight_phrase, 0.15)
+        # Field weights
+        self.assertAlmostEqual(config.field_weight_title, 5.0)
+        self.assertAlmostEqual(config.field_weight_headings, 2.5)
+        self.assertAlmostEqual(config.field_weight_body, 1.0)
     
     def test_custom_config(self):
         """Should accept custom values."""
         config = RerankConfig(
             recall_multiplier=5,
             weight_bm25=0.5,
-            coverage_beta=0.5
+            coverage_beta=0.5,
+            field_weight_title=10.0
         )
         
         self.assertEqual(config.recall_multiplier, 5)
         self.assertAlmostEqual(config.weight_bm25, 0.5)
         self.assertAlmostEqual(config.coverage_beta, 0.5)
+        self.assertAlmostEqual(config.field_weight_title, 10.0)
 
 
 class TestRerankerRecall(unittest.TestCase):
@@ -73,33 +79,33 @@ class TestRerankScoring(unittest.TestCase):
     def setUp(self):
         self.reranker = Reranker()
     
-    def test_title_match_score_full(self):
+    def test_term_matches_full(self):
         """Should return 1.0 when all terms match."""
-        score = self.reranker._compute_title_match_score(
+        score = self.reranker._compute_term_matches(
             "Python Tutorial Guide",
             ["python", "tutorial"]
         )
         self.assertAlmostEqual(score, 1.0)
     
-    def test_title_match_score_partial(self):
+    def test_term_matches_partial(self):
         """Should return fraction for partial match."""
-        score = self.reranker._compute_title_match_score(
+        score = self.reranker._compute_term_matches(
             "Python Guide",
             ["python", "tutorial"]
         )
         self.assertAlmostEqual(score, 0.5)
     
-    def test_title_match_score_none(self):
+    def test_term_matches_none(self):
         """Should return 0.0 when no terms match."""
-        score = self.reranker._compute_title_match_score(
+        score = self.reranker._compute_term_matches(
             "JavaScript Guide",
             ["python", "tutorial"]
         )
         self.assertAlmostEqual(score, 0.0)
     
-    def test_title_match_case_insensitive(self):
+    def test_term_matches_case_insensitive(self):
         """Should match case-insensitively."""
-        score = self.reranker._compute_title_match_score(
+        score = self.reranker._compute_term_matches(
             "PYTHON TUTORIAL",
             ["python", "tutorial"]
         )
@@ -176,6 +182,98 @@ class TestRerankScoring(unittest.TestCase):
             ["python", "tutorial"]
         )
         self.assertAlmostEqual(score, 0.0)
+
+
+class TestFieldAwareScoring(unittest.TestCase):
+    """Tests for field-aware ranking (title > headings > body)."""
+    
+    def setUp(self):
+        self.reranker = Reranker()
+    
+    def test_field_score_title_only(self):
+        """Title matches should score high even without body matches."""
+        score = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="",
+            body_text="",
+            terms=["python", "tutorial"]
+        )
+        self.assertGreater(score, 0.5)  # Title has high weight
+    
+    def test_field_score_body_only(self):
+        """Body-only matches should score lower than title matches."""
+        title_score = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="",
+            body_text="",
+            terms=["python", "tutorial"]
+        )
+        body_score = self.reranker._compute_field_score(
+            title="Guide",
+            headings_text="",
+            body_text="python tutorial content",
+            terms=["python", "tutorial"]
+        )
+        self.assertGreater(title_score, body_score)
+    
+    def test_field_score_headings_intermediate(self):
+        """Headings matches should score between title and body."""
+        title_score = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="",
+            body_text="",
+            terms=["python", "tutorial"]
+        )
+        headings_score = self.reranker._compute_field_score(
+            title="Guide",
+            headings_text="Python Tutorial Section",
+            body_text="",
+            terms=["python", "tutorial"]
+        )
+        body_score = self.reranker._compute_field_score(
+            title="Guide",
+            headings_text="",
+            body_text="python tutorial content",
+            terms=["python", "tutorial"]
+        )
+        self.assertGreater(title_score, headings_score)
+        self.assertGreater(headings_score, body_score)
+    
+    def test_field_score_cumulative(self):
+        """Score should be higher when terms appear in multiple fields."""
+        single_field = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="",
+            body_text="",
+            terms=["python", "tutorial"]
+        )
+        multi_field = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="Python Basics",
+            body_text="python tutorial guide",
+            terms=["python", "tutorial"]
+        )
+        self.assertGreaterEqual(multi_field, single_field)
+    
+    def test_field_score_empty_terms(self):
+        """Should return 0 for empty terms."""
+        score = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="Section",
+            body_text="content",
+            terms=[]
+        )
+        self.assertAlmostEqual(score, 0.0)
+    
+    def test_field_score_normalized(self):
+        """Score should be capped at field_max_score."""
+        score = self.reranker._compute_field_score(
+            title="Python Tutorial",
+            headings_text="Python Tutorial",
+            body_text="python tutorial python tutorial",
+            terms=["python", "tutorial"]
+        )
+        self.assertLessEqual(score, self.reranker.config.field_max_score)
 
 
 class TestRerankerIntegration(unittest.TestCase):

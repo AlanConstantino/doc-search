@@ -27,16 +27,19 @@ from dataclasses import dataclass, field
 
 from .constants import (
     RERANK_WEIGHT_BM25,
-    RERANK_WEIGHT_TITLE_MATCH,
+    RERANK_WEIGHT_FIELD,
     RERANK_WEIGHT_COVERAGE,
     RERANK_WEIGHT_PHRASE,
-    RERANK_TITLE_BOOST,
     RERANK_COVERAGE_BETA,
     RERANK_TITLE_COVERAGE_BETA,
     RERANK_FULL_COVERAGE_BONUS,
     RERANK_RECALL_MULTIPLIER,
     RERANK_MAX_CANDIDATES,
     RERANK_CANDIDATE_LIMIT,
+    FIELD_WEIGHT_TITLE,
+    FIELD_WEIGHT_HEADINGS,
+    FIELD_WEIGHT_BODY,
+    FIELD_MAX_SCORE,
 )
 
 
@@ -50,10 +53,12 @@ class RerankConfig:
         max_candidates: Maximum candidates to fetch in recall stage
         candidate_limit: Maximum candidates to rerank (for performance)
         weight_bm25: Weight for base BM25 score
-        weight_title_match: Weight for title term matches
+        weight_field: Weight for field-aware term matching
         weight_coverage: Weight for query term coverage
         weight_phrase: Weight for phrase/proximity matches
-        title_boost: Boost factor for title matches vs body
+        field_weight_title: Weight multiplier for title field
+        field_weight_headings: Weight multiplier for headings field
+        field_weight_body: Weight multiplier for body field
         coverage_beta: Strength of coverage boost
         title_coverage_beta: Strength of title-specific coverage boost
         full_coverage_bonus: Extra bonus when all terms are present
@@ -62,10 +67,13 @@ class RerankConfig:
     max_candidates: int = RERANK_MAX_CANDIDATES
     candidate_limit: int = RERANK_CANDIDATE_LIMIT
     weight_bm25: float = RERANK_WEIGHT_BM25
-    weight_title_match: float = RERANK_WEIGHT_TITLE_MATCH
+    weight_field: float = RERANK_WEIGHT_FIELD
     weight_coverage: float = RERANK_WEIGHT_COVERAGE
     weight_phrase: float = RERANK_WEIGHT_PHRASE
-    title_boost: float = RERANK_TITLE_BOOST
+    field_weight_title: float = FIELD_WEIGHT_TITLE
+    field_weight_headings: float = FIELD_WEIGHT_HEADINGS
+    field_weight_body: float = FIELD_WEIGHT_BODY
+    field_max_score: float = FIELD_MAX_SCORE
     coverage_beta: float = RERANK_COVERAGE_BETA
     title_coverage_beta: float = RERANK_TITLE_COVERAGE_BETA
     full_coverage_bonus: float = RERANK_FULL_COVERAGE_BONUS
@@ -149,29 +157,77 @@ class Reranker:
             for c in candidates:
                 c['_norm_bm25'] = 0.0
     
-    def _compute_title_match_score(
+    def _compute_term_matches(
         self, 
-        title: str, 
+        text: str, 
         terms: List[str]
     ) -> float:
         """
-        Compute score based on query term matches in title.
+        Compute the fraction of query terms that match in text.
         
         Args:
-            title: Document title
-            terms: Original query terms
+            text: Text to search in
+            terms: Query terms to match
             
         Returns:
             Normalized score (0-1) based on term matches
         """
-        if not title or not terms:
+        if not text or not terms:
             return 0.0
         
-        title_lower = title.lower()
-        matches = sum(1 for term in terms if term.lower() in title_lower)
+        text_lower = text.lower()
+        matches = sum(1 for term in terms if term.lower() in text_lower)
         
         # Normalize by number of query terms
         return matches / len(terms)
+    
+    def _compute_field_score(
+        self,
+        title: str,
+        headings_text: str,
+        body_text: Optional[str],
+        terms: List[str]
+    ) -> float:
+        """
+        Compute field-aware score based on where query terms appear.
+        
+        Fields are weighted: title > headings > body
+        A term appearing in the title is worth more than in headings,
+        which is worth more than in body text.
+        
+        Args:
+            title: Document title
+            headings_text: Concatenated heading text (h1, h2, etc.)
+            body_text: Full document body text
+            terms: Original query terms
+            
+        Returns:
+            Normalized field score (0-1)
+        """
+        if not terms:
+            return 0.0
+        
+        # Calculate weighted score for each field
+        title_matches = self._compute_term_matches(title, terms)
+        headings_matches = self._compute_term_matches(headings_text, terms)
+        body_matches = self._compute_term_matches(body_text or '', terms)
+        
+        # Weight by field importance
+        # Each term can only contribute once - use max across fields weighted
+        total_weight = (
+            self.config.field_weight_title + 
+            self.config.field_weight_headings + 
+            self.config.field_weight_body
+        )
+        
+        weighted_score = (
+            title_matches * self.config.field_weight_title +
+            headings_matches * self.config.field_weight_headings +
+            body_matches * self.config.field_weight_body
+        ) / total_weight
+        
+        # Cap at field_max_score
+        return min(weighted_score, self.config.field_max_score)
     
     def _compute_coverage_score(
         self, 
@@ -324,33 +380,43 @@ class Reranker:
         doc: Dict[str, Any],
         body_text: Optional[str],
         original_terms: List[str],
-        phrases: List[List[str]]
+        phrases: List[List[str]],
+        headings_text: Optional[str] = None
     ) -> Tuple[float, Dict[str, float]]:
         """
         Compute the final rerank score for a document.
         
         Combines multiple signals:
         - Normalized BM25 score (from recall stage)
-        - Title term matches
+        - Field-aware term matches (title > headings > body)
         - Query term coverage
         - Phrase/proximity matches
         
         Args:
-            doc: Document dict with 'score', 'title', etc.
+            doc: Document dict with 'score', 'title', 'headings_text', etc.
             body_text: Full document text (or None)
             original_terms: Original query terms (not expanded)
             phrases: Phrase groups from query
+            headings_text: Concatenated heading text (optional, falls back to doc)
             
         Returns:
             Tuple of (final_score, score_components_dict)
         """
         title = doc.get('title', '') or ''
+        # Get headings from doc metadata if not provided
+        if headings_text is None:
+            headings_text = doc.get('headings_text', '') or ''
         
         # Get normalized BM25 score (set by _normalize_bm25_scores)
         bm25_score = doc.get('_norm_bm25', 0.0)
         
-        # Title match score
-        title_match = self._compute_title_match_score(title, original_terms)
+        # Field-aware score (title > headings > body)
+        field_score = self._compute_field_score(
+            title=title,
+            headings_text=headings_text,
+            body_text=body_text,
+            terms=original_terms
+        )
         
         # Coverage scores
         body_coverage = 1.0
@@ -369,6 +435,9 @@ class Reranker:
         phrase_score = 0.0
         if phrases:
             phrase_score += self._compute_phrase_score(title, phrases, in_title=True)
+            if headings_text:
+                # Headings phrase match is between title and body
+                phrase_score += self._compute_phrase_score(headings_text, phrases, in_title=False) * 1.5
             if body_text:
                 phrase_score += self._compute_phrase_score(body_text, phrases, in_title=False)
             # Normalize phrase score (cap at 1.0)
@@ -377,7 +446,7 @@ class Reranker:
         # Combine scores with weights
         weighted_score = (
             bm25_score * self.config.weight_bm25 +
-            title_match * self.config.weight_title_match +
+            field_score * self.config.weight_field +
             phrase_score * self.config.weight_phrase
         )
         
@@ -392,7 +461,7 @@ class Reranker:
         
         components = {
             'bm25': bm25_score * self.config.weight_bm25,
-            'title_match': title_match * self.config.weight_title_match,
+            'field': field_score * self.config.weight_field,
             'coverage': avg_coverage * self.config.weight_coverage,
             'phrase': phrase_score * self.config.weight_phrase,
             'coverage_multiplier': coverage_multiplier,

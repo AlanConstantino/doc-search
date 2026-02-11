@@ -1354,9 +1354,14 @@ class EnhancedSearchEngine(SearchEngine):
             'candidate_limit': self._reranker.config.candidate_limit,
             'weights': {
                 'bm25': self._reranker.config.weight_bm25,
-                'title_match': self._reranker.config.weight_title_match,
+                'field': self._reranker.config.weight_field,
                 'coverage': self._reranker.config.weight_coverage,
                 'phrase': self._reranker.config.weight_phrase,
+            },
+            'field_weights': {
+                'title': self._reranker.config.field_weight_title,
+                'headings': self._reranker.config.field_weight_headings,
+                'body': self._reranker.config.field_weight_body,
             }
         }
         
