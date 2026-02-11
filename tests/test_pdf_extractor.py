@@ -896,27 +896,28 @@ class TestChunkExtraction(unittest.TestCase):
         """Chunks should track the heading level of their section."""
         extractor = PDFExtractor()
         
+        # Use clear section heading keywords (the new conservative approach)
         text_elements = [
-            {'text': 'Main Title', 'font_size': 24, 'font_name': '', 'page': 1},
-            {'text': 'Title content.', 'font_size': 12, 'font_name': '', 'page': 1},
-            {'text': 'Subtitle', 'font_size': 16, 'font_name': '', 'page': 1},
-            {'text': 'Subtitle content.', 'font_size': 12, 'font_name': '', 'page': 1},
+            {'text': '1 Introduction', 'font_size': 24, 'font_name': '', 'page': 1},
+            {'text': 'Intro content.', 'font_size': 12, 'font_name': '', 'page': 1},
+            {'text': '1.1 Background', 'font_size': 16, 'font_name': '', 'page': 1},
+            {'text': 'Background content.', 'font_size': 12, 'font_name': '', 'page': 1},
         ]
         
         chunks, headings, _ = extractor._build_chunks_with_context(text_elements)
         
         # Verify heading levels were detected
         heading_levels = {h[1]: h[0] for h in headings}
-        self.assertIn('Main Title', heading_levels)
+        self.assertIn('1 Introduction', heading_levels)
         
         # Chunks under different headings should have different section_levels
-        title_chunk = [c for c in chunks if 'Title content' in c['text']]
-        subtitle_chunk = [c for c in chunks if 'Subtitle content' in c['text']]
+        intro_chunk = [c for c in chunks if 'Intro content' in c['text']]
+        bg_chunk = [c for c in chunks if 'Background content' in c['text']]
         
-        if title_chunk and subtitle_chunk:
+        if intro_chunk and bg_chunk:
             # The exact levels depend on detection, but they should be tracked
-            self.assertIsInstance(title_chunk[0]['section_level'], int)
-            self.assertIsInstance(subtitle_chunk[0]['section_level'], int)
+            self.assertIsInstance(intro_chunk[0]['section_level'], int)
+            self.assertIsInstance(bg_chunk[0]['section_level'], int)
     
     def test_empty_elements_returns_empty_chunks(self):
         """Should return empty chunks for empty input."""

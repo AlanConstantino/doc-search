@@ -224,45 +224,56 @@ class PDFExtractor:
         current_section = ''
         current_section_level = 0
         
-        # Pattern for numbered sections like "1.2.3 Section Title"
-        section_pattern = re.compile(r'^(\d+\.)+\d*\s+\w')
+        # Common section heading keywords (language-agnostic, common across documents)
+        section_keywords = {
+            'abstract', 'introduction', 'background', 'overview',
+            'method', 'methods', 'methodology', 'approach',
+            'result', 'results', 'findings', 'evaluation',
+            'discussion', 'analysis', 
+            'conclusion', 'conclusions', 'summary',
+            'references', 'bibliography',
+            'acknowledgment', 'acknowledgments', 'acknowledgement', 'acknowledgements',
+            'appendix', 'appendices',
+            'related work', 'prior work', 'previous work',
+            'future work', 'limitations',
+            'experiment', 'experiments', 'experimental setup',
+            'implementation', 'design', 'architecture',
+            'preliminaries', 'notation', 'definitions',
+        }
         
-        # Patterns to exclude from headings (author names, affiliations, etc.)
-        exclude_patterns = [
-            re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*,'),  # "John Doe,"
-            re.compile(r'^[A-Z][A-Z\s]+,'),  # "JOHN DOE,"
-            re.compile(r',\s*(and\s+)?[A-Z]'),  # ", and John" or ", J"
-            re.compile(r'(University|College|Institute|Department|USA|UK|China|Germany)', re.IGNORECASE),
-            re.compile(r'@|\.edu|\.com|\.org'),  # Email patterns
-            re.compile(r'^\d+$'),  # Just numbers (footnote markers)
-            re.compile(r'arXiv:\d+\.\d+', re.IGNORECASE),  # arXiv IDs
-            re.compile(r'\[\w+\.\w+\]'),  # [cs.AI] style tags
-            re.compile(r'^\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', re.IGNORECASE),  # Dates
-        ]
+        # Pattern for numbered sections - number followed by section-like words
+        # e.g., "1 Introduction", "2.3 Related Work", "4.1.2 Experimental Setup"
+        numbered_section_pattern = re.compile(
+            r'^(\d+\.)*\d+\.?\s+(' + '|'.join(re.escape(kw) for kw in section_keywords) + r')',
+            re.IGNORECASE
+        )
         
-        # Real section heading patterns (positive indicators)
-        section_indicators = [
-            re.compile(r'^(\d+\.)*\d+\s+[A-Z]'),  # "1.2 Introduction" or "3 Methods"
-            re.compile(r'^(Abstract|Introduction|Background|Methods?|Results?|Discussion|Conclusion|References|Acknowledgment)', re.IGNORECASE),
-            re.compile(r'^(Related Work|Future Work|Limitations|Appendix)', re.IGNORECASE),
-        ]
-        
-        def is_likely_section_heading(text: str) -> bool:
-            """Check if text looks like a real section heading."""
-            for pattern in section_indicators:
-                if pattern.match(text):
-                    return True
-            return False
-        
-        def looks_like_noise(text: str) -> bool:
-            """Check if text looks like author name, affiliation, or metadata."""
-            # Very short text ending with comma often author names
-            if len(text) < 40 and text.rstrip().endswith(','):
+        def is_clear_section_heading(text: str) -> bool:
+            """
+            Check if text is clearly a section heading.
+            
+            Only returns True for unambiguous cases:
+            - Numbered sections followed by known keywords (1.2 Introduction)
+            - Known section keywords alone (Abstract, Methods, etc.)
+            """
+            text_clean = text.strip()
+            text_lower = text_clean.lower()
+            
+            # Numbered section with known keyword: "1 Introduction", "2.3 Methods"
+            if numbered_section_pattern.match(text_clean):
                 return True
-            # Check against exclude patterns
-            for pattern in exclude_patterns:
-                if pattern.search(text):
+            
+            # Check for section keywords (case-insensitive, at start or whole text)
+            for keyword in section_keywords:
+                if text_lower == keyword or text_lower.startswith(keyword + ' ') or text_lower.startswith(keyword + ':'):
                     return True
+            
+            # ALL CAPS short text that matches a keyword
+            if text_clean.isupper() and len(text_clean) < 50:
+                for keyword in section_keywords:
+                    if keyword in text_lower:
+                        return True
+            
             return False
         
         for el in text_elements:
@@ -298,7 +309,7 @@ class PDFExtractor:
                     level = 2
             
             # Numbered section detection (e.g., "1.2 Methods", "3.4.1 Results")
-            if not is_heading and section_pattern.match(text):
+            if not is_heading and numbered_section_pattern.match(text):
                 is_heading = True
                 # Determine level by number of dots
                 dots = text.split()[0].count('.')
@@ -308,39 +319,16 @@ class PDFExtractor:
                 # Clean up heading text
                 clean_text = ' '.join(text.split())  # Normalize whitespace
                 
-                # Determine if this is a real section heading
-                is_real_heading = False
-                if len(clean_text) > 200:
-                    # Too long to be a heading
-                    is_real_heading = False
-                elif looks_like_noise(clean_text):
-                    # Author names, affiliations, metadata - not a heading
-                    is_real_heading = False
-                elif is_likely_section_heading(clean_text):
-                    # Matches section heading patterns - definitely a heading
-                    is_real_heading = True
-                elif section_pattern.match(clean_text):
-                    # Numbered section - definitely a heading
-                    is_real_heading = True
-                else:
-                    # Ambiguous - only treat as heading if it's clearly formatted
-                    # Skip very long text or paper titles (contain colons like "Title: Subtitle")
-                    if len(clean_text) > 50:
-                        is_real_heading = False
-                    elif ': ' in clean_text and not clean_text[0].isdigit():
-                        # Likely a paper title "Main Title: Subtitle", skip it
-                        # But allow numbered sections like "5.1: Results"
-                        is_real_heading = False
-                    elif level == 1 or (clean_text.isupper() and len(clean_text) > 3):
-                        is_real_heading = True
-                
-                if is_real_heading:
+                # For section context, only use clearly identifiable section headings
+                # This is conservative - we'd rather show no section than wrong section
+                if len(clean_text) <= 200 and is_clear_section_heading(clean_text):
                     headings.append((level, clean_text))
                     # Update current section context
                     current_section = clean_text
                     current_section_level = level
                 else:
-                    # Treat as body text
+                    # Not a clear section heading - treat as body text
+                    # (It may still be a heading for other purposes, but not for section context)
                     body_parts.append(text)
                     chunks.append({
                         'text': text,
