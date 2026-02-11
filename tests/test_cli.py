@@ -988,6 +988,37 @@ class MockSymSpell:
         return output_path
 
 
+class MockNGramIndex:
+    """Mock NGramIndex for testing CLI index command."""
+    
+    def __init__(self, n: int = 3):
+        self.n = n
+        self.terms = {}
+        self.save_calls = []
+    
+    def add_term(self, term: str, frequency: int = 1):
+        self.terms[term] = frequency
+    
+    def get_stats(self):
+        return {
+            'term_count': len(self.terms),
+            'ngram_count': len(self.terms) * 5,  # Approximate
+            'n': self.n,
+            'min_term_length': 3,
+        }
+    
+    def save(self, path: str, compress: bool = True) -> str:
+        self.save_calls.append({'path': path, 'compress': compress})
+        if compress:
+            output_path = f"{path}.json.gz"
+        else:
+            output_path = f"{path}.json"
+        # Create a dummy file
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b'mock ngram index')
+        return output_path
+
+
 class MockBM25Index:
     """Mock BM25Index for testing CLI index command without real indexing.
     
@@ -1035,6 +1066,13 @@ class MockBM25Index:
         for term, freq in self.doc_freqs.items():
             symspell.add_word(term, frequency=freq)
         return symspell
+    
+    def build_ngram_index(self, n: int = 3) -> MockNGramIndex:
+        """Return mock NGram index."""
+        ngram = MockNGramIndex(n=n)
+        for term, freq in self.doc_freqs.items():
+            ngram.add_term(term, frequency=freq)
+        return ngram
     
     def save(self, path: Path, compress: bool = True) -> Path:
         """Return mock save path and create a dummy file for stat()."""

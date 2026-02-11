@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional, Iterator
 
 from .utils import tokenize
 from .symspell import SymSpell
+from .ngram import NGramIndex
 
 
 class BM25Index:
@@ -378,6 +379,25 @@ class BM25Index:
             symspell.add_word(term, frequency=doc_freq)
         
         return symspell
+    
+    def build_ngram_index(self, n: int = 3) -> NGramIndex:
+        """
+        Build an n-gram index from the vocabulary.
+        
+        Enables prefix search (term*) and substring matching.
+        
+        Args:
+            n: Size of n-grams (default: 3 for trigrams)
+            
+        Returns:
+            NGramIndex instance populated with vocabulary
+        """
+        ngram_index = NGramIndex(n=n)
+        
+        for term, doc_freq in self.doc_freqs.items():
+            ngram_index.add_term(term, frequency=doc_freq)
+        
+        return ngram_index
     
     def get_doc_id(self, url: str) -> Optional[int]:
         """

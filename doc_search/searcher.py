@@ -19,6 +19,7 @@ from .autocomplete import Autocomplete
 from .facets import FacetIndex
 from .synonyms import SynonymExpander
 from .symspell import SymSpell
+from .ngram import NGramIndex
 from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
     format_results, check_phrase_match
@@ -632,8 +633,10 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
                  enable_symspell: bool = True,
+                 enable_ngram: bool = True,
                  synonym_groups: Optional[List[Set[str]]] = None,
                  symspell_index: Optional[SymSpell] = None,
+                 ngram_index: Optional[NGramIndex] = None,
                  cache_size: int = 0,
                  cache_ttl: Optional[float] = None,
                  cache_path: Optional[Path] = None,
@@ -649,8 +652,10 @@ class EnhancedSearchEngine(SearchEngine):
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
             enable_symspell: Enable SymSpell for suggestions (default: True)
+            enable_ngram: Enable n-gram index for prefix/substring search (default: True)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
             symspell_index: Pre-loaded SymSpell index (if None, will try to load from disk)
+            ngram_index: Pre-loaded NGram index (if None, will try to load from disk)
             cache_size: Max number of queries to cache (0 to disable)
             cache_ttl: Cache TTL in seconds (None = never expire)
             cache_path: Optional path for persistent cache (survives restarts)
@@ -664,6 +669,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._facets_enabled = enable_facets
         self._synonyms_enabled = enable_synonyms
         self._symspell_enabled = enable_symspell
+        self._ngram_enabled = enable_ngram
         self._custom_synonym_groups = synonym_groups
         self._index_path = index_path
         
@@ -673,6 +679,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._facets: Optional[FacetIndex] = None
         self._synonyms: Optional[SynonymExpander] = None
         self._symspell: Optional[SymSpell] = symspell_index
+        self._ngram: Optional[NGramIndex] = ngram_index
         
         # Last search metadata (populated after each search() call)
         self.last_suggestion: Optional[str] = None
@@ -723,6 +730,27 @@ class EnhancedSearchEngine(SearchEngine):
         if self._symspell_enabled and self._symspell is None:
             # Try to load SymSpell index from disk
             self._symspell = self._load_symspell_index()
+        
+        if self._ngram_enabled and self._ngram is None:
+            # Try to load n-gram index from disk
+            self._ngram = self._load_ngram_index()
+    
+    def _load_ngram_index(self) -> Optional[NGramIndex]:
+        """Try to load n-gram index from disk."""
+        if not self._index_path:
+            return None
+        
+        parent = Path(self._index_path).parent
+        
+        # Check for compressed and uncompressed versions
+        for candidate in [parent / 'ngram.json.gz', parent / 'ngram.json']:
+            if candidate.exists():
+                try:
+                    return NGramIndex.load(str(candidate))
+                except Exception:
+                    return None
+        
+        return None
     
     def _load_symspell_index(self) -> Optional[SymSpell]:
         """Try to load SymSpell index from disk."""
@@ -745,6 +773,65 @@ class EnhancedSearchEngine(SearchEngine):
     def symspell_enabled(self) -> bool:
         """Check if SymSpell is enabled and available."""
         return self._symspell_enabled and self._symspell is not None
+    
+    @property
+    def ngram_enabled(self) -> bool:
+        """Check if n-gram index is enabled and available."""
+        return self._ngram_enabled and self._ngram is not None
+    
+    def _expand_ngram_terms(self, terms: List[str]) -> List[str]:
+        """
+        Expand terms using n-gram index.
+        
+        Handles:
+        - Wildcard prefix search: "pyth*" → ["python", "pythonic", ...]
+        - Substring matching (non-wildcard terms that aren't in vocab)
+        
+        Args:
+            terms: List of query terms
+            
+        Returns:
+            Expanded list of terms with wildcard matches included
+        """
+        if not self._ngram:
+            return terms
+        
+        vocabulary = set(self.index.index.keys())
+        expanded = []
+        
+        for term in terms:
+            if term.endswith('*'):
+                # Explicit wildcard: prefix search
+                prefix = term[:-1].lower()
+                if len(prefix) >= 2:
+                    matches = self._ngram.search_prefix(prefix, max_results=10)
+                    if matches:
+                        # Add all matched terms
+                        for match_term, similarity, freq in matches:
+                            if match_term not in expanded:
+                                expanded.append(match_term)
+                    else:
+                        # No matches, keep the prefix without wildcard
+                        expanded.append(prefix)
+                else:
+                    expanded.append(term)
+            elif term.lower() in vocabulary:
+                # Exact match exists, keep it
+                expanded.append(term)
+            else:
+                # Term not in vocabulary - try substring search
+                matches = self._ngram.search_substring(term, max_results=5, min_similarity=0.5)
+                if matches:
+                    # Add original term plus top substring matches
+                    expanded.append(term)
+                    for match_term, similarity, freq in matches[:3]:
+                        if match_term not in expanded:
+                            expanded.append(match_term)
+                else:
+                    # No matches, keep original
+                    expanded.append(term)
+        
+        return expanded
     
     @classmethod
     def load(cls, index_path: Path, **kwargs) -> 'EnhancedSearchEngine':
@@ -932,6 +1019,11 @@ class EnhancedSearchEngine(SearchEngine):
         if not terms and not phrases:
             return []
         
+        # Expand wildcard terms using n-gram index (e.g., "pyth*" → ["python", "pythonic"])
+        ngram_expanded_terms = list(terms)
+        if self.ngram_enabled:
+            ngram_expanded_terms = self._expand_ngram_terms(terms)
+        
         # Check for spelling suggestions (for "Did you mean?" display)
         # Uses SymSpell if available, falls back to traditional spellchecker
         suggestion = self.get_spelling_suggestion(query)
@@ -939,10 +1031,10 @@ class EnhancedSearchEngine(SearchEngine):
             self.last_suggestion = suggestion
         
         # Expand query with synonyms
-        expanded_terms = list(terms)
-        if expand_synonyms and self._synonyms and terms:
-            expanded_terms = self._synonyms.expand_terms(terms, max_per_term=2)
-            if expanded_terms != list(terms):
+        expanded_terms = list(ngram_expanded_terms)
+        if expand_synonyms and self._synonyms and ngram_expanded_terms:
+            expanded_terms = self._synonyms.expand_terms(ngram_expanded_terms, max_per_term=2)
+            if expanded_terms != list(ngram_expanded_terms):
                 self.last_expanded_query = ' '.join(expanded_terms)
         
         # Flatten phrases into terms for BM25 scoring
@@ -1028,6 +1120,12 @@ class EnhancedSearchEngine(SearchEngine):
         # Get facet counts for results
         if self._facets and results:
             self.last_facets = self.get_facet_counts(results)
+        
+        # Always try to provide suggestions when no results found
+        if not results and not self.last_suggestion:
+            suggestion = self.get_spelling_suggestion(query)
+            if suggestion and suggestion.lower() != query.lower():
+                self.last_suggestion = suggestion
         
         # Store in cache
         if self._cache:
@@ -1119,7 +1217,8 @@ class EnhancedSearchEngine(SearchEngine):
             'autocomplete': self._autocomplete_enabled,
             'facets': self._facets_enabled,
             'synonyms': self._synonyms_enabled,
-            'symspell': self.symspell_enabled
+            'symspell': self.symspell_enabled,
+            'ngram': self.ngram_enabled
         }
         
         if self._autocomplete:
@@ -1132,6 +1231,9 @@ class EnhancedSearchEngine(SearchEngine):
             stats['synonym_groups'] = self._synonyms.get_synonym_count()
         
         if self._symspell:
-            stats['fuzzy_stats'] = self._symspell.get_stats()
+            stats['symspell_stats'] = self._symspell.get_stats()
+        
+        if self._ngram:
+            stats['ngram_stats'] = self._ngram.get_stats()
         
         return stats
