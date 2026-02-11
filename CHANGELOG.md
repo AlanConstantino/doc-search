@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-02-11
+
+### Added
+- **Excel (.xlsx) document support** (#201, #203)
+  - New `index-files` command to index local Excel documents
+  - One searchable document per worksheet
+  - Header row detection for contextual text extraction
+  - Text formatted as `Header: value, Header: value`
+  - Configurable `--max-rows` limit for large files
+  - Green XLSX badge in web UI search results
+  - Type filter in web UI when site has multiple doc types
+  - Vendored openpyxl 3.1.2 and et_xmlfile 2.0.0 (MIT license)
+
+### Usage
+```bash
+# Index Excel files
+python -m doc_search index-files ./documents/ --extensions xlsx
+
+# Build search index
+python -m doc_search index ~/.doc_search/sites/files_<hash>
+
+# Search
+python -m doc_search search ~/.doc_search/sites/files_<hash> "query"
+
+# Web UI
+python -m doc_search serve ~/.doc_search/sites/files_<hash> --open
+```
+
 ## [1.18.0] - 2026-02-11
 
 ### ⚠️ BREAKING CHANGES
