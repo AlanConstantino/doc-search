@@ -564,6 +564,16 @@ a:hover {
     color: white;
 }
 
+.doc-type-badge.xlsx {
+    background: #16a34a;
+    color: white;
+}
+
+.doc-type-badge.docx {
+    background: #2563eb;
+    color: white;
+}
+
 .doc-type-badge.html {
     background: var(--bg-tertiary);
     color: var(--text-muted);

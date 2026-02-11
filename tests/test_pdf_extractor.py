@@ -518,5 +518,266 @@ class TestEdgeCases(unittest.TestCase):
                 self.assertEqual(result['pages'], 0)
 
 
+# ============================================================================
+# Heading Detection Tests
+# ============================================================================
+
+class TestHeadingDetection(unittest.TestCase):
+    """Tests for PDF heading detection functionality."""
+    
+    def test_result_includes_headings_key(self):
+        """Should include headings key in result."""
+        pdf_content = create_minimal_pdf("Test content")
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_from_file(Path(f.name))
+            
+            self.assertIn('headings', result)
+            self.assertIsInstance(result['headings'], list)
+    
+    def test_headings_structure(self):
+        """Headings should be list of (level, text) tuples."""
+        extractor = PDFExtractor()
+        
+        # Test the internal heading detection with mock data
+        text_elements = [
+            {'text': 'INTRODUCTION', 'font_size': 18, 'font_name': ''},
+            {'text': 'Some body text here.', 'font_size': 12, 'font_name': ''},
+            {'text': 'METHODS', 'font_size': 16, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        # Should have headings as tuples
+        for h in headings:
+            self.assertIsInstance(h, tuple)
+            self.assertEqual(len(h), 2)
+            self.assertIsInstance(h[0], int)  # level
+            self.assertIsInstance(h[1], str)  # text
+    
+    def test_font_size_heading_detection(self):
+        """Should detect headings based on font size."""
+        extractor = PDFExtractor()
+        
+        text_elements = [
+            {'text': 'Large Title', 'font_size': 24, 'font_name': ''},
+            {'text': 'Normal text paragraph.', 'font_size': 12, 'font_name': ''},
+            {'text': 'More normal text.', 'font_size': 12, 'font_name': ''},
+            {'text': 'Section Heading', 'font_size': 18, 'font_name': ''},
+            {'text': 'Body text content.', 'font_size': 12, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        # Should detect larger fonts as headings
+        heading_texts = [h[1] for h in headings]
+        self.assertIn('Large Title', heading_texts)
+        self.assertIn('Section Heading', heading_texts)
+        
+        # Normal text should be in body
+        self.assertTrue(any('Normal text' in b for b in body))
+    
+    def test_bold_font_heading_detection(self):
+        """Should detect bold fonts as headings."""
+        extractor = PDFExtractor()
+        
+        text_elements = [
+            {'text': 'Bold Heading', 'font_size': 12, 'font_name': '/Helvetica-Bold'},
+            {'text': 'Regular paragraph text here.', 'font_size': 12, 'font_name': '/Helvetica'},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        heading_texts = [h[1] for h in headings]
+        self.assertIn('Bold Heading', heading_texts)
+    
+    def test_all_caps_heading_detection(self):
+        """Should detect ALL CAPS as headings."""
+        extractor = PDFExtractor()
+        
+        text_elements = [
+            {'text': 'CHAPTER ONE', 'font_size': 12, 'font_name': ''},
+            {'text': 'This is regular text with normal casing.', 'font_size': 12, 'font_name': ''},
+            {'text': 'SUMMARY', 'font_size': 12, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        heading_texts = [h[1] for h in headings]
+        self.assertIn('CHAPTER ONE', heading_texts)
+        self.assertIn('SUMMARY', heading_texts)
+    
+    def test_numbered_section_heading_detection(self):
+        """Should detect numbered sections as headings."""
+        extractor = PDFExtractor()
+        
+        text_elements = [
+            {'text': '1. Introduction', 'font_size': 12, 'font_name': ''},
+            {'text': 'Some intro text.', 'font_size': 12, 'font_name': ''},
+            {'text': '1.1 Background', 'font_size': 12, 'font_name': ''},
+            {'text': 'Background details.', 'font_size': 12, 'font_name': ''},
+            {'text': '2.3.4 Specific Topic', 'font_size': 12, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        heading_texts = [h[1] for h in headings]
+        self.assertIn('1. Introduction', heading_texts)
+        self.assertIn('1.1 Background', heading_texts)
+        self.assertIn('2.3.4 Specific Topic', heading_texts)
+    
+    def test_heading_level_assignment(self):
+        """Should assign appropriate heading levels."""
+        extractor = PDFExtractor()
+        
+        # Larger fonts should get level 1
+        text_elements = [
+            {'text': 'Main Title', 'font_size': 24, 'font_name': ''},
+            {'text': 'Body text', 'font_size': 12, 'font_name': ''},
+            {'text': 'Section', 'font_size': 16, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        # Find the main title heading
+        main_title = [h for h in headings if h[1] == 'Main Title']
+        self.assertTrue(len(main_title) > 0)
+        self.assertEqual(main_title[0][0], 1)  # Should be level 1
+    
+    def test_empty_elements_handling(self):
+        """Should handle empty element lists gracefully."""
+        extractor = PDFExtractor()
+        
+        headings, body = extractor._detect_headings([])
+        
+        self.assertEqual(headings, [])
+        self.assertEqual(body, [])
+    
+    def test_no_font_info_fallback(self):
+        """Should handle elements without font info."""
+        extractor = PDFExtractor()
+        
+        text_elements = [
+            {'text': 'HEADING TEXT', 'font_size': 0, 'font_name': ''},
+            {'text': 'Regular body text here.', 'font_size': 0, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        # ALL CAPS should still be detected
+        heading_texts = [h[1] for h in headings]
+        self.assertIn('HEADING TEXT', heading_texts)
+    
+    def test_long_text_not_heading(self):
+        """Should not treat very long text as headings."""
+        extractor = PDFExtractor()
+        
+        long_text = "THIS IS A VERY LONG TEXT THAT GOES ON AND ON " * 10
+        text_elements = [
+            {'text': long_text, 'font_size': 16, 'font_name': ''},
+            {'text': 'Short heading', 'font_size': 16, 'font_name': ''},
+        ]
+        
+        headings, body = extractor._detect_headings(text_elements)
+        
+        heading_texts = [h[1] for h in headings]
+        # Long text should not be a heading (even with large font)
+        self.assertFalse(any(len(h) > 200 for _, h in headings))
+        # It should end up in body
+        self.assertTrue(len(body) > 0)
+
+
+class TestOutlineExtraction(unittest.TestCase):
+    """Tests for PDF outline/TOC extraction."""
+    
+    def test_extract_outline_empty(self):
+        """Should handle empty outline."""
+        extractor = PDFExtractor()
+        
+        result = extractor._extract_outline_headings(None)
+        self.assertEqual(result, [])
+    
+    def test_extract_outline_list(self):
+        """Should handle outline as list."""
+        extractor = PDFExtractor()
+        
+        # Create mock outline items
+        class MockOutlineItem:
+            def __init__(self, title):
+                self.title = title
+        
+        outline = [
+            MockOutlineItem("Chapter 1"),
+            MockOutlineItem("Chapter 2"),
+        ]
+        
+        result = extractor._extract_outline_headings(outline)
+        
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], (1, "Chapter 1"))
+        self.assertEqual(result[1], (1, "Chapter 2"))
+    
+    def test_extract_nested_outline(self):
+        """Should handle nested outline structure."""
+        extractor = PDFExtractor()
+        
+        class MockOutlineItem:
+            def __init__(self, title):
+                self.title = title
+        
+        outline = [
+            MockOutlineItem("Part 1"),
+            [  # Nested level
+                MockOutlineItem("Chapter 1.1"),
+                MockOutlineItem("Chapter 1.2"),
+            ],
+            MockOutlineItem("Part 2"),
+        ]
+        
+        result = extractor._extract_outline_headings(outline)
+        
+        # Should have all items with appropriate levels
+        titles = [h[1] for h in result]
+        self.assertIn("Part 1", titles)
+        self.assertIn("Chapter 1.1", titles)
+        self.assertIn("Part 2", titles)
+        
+        # Nested items should have higher level
+        for level, title in result:
+            if title.startswith("Chapter"):
+                self.assertEqual(level, 2)
+
+
+class TestHeadingIntegration(unittest.TestCase):
+    """Integration tests for heading extraction with real PDFs."""
+    
+    def test_extraction_includes_headings(self):
+        """Extracted result should include headings list."""
+        pdf_content = create_minimal_pdf("Document content")
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_from_file(Path(f.name))
+            
+            # Should have headings key (may be empty for simple PDFs)
+            self.assertIn('headings', result)
+            self.assertIsInstance(result['headings'], list)
+    
+    def test_error_result_includes_headings(self):
+        """Error results should still include headings key."""
+        extractor = PDFExtractor()
+        result = extractor.extract("/nonexistent/file.pdf")
+        
+        self.assertIn('headings', result)
+        self.assertEqual(result['headings'], [])
+
+
 if __name__ == '__main__':
     unittest.main()

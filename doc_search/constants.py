@@ -99,3 +99,89 @@ TITLE_WEIGHT = 3
 def heading_weight(level: int) -> int:
     """Calculate weight multiplier for heading level."""
     return max(1, 4 - level)
+
+
+# =============================================================================
+# Reranking Configuration (Two-Stage Retrieval)
+# =============================================================================
+
+# Recall stage: fetch this multiple of top_k candidates
+RERANK_RECALL_MULTIPLIER = 10
+
+# Maximum candidates to fetch in recall stage
+RERANK_MAX_CANDIDATES = 500
+
+# Number of candidates to rerank (balance speed vs quality)
+RERANK_CANDIDATE_LIMIT = 100
+
+# Score component weights (must sum to ~1.0)
+RERANK_WEIGHT_BM25 = 0.35          # Base BM25 relevance
+RERANK_WEIGHT_FIELD = 0.30         # Field-aware term matching (title > headings > body)
+RERANK_WEIGHT_COVERAGE = 0.20      # Query term coverage
+RERANK_WEIGHT_PHRASE = 0.15        # Phrase/proximity matches
+
+# Coverage boost strength (beta parameter)
+# coverage=1.0 (all terms) → boost = 1 + beta
+# coverage=0.5 (half terms) → boost = 1 + 0.5*beta
+RERANK_COVERAGE_BETA = 0.4
+
+# Title-specific coverage boost (stronger because title is more important)
+RERANK_TITLE_COVERAGE_BETA = 0.6
+
+# Full coverage bonus: extra boost when all query terms are present
+RERANK_FULL_COVERAGE_BONUS = 0.2
+
+# Maximum terms to consider for coverage (for very long queries)
+RERANK_MAX_COVERAGE_TERMS = 8
+
+
+# =============================================================================
+# Field-Aware Ranking Weights
+# =============================================================================
+
+# Field weights for term matching (title > headings > body)
+# Based on Elasticsearch/Lucene field boosting recommendations
+FIELD_WEIGHT_TITLE = 5.0       # Title matches are 5x more valuable
+FIELD_WEIGHT_HEADINGS = 2.5    # Heading matches are 2.5x more valuable  
+FIELD_WEIGHT_BODY = 1.0        # Body is the baseline
+
+# Maximum field score (normalized to prevent field domination)
+FIELD_MAX_SCORE = 1.0
+
+
+# =============================================================================
+# Phrase Proximity Configuration
+# =============================================================================
+
+# Maximum word distance for proximity matching (slop)
+PHRASE_MAX_SLOP = 3
+
+# Phrase match boost values
+PHRASE_EXACT_MATCH_TITLE = 10.0      # Exact phrase in title
+PHRASE_EXACT_MATCH_BODY = 3.0        # Exact phrase in body
+PHRASE_PROXIMITY_MATCH_TITLE = 5.0   # Proximity match in title (within slop)
+PHRASE_PROXIMITY_MATCH_BODY = 1.5    # Proximity match in body
+
+# Whether to hard-filter on phrase (only for quoted phrases)
+PHRASE_HARD_FILTER_QUOTED = True
+
+
+# =============================================================================
+# Term Expansion Weights
+# =============================================================================
+
+# Original query terms get full weight
+TERM_WEIGHT_ORIGINAL = 1.0
+
+# Fuzzy corrections by edit distance
+TERM_WEIGHT_FUZZY_DIST_1 = 0.5   # Edit distance 1 (likely typo)
+TERM_WEIGHT_FUZZY_DIST_2 = 0.3   # Edit distance 2 (less certain)
+
+# Synonym expansions
+TERM_WEIGHT_SYNONYM = 0.5
+
+# Wildcard/prefix expansions
+TERM_WEIGHT_WILDCARD = 0.4
+
+# N-gram substring matches
+TERM_WEIGHT_NGRAM = 0.3

@@ -5,9 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.17.0] - 2026-02-10
+## [1.20.0] - 2026-02-11
 
 ### Added
+- **Word (.docx) document support** (#202, #204)
+  - Pure Python implementation using stdlib (zipfile + xml.etree.ElementTree)
+  - Zero external dependencies
+  - Heading detection from Word styles (Heading 1, 2, 3, Title, Subtitle)
+  - Document properties extraction (title, author, created/modified dates)
+  - Headers and footers included in extracted text
+  - Word count calculation
+  - Blue DOCX badge in web UI search results
+  - Default extensions for `index-files` now: `xlsx,docx`
+
+### Usage
+```bash
+# Index Word and Excel files
+python -m doc_search index-files ./documents/
+
+# Or just Word files
+python -m doc_search index-files ./documents/ --extensions docx
+```
+
+### Note
+Only .docx (Office 2007+) supported. For legacy .doc files:
+```bash
+libreoffice --headless --convert-to docx *.doc
+```
+
+## [1.19.0] - 2026-02-11
+
+### Added
+- **Excel (.xlsx) document support** (#201, #203)
+  - New `index-files` command to index local Excel documents
+  - One searchable document per worksheet
+  - Header row detection for contextual text extraction
+  - Text formatted as `Header: value, Header: value`
+  - Configurable `--max-rows` limit for large files
+  - Green XLSX badge in web UI search results
+  - Type filter in web UI when site has multiple doc types
+  - Vendored openpyxl 3.1.2 and et_xmlfile 2.0.0 (MIT license)
+
+### Usage
+```bash
+# Index Excel files
+python -m doc_search index-files ./documents/ --extensions xlsx
+
+# Build search index
+python -m doc_search index ~/.doc_search/sites/files_<hash>
+
+# Search
+python -m doc_search search ~/.doc_search/sites/files_<hash> "query"
+
+# Web UI
+python -m doc_search serve ~/.doc_search/sites/files_<hash> --open
+```
+
+## [1.18.0] - 2026-02-11
+
+### ⚠️ BREAKING CHANGES
+- **Python 3.9+ now required** (previously 3.7+) - needed for pypdf library
+
+### Added
+- **Enhanced PDF extraction with heading detection** (#198, #199)
+  - Upgraded from PyPDF2 to pypdf for font-aware text extraction
+  - Detects headings via font size, bold fonts, ALL CAPS, and numbered sections
+  - Extracts PDF outline/TOC as additional headings
+  - Headings used for field-aware search ranking (headings weighted 2-3x higher)
+
+## [1.17.0] - 2026-02-11
+
+### Added
+- **Two-stage retrieval with reranking** (#190)
+  - BM25 retrieval followed by feature-based reranking
+  - Configurable via `RerankConfig`
+- **Field-aware ranking** (#188)
+  - Title matches: 5x weight
+  - Heading matches: 2.5x weight
+  - Body matches: 1x weight
+- **Query term coverage boosting** (#191)
+  - Results containing more query terms ranked higher
+- **Phrase proximity boosting** (#189)
+  - Results with query terms closer together ranked higher
+- **Weighted term expansion** (#187)
+  - Synonym and fuzzy matches weighted lower than exact matches
 - **SymSpell fuzzy search** - Fast "Did you mean?" suggestions using Symmetric Delete algorithm (#185)
   - Enabled by default, use `--no-symspell` to disable
   - Pure Python implementation, no dependencies
@@ -18,12 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **2.6x faster snippet generation** - Optimized `find_best_snippet` for wildcard queries
-  - Pre-lowercase words once instead of per-window
-  - Only check windows around actual term matches
 
 ### Fixed
+- RerankMetrics JSON serialization for web UI cache
 - Wildcard `*` character preserved in queries (was being stripped by tokenizer)
-- Expanded terms now highlighted in snippets (was showing raw wildcard)
+- Expanded terms now highlighted in snippets
 
 ## [1.16.1] - 2026-02-10
 

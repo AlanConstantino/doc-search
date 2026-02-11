@@ -373,7 +373,8 @@ class Crawler:
                 self.state.mark_failed(url, depth)
                 return None
             
-            # Build and save document data
+            # Build and save document data (now with headings!)
+            headings = result.get('headings', [])
             page_data = build_document_data(
                 url=url,
                 title=result['title'] or Path(parsed.path).stem,
@@ -382,6 +383,7 @@ class Crawler:
                 doc_type='pdf',
                 doc_pages=result['pages'],
                 doc_metadata=result['metadata'],
+                headings=headings,
             )
             self._processor.save_page(url, page_data)
             
@@ -389,7 +391,8 @@ class Crawler:
             self.state.increment_stat('pages_crawled')
             self.state.increment_stat('docs_extracted')
             
-            self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars")
+            headings_count = len(headings)
+            self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
             return []
         
         # DOCX/XLSX extraction not yet implemented
@@ -416,7 +419,8 @@ class Crawler:
             self.state.mark_failed(url, depth)
             return None
         
-        # Build and save document data
+        # Build and save document data (now with headings!)
+        headings = result.get('headings', [])
         page_data = build_document_data(
             url=url,
             title=result['title'] or Path(parsed.path).stem,
@@ -425,6 +429,7 @@ class Crawler:
             doc_type='pdf',
             doc_pages=result['pages'],
             doc_metadata=result['metadata'],
+            headings=headings,
         )
         self._processor.save_page(url, page_data)
         
@@ -432,7 +437,8 @@ class Crawler:
         self.state.increment_stat('pages_crawled')
         self.state.increment_stat('docs_extracted')
         
-        self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars")
+        headings_count = len(headings)
+        self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
         return []
     
     # -------------------------------------------------------------------------

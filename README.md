@@ -4,7 +4,7 @@ Search through large technical documentation websites offline.
 
 Built for sites with 5,000–15,000+ pages. Crawl once, search instantly.
 
-**Zero dependencies** — Pure Python 3.6+ standard library (PDF support included via vendored PyPDF2).
+**Zero dependencies** — Pure Python 3.9+ standard library (PDF support included via vendored pypdf).
 
 ## Why?
 
