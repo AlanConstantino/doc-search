@@ -173,36 +173,52 @@ def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
     if not matches:
         return text[:snippet_length] + '...'
     
+    # Pre-lowercase all words once and build lookup
+    all_query_terms = set(terms)
+    for phrase in phrases:
+        all_query_terms.update(phrase)
+    
+    # Pre-compute lowercase words and find term positions
+    word_lower = [m.group(0).lower() for m in matches]
+    term_positions = [i for i, w in enumerate(word_lower) if w in all_query_terms]
+    
+    # If no terms found, return start of text
+    if not term_positions:
+        return text[:snippet_length] + '...'
+    
     # Score each position by term density in surrounding window
     window_words = SNIPPET_WINDOW_WORDS
     best_score = -1
     best_start = 0
     
-    all_query_terms = set(terms)
-    for phrase in phrases:
-        all_query_terms.update(phrase)
+    # Only check windows starting near term matches (optimization)
+    candidate_starts = set()
+    for pos in term_positions:
+        # Add positions around each term match
+        for offset in range(-window_words, 1):
+            candidate = pos + offset
+            if 0 <= candidate < len(matches):
+                candidate_starts.add(candidate)
     
-    for i in range(len(matches)):
+    for i in sorted(candidate_starts):
         # Calculate score for window starting at this word
         window_end = min(i + window_words, len(matches))
-        window_matches = matches[i:window_end]
         
         score = 0
         found_terms = set()
         
-        for m in window_matches:
-            word_lower = m.group(0).lower()
-            if word_lower in all_query_terms:
+        for j in range(i, window_end):
+            if word_lower[j] in all_query_terms:
                 score += 1
-                found_terms.add(word_lower)
+                found_terms.add(word_lower[j])
         
         # Bonus for having multiple different terms
         score += len(found_terms) * TERM_DIVERSITY_BONUS
         
-        # Check for phrase matches in this window
+        # Check for phrase matches in this window (only if we have phrases)
         if phrases:
             window_start_char = matches[i].start()
-            window_end_char = window_matches[-1].end() if window_matches else window_start_char + snippet_length
+            window_end_char = matches[window_end - 1].end() if window_end > i else window_start_char + snippet_length
             window_text = text[window_start_char:window_end_char + 50]
             
             for phrase in phrases:
