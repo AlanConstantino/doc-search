@@ -314,6 +314,22 @@ def format_results(
         if len(snippet) > MAX_SNIPPET_LENGTH:
             snippet = snippet[:MAX_SNIPPET_LENGTH - 3] + '...'
         
+        # Build PDF location info (page/section)
+        pdf_location = ''
+        if result.get('doc_type') == 'pdf':
+            page = result.get('pdf_page')
+            section = result.get('pdf_section')
+            if page or section:
+                parts = []
+                if page:
+                    parts.append(f"p.{page}")
+                if section:
+                    # Truncate long section names
+                    if len(section) > 30:
+                        section = section[:27] + '...'
+                    parts.append(f"§{section}")
+                pdf_location = f" — {', '.join(parts)}"
+        
         # Apply ANSI highlighting to snippet if we have query terms
         if colorize_output and query_terms and snippet:
             # Convert **term** markers to ANSI codes
@@ -326,9 +342,9 @@ def format_results(
         # Build the result lines with colors
         if colorize_output:
             if show_scores:
-                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}")
+                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}{style_info(pdf_location)}")
             else:
-                lines.append(f"{style_number(i)} {style_title(title)}")
+                lines.append(f"{style_number(i)} {style_title(title)}{style_info(pdf_location)}")
             
             lines.append(f"   {style_url(url)}")
             
@@ -337,9 +353,9 @@ def format_results(
         else:
             # Plain text output
             if show_scores:
-                lines.append(f"{i}. [{score:.4f}] {title}")
+                lines.append(f"{i}. [{score:.4f}] {title}{pdf_location}")
             else:
-                lines.append(f"{i}. {title}")
+                lines.append(f"{i}. {title}{pdf_location}")
             
             lines.append(f"   {url}")
             
