@@ -1656,8 +1656,8 @@ JAVASCRIPT = """
                 <div class="result-header">
                     <span class="result-number">${r.rank}</span>
                     <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
-                    ${docTypeBadge}
                     ${pdfLocation}
+                    ${docTypeBadge}
                     <span class="result-score" title="Score: ${r.score.toFixed(2)}">
                         <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
@@ -2170,8 +2170,8 @@ def render_page(
                     <div class="result-header">
                         <span class="result-number">{i}</span>
                         <a href="{url}" class="result-title" target="_blank" rel="noopener">{title}</a>
-                        {doc_type_badge}
                         {pdf_location_html}
+                        {doc_type_badge}
                         {score_html}
                     </div>
                     <div class="result-url">{url}</div>
