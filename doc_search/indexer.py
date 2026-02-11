@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Dict, List, Any, Optional, Iterator
 
 from .utils import tokenize
+from .symspell import SymSpell
 
 
 class BM25Index:
@@ -357,6 +358,26 @@ class BM25Index:
             'b': self.b,
             'stemming': self.stem
         }
+    
+    def build_symspell(self, max_distance: int = 2) -> SymSpell:
+        """
+        Build a SymSpell fuzzy matching index from the vocabulary.
+        
+        Uses document frequency as word frequency for ranking suggestions.
+        
+        Args:
+            max_distance: Maximum edit distance for fuzzy matching
+            
+        Returns:
+            SymSpell instance populated with vocabulary
+        """
+        symspell = SymSpell(max_distance=max_distance)
+        
+        for term, doc_freq in self.doc_freqs.items():
+            # Use document frequency as word frequency
+            symspell.add_word(term, frequency=doc_freq)
+        
+        return symspell
     
     def get_doc_id(self, url: str) -> Optional[int]:
         """

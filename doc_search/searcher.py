@@ -18,6 +18,7 @@ from .spellcheck import SpellChecker
 from .autocomplete import Autocomplete
 from .facets import FacetIndex
 from .synonyms import SynonymExpander
+from .symspell import SymSpell
 from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
     format_results, check_phrase_match
@@ -617,6 +618,7 @@ class EnhancedSearchEngine(SearchEngine):
     - Autocomplete / type-ahead suggestions
     - Faceted search (filter by section/type)
     - Query expansion with synonyms (disabled by default)
+    - Fuzzy search with SymSpell (enabled by default if index exists)
     
     Note: The search() method returns List[Dict[str, Any]] for LSP compliance
     with SearchEngine. Enhanced metadata (suggestion, facets, etc.) is stored
@@ -629,7 +631,9 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
+                 enable_fuzzy: bool = True,
                  synonym_groups: Optional[List[Set[str]]] = None,
+                 symspell_index: Optional[SymSpell] = None,
                  cache_size: int = 0,
                  cache_ttl: Optional[float] = None,
                  cache_path: Optional[Path] = None,
@@ -644,7 +648,9 @@ class EnhancedSearchEngine(SearchEngine):
             enable_autocomplete: Enable type-ahead suggestions
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
+            enable_fuzzy: Enable fuzzy search with SymSpell (default: True)
             synonym_groups: Custom synonym groups (if None and enabled, uses defaults)
+            symspell_index: Pre-loaded SymSpell index (if None, will try to load from disk)
             cache_size: Max number of queries to cache (0 to disable)
             cache_ttl: Cache TTL in seconds (None = never expire)
             cache_path: Optional path for persistent cache (survives restarts)
@@ -657,19 +663,23 @@ class EnhancedSearchEngine(SearchEngine):
         self._autocomplete_enabled = enable_autocomplete
         self._facets_enabled = enable_facets
         self._synonyms_enabled = enable_synonyms
+        self._fuzzy_enabled = enable_fuzzy
         self._custom_synonym_groups = synonym_groups
+        self._index_path = index_path
         
         # Initialize components
         self._spellchecker: Optional[SpellChecker] = None
         self._autocomplete: Optional[Autocomplete] = None
         self._facets: Optional[FacetIndex] = None
         self._synonyms: Optional[SynonymExpander] = None
+        self._symspell: Optional[SymSpell] = symspell_index
         
         # Last search metadata (populated after each search() call)
         self.last_suggestion: Optional[str] = None
         self.last_facets: Dict[str, Dict[str, int]] = {}
         self.last_query: str = ''
         self.last_expanded_query: Optional[str] = None
+        self.last_fuzzy_expansions: List[Tuple[str, str]] = []  # [(original, expanded), ...]
         
         # Build enhanced features from index
         self._build_enhanced_features()
@@ -710,6 +720,79 @@ class EnhancedSearchEngine(SearchEngine):
             else:
                 # Use built-in programming synonyms
                 self._synonyms = SynonymExpander(include_defaults=True)
+        
+        if self._fuzzy_enabled and self._symspell is None:
+            # Try to load SymSpell index from disk
+            self._symspell = self._load_symspell_index()
+    
+    def _load_symspell_index(self) -> Optional[SymSpell]:
+        """Try to load SymSpell index from disk."""
+        if not self._index_path:
+            return None
+        
+        parent = Path(self._index_path).parent
+        
+        # Check for compressed and uncompressed versions
+        for candidate in [parent / 'fuzzy.json.gz', parent / 'fuzzy.json']:
+            if candidate.exists():
+                try:
+                    return SymSpell.load(str(candidate))
+                except Exception:
+                    return None
+        
+        return None
+    
+    def _expand_fuzzy(self, terms: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
+        """
+        Expand query terms using fuzzy matching.
+        
+        For each term not in the vocabulary, find the closest match
+        using SymSpell and replace it.
+        
+        Args:
+            terms: List of query terms
+            
+        Returns:
+            Tuple of (expanded_terms, expansions) where expansions is a list
+            of (original, replacement) tuples for terms that were replaced.
+        """
+        if not self._symspell:
+            return terms, []
+        
+        expanded = []
+        expansions = []
+        vocabulary = set(self.index.index.keys())
+        
+        for term in terms:
+            # Skip if term exists in vocabulary
+            if term.lower() in vocabulary:
+                expanded.append(term)
+                continue
+            
+            # Skip very short terms
+            if len(term) < 3:
+                expanded.append(term)
+                continue
+            
+            # Look up fuzzy matches
+            matches = self._symspell.lookup(term, max_distance=2, max_results=1)
+            
+            if matches:
+                best_match, distance, _ = matches[0]
+                if distance > 0:  # Only expand if it's actually a fuzzy match
+                    expanded.append(best_match)
+                    expansions.append((term, best_match))
+                else:
+                    expanded.append(term)
+            else:
+                expanded.append(term)
+        
+        return expanded, expansions
+    
+    @property
+    def fuzzy_enabled(self) -> bool:
+        """Check if fuzzy search is enabled and available."""
+        return self._fuzzy_enabled and self._symspell is not None
     
     @classmethod
     def load(cls, index_path: Path, **kwargs) -> 'EnhancedSearchEngine':
@@ -833,6 +916,7 @@ class EnhancedSearchEngine(SearchEngine):
         self.last_facets = {}
         self.last_query = query
         self.last_expanded_query = None
+        self.last_fuzzy_expansions = []
         
         # Check cache first
         facet_key = tuple(sorted(facet_filters.items())) if facet_filters else None
@@ -848,6 +932,7 @@ class EnhancedSearchEngine(SearchEngine):
                 self.last_suggestion = metadata.get('suggestion')
                 self.last_facets = metadata.get('facets', {})
                 self.last_expanded_query = metadata.get('expanded_query')
+                self.last_fuzzy_expansions = metadata.get('fuzzy_expansions', [])
                 return results
         
         # Parse query
@@ -856,17 +941,22 @@ class EnhancedSearchEngine(SearchEngine):
         if not terms and not phrases:
             return []
         
-        # Check for spelling suggestions
+        # Fuzzy expansion: replace misspelled terms with corrections
+        fuzzy_terms = list(terms)
+        if self._fuzzy_enabled and self._symspell and terms:
+            fuzzy_terms, self.last_fuzzy_expansions = self._expand_fuzzy(terms)
+        
+        # Check for spelling suggestions (for "Did you mean?" display)
         if self._spellchecker:
             suggestion = self.get_spelling_suggestion(query)
             if suggestion and suggestion.lower() != query.lower():
                 self.last_suggestion = suggestion
         
         # Expand query with synonyms
-        expanded_terms = list(terms)
-        if expand_synonyms and self._synonyms and terms:
-            expanded_terms = self._synonyms.expand_terms(terms, max_per_term=2)
-            if expanded_terms != list(terms):
+        expanded_terms = list(fuzzy_terms)
+        if expand_synonyms and self._synonyms and fuzzy_terms:
+            expanded_terms = self._synonyms.expand_terms(fuzzy_terms, max_per_term=2)
+            if expanded_terms != list(fuzzy_terms):
                 self.last_expanded_query = ' '.join(expanded_terms)
         
         # Flatten phrases into terms for BM25 scoring
@@ -958,7 +1048,8 @@ class EnhancedSearchEngine(SearchEngine):
             metadata = {
                 'suggestion': self.last_suggestion,
                 'facets': self.last_facets,
-                'expanded_query': self.last_expanded_query
+                'expanded_query': self.last_expanded_query,
+                'fuzzy_expansions': self.last_fuzzy_expansions
             }
             self._cache.set(
                 query, (results, metadata),
@@ -1012,7 +1103,8 @@ class EnhancedSearchEngine(SearchEngine):
             'suggestion': self.last_suggestion,
             'facets': self.last_facets,
             'query': self.last_query,
-            'expanded_query': self.last_expanded_query
+            'expanded_query': self.last_expanded_query,
+            'fuzzy_expansions': self.last_fuzzy_expansions
         }
     
     def search_simple(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
@@ -1042,7 +1134,8 @@ class EnhancedSearchEngine(SearchEngine):
             'spellcheck': self._spellcheck_enabled,
             'autocomplete': self._autocomplete_enabled,
             'facets': self._facets_enabled,
-            'synonyms': self._synonyms_enabled
+            'synonyms': self._synonyms_enabled,
+            'fuzzy': self.fuzzy_enabled
         }
         
         if self._autocomplete:
@@ -1053,5 +1146,8 @@ class EnhancedSearchEngine(SearchEngine):
         
         if self._synonyms:
             stats['synonym_groups'] = self._synonyms.get_synonym_count()
+        
+        if self._symspell:
+            stats['fuzzy_stats'] = self._symspell.get_stats()
         
         return stats

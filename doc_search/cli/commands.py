@@ -216,6 +216,19 @@ def cmd_index(args):
     print(f"\nIndex saved to: {index_path}")
     print(f"Index size: {format_size(index_path.stat().st_size)}")
     
+    # Build and save fuzzy search index (SymSpell)
+    no_fuzzy = getattr(args, 'no_fuzzy', False)
+    if not no_fuzzy:
+        if not args.quiet:
+            print(f"\nBuilding fuzzy search index...")
+        
+        symspell = index.build_symspell(max_distance=2)
+        fuzzy_path = symspell.save(str(site_dir / 'fuzzy'), compress=not args.no_compress)
+        
+        stats = symspell.get_stats()
+        print(f"Fuzzy index saved to: {fuzzy_path}")
+        print(f"Fuzzy index: {stats['word_count']} words, {stats['unique_deletes']} deletion entries")
+    
     return 0
 
 
@@ -269,6 +282,7 @@ def cmd_search(args):
             enable_autocomplete=True,
             enable_facets=not getattr(args, 'no_facets', False),
             enable_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None,
+            enable_fuzzy=not getattr(args, 'no_fuzzy', False),
             synonym_groups=custom_synonyms
         )
     else:
@@ -416,7 +430,8 @@ def cmd_interactive(args):
     engine = EnhancedSearchEngine.load(
         index_path,
         cache_size=128,
-        cache_path=cache_path
+        cache_path=cache_path,
+        enable_fuzzy=not getattr(args, 'no_fuzzy', False)
     )
     
     stats = engine.get_stats()
@@ -911,6 +926,7 @@ def cmd_serve(args):
         enable_autocomplete=True,
         enable_facets=True,
         enable_synonyms=enable_synonyms,
+        enable_fuzzy=not getattr(args, 'no_fuzzy', False),
         cache_size=cache_size,
         cache_ttl=cache_ttl,
         cache_path=cache_path
