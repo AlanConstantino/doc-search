@@ -896,6 +896,186 @@ def cmd_delete(args):
     return 0
 
 
+def cmd_index_files(args):
+    """Index local Office documents (Excel, Word) and PDFs."""
+    from ..office_extractor import OfficeExtractor
+    from ..pdf_extractor import PDFExtractor
+    import hashlib
+    
+    directory = Path(args.directory)
+    if not directory.exists():
+        print(style_error(f"Error: Directory not found: {directory}"))
+        return 1
+    
+    if not directory.is_dir():
+        print(style_error(f"Error: Not a directory: {directory}"))
+        return 1
+    
+    # Parse extensions
+    extensions_str = getattr(args, 'extensions', 'docx,xlsx,pdf')
+    extensions = set('.' + ext.strip().lower().lstrip('.') for ext in extensions_str.split(','))
+    
+    # Determine site name and directory
+    site_name = getattr(args, 'site_name', None) or directory.name
+    
+    # Create site directory using hash of directory path
+    dir_hash = hashlib.md5(str(directory.absolute()).encode()).hexdigest()[:12]
+    site_dir = DEFAULT_DATA_DIR / f"files_{dir_hash}"
+    
+    # Check for merge
+    merge_with = getattr(args, 'merge_with', None)
+    if merge_with:
+        try:
+            merge_site_dir = get_site_dir(merge_with)
+            if merge_site_dir.exists():
+                site_dir = merge_site_dir
+                print(style_info(f"Merging with existing site: {merge_site_dir}"))
+        except ValueError:
+            print(style_error(f"Error: Cannot find site to merge with: {merge_with}"))
+            return 1
+    
+    site_dir.mkdir(parents=True, exist_ok=True)
+    pages_dir = site_dir / 'pages'
+    pages_dir.mkdir(exist_ok=True)
+    
+    print(f"Indexing: {directory}")
+    print(f"Extensions: {', '.join(extensions)}")
+    print(f"Data directory: {site_dir}")
+    print()
+    
+    # Set up extractors
+    first_row_is_header = not getattr(args, 'no_headers', False)
+    office_extractor = OfficeExtractor(first_row_is_header=first_row_is_header)
+    pdf_extractor = PDFExtractor()
+    
+    # Find and process files
+    recursive = not getattr(args, 'no_recursive', False)
+    exclude_patterns = getattr(args, 'exclude', []) or []
+    
+    files_found = 0
+    docs_extracted = 0
+    errors = 0
+    
+    # Collect files
+    if recursive:
+        all_files = list(directory.rglob('*'))
+    else:
+        all_files = list(directory.glob('*'))
+    
+    # Filter to supported extensions
+    files_to_process = []
+    for f in all_files:
+        if not f.is_file():
+            continue
+        if f.suffix.lower() not in extensions:
+            continue
+        # Check exclude patterns
+        excluded = False
+        for pattern in exclude_patterns:
+            if f.match(pattern):
+                excluded = True
+                break
+        if not excluded:
+            files_to_process.append(f)
+    
+    files_found = len(files_to_process)
+    print(f"Found {files_found} files to process...")
+    print()
+    
+    quiet = getattr(args, 'quiet', False)
+    
+    for file_path in files_to_process:
+        ext = file_path.suffix.lower()
+        
+        try:
+            if ext == '.pdf':
+                result = pdf_extractor.extract_from_file(file_path)
+                if result.get('error'):
+                    if not quiet:
+                        print(style_error(f"  {_e('cross')} {file_path.name}: {result['error']}"))
+                    errors += 1
+                    continue
+                
+                # Create document entry
+                documents = [{
+                    'url': f"file://{file_path.absolute()}",
+                    'title': result.get('title') or file_path.stem,
+                    'text': result.get('text', ''),
+                    'headings': result.get('headings', []),
+                    'metadata': {
+                        'doc_type': 'pdf',
+                        'pages': result.get('pages', 0),
+                        'file_path': str(file_path.absolute()),
+                        **result.get('metadata', {})
+                    }
+                }]
+            else:
+                # Office document
+                documents = office_extractor.extract(file_path)
+            
+            # Save each document
+            for doc in documents:
+                if doc.get('error'):
+                    if not quiet:
+                        print(style_error(f"  {_e('cross')} {file_path.name}: {doc['error']}"))
+                    errors += 1
+                    continue
+                
+                # Generate document ID from URL
+                doc_id = hashlib.md5(doc['url'].encode()).hexdigest()[:16]
+                
+                # Save as JSON (same format as crawled pages)
+                doc_file = pages_dir / f"{doc_id}.json"
+                
+                # Convert headings tuples to lists for JSON
+                doc_json = {
+                    'url': doc['url'],
+                    'title': doc['title'],
+                    'text': doc['text'],
+                    'headings': [list(h) for h in doc.get('headings', [])],
+                    'doc_type': doc.get('metadata', {}).get('doc_type', 'unknown'),
+                    **{k: v for k, v in doc.get('metadata', {}).items() if k != 'doc_type'}
+                }
+                
+                with open(doc_file, 'w', encoding='utf-8') as f:
+                    json.dump(doc_json, f, ensure_ascii=False, indent=2)
+                
+                docs_extracted += 1
+                
+                if not quiet:
+                    print(f"  {_e('check')} {doc['title'][:60]}")
+        
+        except Exception as e:
+            if not quiet:
+                print(style_error(f"  {_e('cross')} {file_path.name}: {e}"))
+            errors += 1
+    
+    print()
+    print(f"Extracted {docs_extracted} documents from {files_found} files")
+    if errors:
+        print(style_error(f"Errors: {errors}"))
+    
+    # Save metadata
+    metadata = {
+        'source': str(directory.absolute()),
+        'site_name': site_name,
+        'type': 'files',
+        'stats': {
+            'files_found': files_found,
+            'docs_extracted': docs_extracted,
+            'errors': errors,
+            'extensions': list(extensions)
+        }
+    }
+    with open(site_dir / 'metadata.json', 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"\nDocuments saved to: {pages_dir}")
+    print(f"Run 'doc_search index {site_dir}' to build the search index")
+    
+    return 0
+
+
 def cmd_serve(args):
     """Start the web UI server for searching."""
     import webbrowser

@@ -7,7 +7,7 @@ This module defines all CLI argument parsers and their options.
 import argparse
 from .. import __version__
 from .commands import (
-    cmd_crawl, cmd_index, cmd_search, cmd_autocomplete,
+    cmd_crawl, cmd_index, cmd_index_files, cmd_search, cmd_autocomplete,
     cmd_interactive, cmd_stats, cmd_list, cmd_delete, cmd_serve
 )
 
@@ -50,6 +50,7 @@ Examples:
     # Add all command parsers
     _add_crawl_parser(subparsers)
     _add_index_parser(subparsers)
+    _add_index_files_parser(subparsers)
     _add_search_parser(subparsers)
     _add_autocomplete_parser(subparsers)
     _add_interactive_parser(subparsers)
@@ -122,6 +123,30 @@ def _add_index_parser(subparsers):
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
+
+
+def _add_index_files_parser(subparsers):
+    """Add the index-files command parser for local Office/PDF documents."""
+    index_files_parser = subparsers.add_parser(
+        'index-files', 
+        help='Index local Office documents (Excel, Word, PDF)'
+    )
+    index_files_parser.add_argument('directory', help='Directory containing files to index')
+    index_files_parser.add_argument('--extensions', '-e', default='docx,xlsx,pdf',
+                                    help='Comma-separated file extensions to include (default: docx,xlsx,pdf)')
+    index_files_parser.add_argument('--no-recursive', action='store_true',
+                                    help='Do not scan subdirectories (default: recursive)')
+    index_files_parser.add_argument('--exclude', action='append', metavar='PATTERN',
+                                    help='Glob pattern to exclude (can be repeated)')
+    index_files_parser.add_argument('--site-name', metavar='NAME',
+                                    help='Name for this document set (default: directory name)')
+    index_files_parser.add_argument('--merge-with', metavar='URL',
+                                    help='Merge into existing site index')
+    index_files_parser.add_argument('--no-headers', action='store_true',
+                                    help='Do not treat first Excel row as headers')
+    index_files_parser.add_argument('--quiet', '-q', action='store_true',
+                                    help='Suppress progress output')
+    index_files_parser.set_defaults(func=cmd_index_files)
 
 
 def _add_search_parser(subparsers):
