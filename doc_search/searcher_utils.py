@@ -314,22 +314,6 @@ def format_results(
         if len(snippet) > MAX_SNIPPET_LENGTH:
             snippet = snippet[:MAX_SNIPPET_LENGTH - 3] + '...'
         
-        # Build PDF location info (page/section)
-        pdf_location = ''
-        if result.get('doc_type') == 'pdf':
-            page = result.get('pdf_page')
-            section = result.get('pdf_section')
-            if page or section:
-                parts = []
-                if page:
-                    parts.append(f"p.{page}")
-                if section:
-                    # Truncate long section names
-                    if len(section) > 30:
-                        section = section[:27] + '...'
-                    parts.append(f"§{section}")
-                pdf_location = f" — {', '.join(parts)}"
-        
         # Apply ANSI highlighting to snippet if we have query terms
         if colorize_output and query_terms and snippet:
             # Convert **term** markers to ANSI codes
@@ -342,9 +326,9 @@ def format_results(
         # Build the result lines with colors
         if colorize_output:
             if show_scores:
-                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}{style_info(pdf_location)}")
+                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}")
             else:
-                lines.append(f"{style_number(i)} {style_title(title)}{style_info(pdf_location)}")
+                lines.append(f"{style_number(i)} {style_title(title)}")
             
             lines.append(f"   {style_url(url)}")
             
@@ -353,9 +337,9 @@ def format_results(
         else:
             # Plain text output
             if show_scores:
-                lines.append(f"{i}. [{score:.4f}] {title}{pdf_location}")
+                lines.append(f"{i}. [{score:.4f}] {title}")
             else:
-                lines.append(f"{i}. {title}{pdf_location}")
+                lines.append(f"{i}. {title}")
             
             lines.append(f"   {url}")
             
@@ -365,72 +349,3 @@ def format_results(
         lines.append("")
     
     return "\n".join(lines)
-
-
-def find_chunk_context(
-    snippet: str,
-    chunks: List[Dict[str, Any]],
-    threshold: float = 0.3
-) -> Optional[Dict[str, Any]]:
-    """
-    Find the PDF chunk that best matches a snippet.
-    
-    Given a snippet extracted from document text and a list of PDF chunks
-    (each with text, page, section, section_level), find the chunk that
-    contains the most overlap with the snippet.
-    
-    Args:
-        snippet: The snippet text to match
-        chunks: List of chunks with {text, page, section, section_level}
-        threshold: Minimum overlap ratio to consider a match
-        
-    Returns:
-        Dict with {page, section, section_level} or None if no match
-    """
-    if not snippet or not chunks:
-        return None
-    
-    # Normalize snippet for matching
-    snippet_lower = snippet.lower()
-    snippet_words = set(snippet_lower.split())
-    
-    if not snippet_words:
-        return None
-    
-    best_match = None
-    best_score = 0
-    
-    for chunk in chunks:
-        chunk_text = chunk.get('text', '')
-        if not chunk_text:
-            continue
-        
-        chunk_lower = chunk_text.lower()
-        
-        # Check for substring match first (most reliable)
-        # Strip highlighting markers for comparison
-        clean_snippet = re.sub(r'\*\*([^*]+)\*\*', r'\1', snippet_lower)
-        if clean_snippet[:50] in chunk_lower or chunk_lower[:50] in clean_snippet:
-            return {
-                'page': chunk.get('page'),
-                'section': chunk.get('section'),
-                'section_level': chunk.get('section_level', 0)
-            }
-        
-        # Fall back to word overlap scoring
-        chunk_words = set(chunk_lower.split())
-        if not chunk_words:
-            continue
-        
-        overlap = len(snippet_words & chunk_words)
-        score = overlap / len(snippet_words)
-        
-        if score > best_score and score >= threshold:
-            best_score = score
-            best_match = {
-                'page': chunk.get('page'),
-                'section': chunk.get('section'),
-                'section_level': chunk.get('section_level', 0)
-            }
-    
-    return best_match

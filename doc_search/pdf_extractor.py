@@ -174,179 +174,6 @@ class PDFExtractor:
         
         return headings, body_parts
     
-    def _build_chunks_with_context(
-        self,
-        text_elements: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, str]], List[str]]:
-        """
-        Build text chunks with page and section context.
-        
-        Each chunk includes:
-        - text: The body text content
-        - page: PDF page number (1-indexed)
-        - section: The most recent heading/section title
-        - section_level: Heading level (1, 2, or 3)
-        
-        Args:
-            text_elements: List of dicts with 'text', 'font_size', 'font_name', 'page'
-            
-        Returns:
-            Tuple of (chunks, headings, body_parts)
-            - chunks: List of dicts with text, page, section, section_level
-            - headings: List of (level, text) tuples (for backward compatibility)
-            - body_parts: List of body text strings (for backward compatibility)
-        """
-        if not text_elements:
-            return [], [], []
-        
-        # Collect font sizes for analysis
-        font_sizes = [
-            el['font_size'] for el in text_elements
-            if el.get('font_size') and el['font_size'] > 0
-        ]
-        
-        # Calculate threshold for heading detection
-        if font_sizes:
-            sorted_sizes = sorted(font_sizes)
-            median_size = sorted_sizes[len(sorted_sizes) // 2]
-            heading_threshold = median_size * 1.2  # 20% larger than median
-            large_heading_threshold = median_size * 1.4  # 40% larger = h1
-        else:
-            # Fallback thresholds when no font info available
-            heading_threshold = 14.0
-            large_heading_threshold = 18.0
-        
-        chunks = []
-        headings = []
-        body_parts = []
-        
-        # Track current section context
-        current_section = ''
-        current_section_level = 0
-        
-        # Common section heading keywords (language-agnostic, common across documents)
-        section_keywords = {
-            'abstract', 'introduction', 'background', 'overview',
-            'method', 'methods', 'methodology', 'approach',
-            'result', 'results', 'findings', 'evaluation',
-            'discussion', 'analysis', 
-            'conclusion', 'conclusions', 'summary',
-            'references', 'bibliography',
-            'acknowledgment', 'acknowledgments', 'acknowledgement', 'acknowledgements',
-            'appendix', 'appendices',
-            'related work', 'prior work', 'previous work',
-            'future work', 'limitations',
-            'experiment', 'experiments', 'experimental setup',
-            'implementation', 'design', 'architecture',
-            'preliminaries', 'notation', 'definitions',
-        }
-        
-        # Pattern for numbered sections - number followed by section-like words
-        # e.g., "1 Introduction", "2.3 Related Work", "4.1.2 Experimental Setup"
-        numbered_section_pattern = re.compile(
-            r'^(\d+\.)*\d+\.?\s+(' + '|'.join(re.escape(kw) for kw in section_keywords) + r')',
-            re.IGNORECASE
-        )
-        
-        def is_clear_section_heading(text: str) -> bool:
-            """
-            Check if text is clearly a section heading.
-            
-            Only returns True for unambiguous cases:
-            - Numbered sections followed by known keywords (1.2 Introduction)
-            - Known section keywords alone (Abstract, Methods, etc.)
-            """
-            text_clean = text.strip()
-            text_lower = text_clean.lower()
-            
-            # Numbered section with known keyword: "1 Introduction", "2.3 Methods"
-            if numbered_section_pattern.match(text_clean):
-                return True
-            
-            # Check for section keywords (case-insensitive, at start or whole text)
-            for keyword in section_keywords:
-                if text_lower == keyword or text_lower.startswith(keyword + ' ') or text_lower.startswith(keyword + ':'):
-                    return True
-            
-            # ALL CAPS short text that matches a keyword
-            if text_clean.isupper() and len(text_clean) < 50:
-                for keyword in section_keywords:
-                    if keyword in text_lower:
-                        return True
-            
-            return False
-        
-        for el in text_elements:
-            text = el.get('text', '').strip()
-            if not text:
-                continue
-            
-            page = el.get('page', 1)
-            font_size = el.get('font_size', 0) or 0
-            font_name = el.get('font_name', '') or ''
-            
-            is_heading = False
-            level = 2  # Default heading level
-            
-            # Font size based detection (most reliable)
-            if font_size > 0:
-                if font_size > large_heading_threshold:
-                    is_heading = True
-                    level = 1
-                elif font_size > heading_threshold:
-                    is_heading = True
-                    level = 2
-            
-            # Bold font detection (for short lines only)
-            if not is_heading and 'Bold' in font_name and len(text) < 100:
-                is_heading = True
-                level = 2
-            
-            # ALL CAPS detection (short lines only, at least 3 words or chars)
-            if not is_heading and len(text) < 80 and len(text) > 5:
-                if text.isupper() and any(c.isalpha() for c in text):
-                    is_heading = True
-                    level = 2
-            
-            # Numbered section detection (e.g., "1.2 Methods", "3.4.1 Results")
-            if not is_heading and numbered_section_pattern.match(text):
-                is_heading = True
-                # Determine level by number of dots
-                dots = text.split()[0].count('.')
-                level = min(dots + 1, 3)  # Cap at level 3
-            
-            if is_heading:
-                # Clean up heading text
-                clean_text = ' '.join(text.split())  # Normalize whitespace
-                
-                # For section context, only use clearly identifiable section headings
-                # This is conservative - we'd rather show no section than wrong section
-                if len(clean_text) <= 200 and is_clear_section_heading(clean_text):
-                    headings.append((level, clean_text))
-                    # Update current section context
-                    current_section = clean_text
-                    current_section_level = level
-                else:
-                    # Not a clear section heading - treat as body text
-                    # (It may still be a heading for other purposes, but not for section context)
-                    body_parts.append(text)
-                    chunks.append({
-                        'text': text,
-                        'page': page,
-                        'section': current_section,
-                        'section_level': current_section_level,
-                    })
-            else:
-                body_parts.append(text)
-                chunks.append({
-                    'text': text,
-                    'page': page,
-                    'section': current_section,
-                    'section_level': current_section_level,
-                })
-        
-        return chunks, headings, body_parts
-    
     def _extract_outline_headings(
         self,
         outline: Any,
@@ -468,14 +295,12 @@ class PDFExtractor:
             title_fallback: Fallback title if none found
             
         Returns:
-            Dict with text, title, headings, chunks, pages, metadata, error
-            - chunks: List of {text, page, section, section_level} for per-chunk context
+            Dict with text, title, headings, pages, metadata, error
         """
         result = {
             'text': '',
             'title': '',
             'headings': [],
-            'chunks': [],  # NEW: per-chunk page/section tracking
             'pages': 0,
             'metadata': {},
             'error': None
@@ -497,9 +322,8 @@ class PDFExtractor:
             # Extract text with font information
             text_elements, fallback_text = self._extract_with_visitor(reader)
             
-            # Build chunks with page/section context (also returns headings/body for compat)
-            chunks, detected_headings, body_parts = self._build_chunks_with_context(text_elements)
-            result['chunks'] = chunks
+            # Detect headings from font analysis
+            detected_headings, body_parts = self._detect_headings(text_elements)
             
             # Extract outline/TOC headings
             outline_headings = []
@@ -684,7 +508,6 @@ if __name__ == '__main__':
     parser.add_argument('source', help='PDF file path or URL')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     parser.add_argument('--headings', action='store_true', help='Show detected headings')
-    parser.add_argument('--chunks', action='store_true', help='Show chunks with page/section info')
     args = parser.parse_args()
     
     extractor = PDFExtractor()
@@ -701,7 +524,6 @@ if __name__ == '__main__':
             sys.exit(1)
         print(f"Title: {result['title']}")
         print(f"Pages: {result['pages']}")
-        print(f"Chunks: {len(result.get('chunks', []))}")
         if args.headings or result['headings']:
             print(f"\nHeadings ({len(result['headings'])}):")
             for level, text in result['headings'][:20]:  # Show first 20
@@ -709,15 +531,6 @@ if __name__ == '__main__':
                 print(f"  {indent}[H{level}] {text[:80]}")
             if len(result['headings']) > 20:
                 print(f"  ... and {len(result['headings']) - 20} more")
-        if args.chunks and result.get('chunks'):
-            print(f"\nChunks with page/section ({len(result['chunks'])}):")
-            for i, chunk in enumerate(result['chunks'][:30]):  # Show first 30
-                section = chunk.get('section', '') or '(no section)'
-                page = chunk.get('page', '?')
-                text_preview = chunk.get('text', '')[:60].replace('\n', ' ')
-                print(f"  [{i+1}] p.{page} §{section[:30]}: {text_preview}...")
-            if len(result['chunks']) > 30:
-                print(f"  ... and {len(result['chunks']) - 30} more chunks")
         print(f"\n{'-'*50}\n")
         print(result['text'][:2000])
         if len(result['text']) > 2000:

@@ -100,7 +100,6 @@ def build_document_data(
     doc_pages: int = 0,
     doc_metadata: Optional[Dict[str, Any]] = None,
     headings: Optional[List[Tuple[int, str]]] = None,
-    chunks: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Build page data for an extracted document (PDF, DOCX, etc.).
@@ -114,12 +113,11 @@ def build_document_data(
         doc_pages: Number of pages in the document.
         doc_metadata: Additional document metadata.
         headings: List of (level, text) tuples for detected headings.
-        chunks: List of {text, page, section, section_level} for per-chunk context.
     
     Returns:
         A dictionary with document data ready for persistence.
     """
-    data = {
+    return {
         'url': url,
         'title': title,
         'description': f"{doc_type.upper()} document, {doc_pages} pages",
@@ -131,10 +129,6 @@ def build_document_data(
         'doc_pages': doc_pages,
         'doc_metadata': doc_metadata or {},
     }
-    # Include chunks for PDF page/section tracking if available
-    if chunks:
-        data['chunks'] = chunks
-    return data
 
 
 class PageProcessor:

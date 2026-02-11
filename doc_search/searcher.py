@@ -23,7 +23,7 @@ from .ngram import NGramIndex
 from .reranker import Reranker, RerankConfig, RerankMetrics
 from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
-    format_results, check_phrase_match, find_chunk_context
+    format_results, check_phrase_match
 )
 
 
@@ -573,25 +573,8 @@ class SearchEngine:
                 'title': r.get('title', ''),
                 'snippet': snippet,
                 'description': r.get('description', ''),  # Keep original too
-                'score': r.get('score', 0),
-                'doc_type': r.get('doc_type', 'html')
+                'score': r.get('score', 0)
             }
-            
-            # Add page/section info for PDF results
-            if r.get('doc_type') == 'pdf' and snippet:
-                doc_id = self.index.get_doc_id(r['url'])
-                if doc_id is not None:
-                    doc = self.index.documents.get(doc_id, {})
-                    pdf_chunks = doc.get('pdf_chunks', [])
-                    if pdf_chunks:
-                        chunk_ctx = find_chunk_context(snippet, pdf_chunks)
-                        if chunk_ctx:
-                            if chunk_ctx.get('page'):
-                                result['pdf_page'] = chunk_ctx['page']
-                            if chunk_ctx.get('section'):
-                                result['pdf_section'] = chunk_ctx['section']
-                    if doc.get('doc_pages'):
-                        result['doc_pages'] = doc['doc_pages']
             
             results.append(result)
             
@@ -1312,23 +1295,6 @@ class EnhancedSearchEngine(SearchEngine):
                 'score': round(score, 4) if isinstance(score, float) else score,
                 'doc_type': r.get('doc_type', 'html')
             }
-            
-            # Add page/section info for PDF results
-            if r.get('doc_type') == 'pdf' and snippet:
-                doc_id = self.index.get_doc_id(r['url'])
-                if doc_id is not None:
-                    doc = self.index.documents.get(doc_id, {})
-                    pdf_chunks = doc.get('pdf_chunks', [])
-                    if pdf_chunks:
-                        chunk_ctx = find_chunk_context(snippet, pdf_chunks)
-                        if chunk_ctx:
-                            if chunk_ctx.get('page'):
-                                result['pdf_page'] = chunk_ctx['page']
-                            if chunk_ctx.get('section'):
-                                result['pdf_section'] = chunk_ctx['section']
-                    # Include total page count
-                    if doc.get('doc_pages'):
-                        result['doc_pages'] = doc['doc_pages']
             
             # Add facets for this result
             if self._facets:
