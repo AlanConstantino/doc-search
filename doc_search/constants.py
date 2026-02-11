@@ -164,3 +164,24 @@ PHRASE_PROXIMITY_MATCH_BODY = 1.5    # Proximity match in body
 
 # Whether to hard-filter on phrase (only for quoted phrases)
 PHRASE_HARD_FILTER_QUOTED = True
+
+
+# =============================================================================
+# Term Expansion Weights
+# =============================================================================
+
+# Original query terms get full weight
+TERM_WEIGHT_ORIGINAL = 1.0
+
+# Fuzzy corrections by edit distance
+TERM_WEIGHT_FUZZY_DIST_1 = 0.5   # Edit distance 1 (likely typo)
+TERM_WEIGHT_FUZZY_DIST_2 = 0.3   # Edit distance 2 (less certain)
+
+# Synonym expansions
+TERM_WEIGHT_SYNONYM = 0.5
+
+# Wildcard/prefix expansions
+TERM_WEIGHT_WILDCARD = 0.4
+
+# N-gram substring matches
+TERM_WEIGHT_NGRAM = 0.3

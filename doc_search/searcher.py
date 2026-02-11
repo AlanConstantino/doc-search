@@ -874,6 +874,75 @@ class EnhancedSearchEngine(SearchEngine):
         
         return expanded
     
+    def _build_term_weights(
+        self,
+        original_terms: List[str],
+        expanded_terms: List[str],
+        fuzzy_corrections: Optional[Dict[str, int]] = None,
+        synonym_terms: Optional[Set[str]] = None,
+        wildcard_terms: Optional[Set[str]] = None
+    ) -> Dict[str, float]:
+        """
+        Build a weight map for query terms based on their source.
+        
+        Original terms get full weight, while expanded terms get reduced
+        weights based on how they were derived.
+        
+        Args:
+            original_terms: Original query terms (full weight)
+            expanded_terms: All terms including expansions
+            fuzzy_corrections: Dict of term -> edit_distance for fuzzy matches
+            synonym_terms: Set of terms that came from synonym expansion
+            wildcard_terms: Set of terms that came from wildcard expansion
+            
+        Returns:
+            Dict mapping term (lowercase) -> weight
+        """
+        from .constants import (
+            TERM_WEIGHT_ORIGINAL,
+            TERM_WEIGHT_FUZZY_DIST_1,
+            TERM_WEIGHT_FUZZY_DIST_2,
+            TERM_WEIGHT_SYNONYM,
+            TERM_WEIGHT_WILDCARD,
+            TERM_WEIGHT_NGRAM,
+        )
+        
+        weights = {}
+        
+        # Original terms get full weight
+        original_set = {t.lower().rstrip('*') for t in original_terms}
+        for term in original_set:
+            weights[term] = TERM_WEIGHT_ORIGINAL
+        
+        # Build sets for easier lookup
+        fuzzy_corrections = fuzzy_corrections or {}
+        synonym_terms = synonym_terms or set()
+        wildcard_terms = wildcard_terms or set()
+        
+        # Assign weights to expanded terms
+        for term in expanded_terms:
+            term_lower = term.lower()
+            
+            if term_lower in weights:
+                continue  # Already assigned (original term)
+            
+            if term_lower in fuzzy_corrections:
+                # Fuzzy correction - weight by edit distance
+                dist = fuzzy_corrections[term_lower]
+                if dist == 1:
+                    weights[term_lower] = TERM_WEIGHT_FUZZY_DIST_1
+                else:
+                    weights[term_lower] = TERM_WEIGHT_FUZZY_DIST_2
+            elif term_lower in synonym_terms:
+                weights[term_lower] = TERM_WEIGHT_SYNONYM
+            elif term_lower in wildcard_terms:
+                weights[term_lower] = TERM_WEIGHT_WILDCARD
+            else:
+                # Default for unknown expansions (e.g., ngram)
+                weights[term_lower] = TERM_WEIGHT_NGRAM
+        
+        return weights
+    
     @classmethod
     def load(cls, index_path: Path, **kwargs) -> 'EnhancedSearchEngine':
         """Load enhanced search engine from saved index."""
@@ -1082,12 +1151,25 @@ class EnhancedSearchEngine(SearchEngine):
         if suggestion and suggestion.lower() != query.lower():
             self.last_suggestion = suggestion
         
+        # Track expansion sources for weighted scoring
+        synonym_terms: Set[str] = set()
+        wildcard_terms: Set[str] = set()
+        
+        # Track which terms came from wildcard expansion
+        if has_wildcards or self.ngram_enabled:
+            original_term_set = {t.lower().rstrip('*') for t in terms}
+            ngram_term_set = {t.lower() for t in ngram_expanded_terms}
+            wildcard_terms = ngram_term_set - original_term_set
+        
         # Expand query with synonyms
         expanded_terms = list(ngram_expanded_terms)
         if expand_synonyms and self._synonyms and ngram_expanded_terms:
+            pre_expansion_set = set(ngram_expanded_terms)
             expanded_terms = self._synonyms.expand_terms(ngram_expanded_terms, max_per_term=2)
             if expanded_terms != list(ngram_expanded_terms):
                 self.last_expanded_query = ' '.join(expanded_terms)
+                # Track which terms came from synonym expansion
+                synonym_terms = set(expanded_terms) - pre_expansion_set
         
         # Flatten phrases into terms for BM25 scoring
         all_terms = list(expanded_terms)
@@ -1136,6 +1218,15 @@ class EnhancedSearchEngine(SearchEngine):
         # Strip wildcards from original terms for matching
         original_terms = [t.rstrip('*') for t in original_terms if not t.endswith('*') or len(t) > 1]
         
+        # Build term weights for weighted coverage scoring
+        term_weights = self._build_term_weights(
+            original_terms=original_terms,
+            expanded_terms=expanded_terms,
+            fuzzy_corrections=None,  # TODO: track fuzzy corrections
+            synonym_terms=synonym_terms,
+            wildcard_terms=wildcard_terms
+        )
+        
         if enable_reranking and bm25_results:
             # Rerank candidates using multiple signals
             reranked = self._reranker.rerank(
@@ -1143,7 +1234,8 @@ class EnhancedSearchEngine(SearchEngine):
                 original_terms=original_terms,
                 phrases=phrases,
                 load_text_fn=self._load_page_text,
-                top_k=None  # Don't limit yet, we'll process all and limit below
+                top_k=None,  # Don't limit yet, we'll process all and limit below
+                term_weights=term_weights
             )
             self.last_rerank_metrics = self._reranker.last_metrics
             
