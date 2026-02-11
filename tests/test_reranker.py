@@ -136,6 +136,52 @@ class TestRerankScoring(unittest.TestCase):
         score = self.reranker._compute_coverage_score("some text", [], beta=0.4)
         self.assertAlmostEqual(score, 1.0)
     
+    def test_coverage_score_weighted(self):
+        """Should use term weights when provided."""
+        # Without weights
+        unweighted = self.reranker._compute_coverage_score(
+            "python basics",
+            ["python", "list", "comprehension"],
+            beta=0.4
+        )
+        
+        # With weights favoring "python"
+        weighted = self.reranker._compute_coverage_score(
+            "python basics",
+            ["python", "list", "comprehension"],
+            beta=0.4,
+            term_weights={"python": 3.0, "list": 1.0, "comprehension": 1.0}
+        )
+        
+        # Weighted coverage should be higher (python has 3x weight)
+        self.assertGreater(weighted, unweighted)
+    
+    def test_coverage_score_long_query_capped(self):
+        """Should cap terms considered for very long queries."""
+        # Create a long query with 15 terms
+        long_terms = [f"term{i}" for i in range(15)]
+        text = " ".join(long_terms[:3])  # Only first 3 match
+        
+        # With default max_coverage_terms=8, only 8 terms considered
+        score = self.reranker._compute_coverage_score(
+            text, long_terms, beta=0.4
+        )
+        
+        # 3 out of 8 matched (capped) = 37.5% coverage
+        expected = 1 + 0.4 * (3 / 8)
+        self.assertAlmostEqual(score, expected, places=2)
+    
+    def test_weighted_coverage_helper(self):
+        """Should compute weighted coverage ratio."""
+        coverage = self.reranker._compute_weighted_coverage(
+            "python list basics",
+            ["python", "list", "comprehension"],
+            {"python": 2.0, "list": 1.0, "comprehension": 1.0}
+        )
+        # python (2.0) + list (1.0) matched, total weight = 4.0
+        # coverage = 3.0 / 4.0 = 0.75
+        self.assertAlmostEqual(coverage, 0.75)
+    
     def test_phrase_score_exact_match_in_title(self):
         """Should give high score for exact phrase in title."""
         score = self.reranker._compute_phrase_score(
