@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-02-10
+
+### Added
+- **Delete command** - Remove crawled sites and their indexes (#184)
+  - Delete by URL: `doc_search delete https://example.com`
+  - Delete by hash ID: `doc_search delete abc123`
+  - Delete all sites: `doc_search delete --all`
+  - Preview mode: `doc_search delete --dry-run` shows what would be deleted without removing anything
+
 ## [1.16.0] - 2026-02-05
 
 ### Added
