@@ -449,7 +449,7 @@ class TestParserCreation(unittest.TestCase):
     
     def test_parser_has_subcommands(self):
         """Parser should recognize all expected subcommands."""
-        expected_commands = ['crawl', 'index', 'search', 'autocomplete', 
+        expected_commands = ['crawl', 'index', 'index-files', 'search', 'autocomplete', 
                            'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in expected_commands:
@@ -4060,7 +4060,7 @@ class TestCLIParsersModule(unittest.TestCase):
     def test_all_subcommands_registered(self):
         """All expected subcommands should be registered."""
         expected_commands = [
-            'crawl', 'index', 'search', 'autocomplete',
+            'crawl', 'index', 'index-files', 'search', 'autocomplete',
             'interactive', 'stats', 'list', 'delete', 'serve'
         ]
         
@@ -4080,8 +4080,8 @@ class TestCLIParsersModule(unittest.TestCase):
         for cmd in expected_commands:
             self.assertIn(cmd, registered_commands, f"Command '{cmd}' should be registered")
     
-    def test_subcommand_count_is_exactly_nine(self):
-        """Parser should have exactly 9 subcommands."""
+    def test_subcommand_count_is_exactly_ten(self):
+        """Parser should have exactly 10 subcommands."""
         parser = create_parser()
         
         subparsers_action = None
@@ -4090,13 +4090,13 @@ class TestCLIParsersModule(unittest.TestCase):
                 subparsers_action = action
                 break
         
-        self.assertEqual(len(subparsers_action.choices), 9)
+        self.assertEqual(len(subparsers_action.choices), 10)
     
     def test_each_subcommand_has_func(self):
         """Each subcommand should have a func default set."""
         parser = create_parser()
         
-        commands = ['crawl', 'index', 'search', 'autocomplete',
+        commands = ['crawl', 'index', 'index-files', 'search', 'autocomplete',
                    'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in commands:

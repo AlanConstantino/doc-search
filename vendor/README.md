@@ -2,6 +2,47 @@
 
 This directory contains vendored (bundled) third-party libraries to avoid requiring users to install dependencies via pip.
 
+## openpyxl v3.1.2
+
+- **Source:** https://github.com/theorchard/openpyxl
+- **License:** MIT
+- **Vendored:** 2026-02-11
+- **Purpose:** Excel (.xlsx) text extraction
+- **Python:** 3.6+ required
+
+### License Notice
+
+openpyxl is licensed under the MIT license.
+
+Copyright (c) 2010 openpyxl
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+### Usage
+
+```python
+from vendor.openpyxl import load_workbook
+
+wb = load_workbook("spreadsheet.xlsx")
+for sheet_name in wb.sheetnames:
+    sheet = wb[sheet_name]
+    for row in sheet.iter_rows(values_only=True):
+        print(row)
+```
+
+---
+
+## et_xmlfile v2.0.0
+
+- **Source:** https://pypi.org/project/et-xmlfile/
+- **License:** MIT
+- **Vendored:** 2026-02-11
+- **Purpose:** Required dependency of openpyxl for XML handling
+
+---
+
 ## pypdf v6.7.0
 
 - **Source:** https://github.com/py-pdf/pypdf
