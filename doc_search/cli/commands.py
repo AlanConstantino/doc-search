@@ -897,8 +897,9 @@ def cmd_delete(args):
 
 
 def cmd_index_files(args):
-    """Index local Excel documents (.xlsx)."""
+    """Index local Office documents (.xlsx, .docx)."""
     from ..excel_extractor import ExcelExtractor
+    from ..word_extractor import WordExtractor
     import hashlib
     
     directory = Path(args.directory)
@@ -911,7 +912,7 @@ def cmd_index_files(args):
         return 1
     
     # Parse extensions
-    extensions_str = getattr(args, 'extensions', 'xlsx')
+    extensions_str = getattr(args, 'extensions', 'xlsx,docx')
     extensions = set('.' + ext.strip().lower().lstrip('.') for ext in extensions_str.split(','))
     
     # Determine site name and directory
@@ -942,13 +943,14 @@ def cmd_index_files(args):
     print(f"Data directory: {site_dir}")
     print()
     
-    # Set up extractor
+    # Set up extractors
     first_row_is_header = not getattr(args, 'no_headers', False)
     max_rows = getattr(args, 'max_rows', None)
     excel_extractor = ExcelExtractor(
         first_row_is_header=first_row_is_header,
         max_rows=max_rows
     )
+    word_extractor = WordExtractor()
     
     # Find and process files
     recursive = not getattr(args, 'no_recursive', False)
@@ -992,6 +994,8 @@ def cmd_index_files(args):
         try:
             if ext == '.xlsx':
                 documents = excel_extractor.extract(file_path)
+            elif ext == '.docx':
+                documents = word_extractor.extract(file_path)
             else:
                 # Skip unsupported extensions
                 continue
