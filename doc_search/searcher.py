@@ -317,6 +317,7 @@ def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
     Supports:
         - Regular terms: python tutorial
         - Exact phrases: "list comprehension"
+        - Wildcard prefix: pyth* (expands to python, pythonic, etc.)
         - Mixed: python "list comprehension" tutorial
     
     Args:
@@ -340,8 +341,23 @@ def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
     # Remove quoted phrases from query
     remaining = re.sub(phrase_pattern, ' ', query)
     
+    # Extract wildcard terms before tokenizing (tokenize strips *)
+    # Match word characters followed by * (e.g., "pyth*", "iter*")
+    wildcard_pattern = r'\b([a-zA-Z][a-zA-Z0-9_]*)\*'
+    wildcards = []
+    for match in re.finditer(wildcard_pattern, remaining):
+        prefix = match.group(1).lower()
+        if len(prefix) >= 2:  # Need at least 2 chars for prefix search
+            wildcards.append(prefix + '*')
+    
+    # Remove wildcard terms from remaining before tokenizing
+    remaining_no_wildcards = re.sub(wildcard_pattern, ' ', remaining)
+    
     # Tokenize remaining terms
-    terms = tokenize(remaining)
+    terms = tokenize(remaining_no_wildcards)
+    
+    # Add wildcard terms back
+    terms.extend(wildcards)
     
     return terms, phrases
 
@@ -794,7 +810,27 @@ class EnhancedSearchEngine(SearchEngine):
             Expanded list of terms with wildcard matches included
         """
         if not self._ngram:
-            return terms
+            # Fallback when ngram is disabled: strip wildcards and do basic prefix match
+            vocabulary = set(self.index.index.keys())
+            expanded = []
+            for term in terms:
+                if term.endswith('*'):
+                    prefix = term[:-1].lower()
+                    if len(prefix) >= 2:
+                        # Find all vocab terms that start with this prefix
+                        matches = [t for t in vocabulary if t.startswith(prefix)]
+                        if matches:
+                            # Sort by length (prefer shorter matches) and take top 10
+                            matches.sort(key=len)
+                            expanded.extend(matches[:10])
+                        else:
+                            # No matches, just use the prefix
+                            expanded.append(prefix)
+                    else:
+                        expanded.append(term.rstrip('*'))
+                else:
+                    expanded.append(term)
+            return expanded
         
         vocabulary = set(self.index.index.keys())
         expanded = []
@@ -1020,8 +1056,10 @@ class EnhancedSearchEngine(SearchEngine):
             return []
         
         # Expand wildcard terms using n-gram index (e.g., "pyth*" → ["python", "pythonic"])
+        # Also handles wildcards when ngram is disabled via fallback prefix matching
         ngram_expanded_terms = list(terms)
-        if self.ngram_enabled:
+        has_wildcards = any(t.endswith('*') for t in terms)
+        if self.ngram_enabled or has_wildcards:
             ngram_expanded_terms = self._expand_ngram_terms(terms)
         
         # Check for spelling suggestions (for "Did you mean?" display)
