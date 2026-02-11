@@ -53,7 +53,8 @@ class BM25Index:
     
     def add_document(self, doc_id: int, url: str, title: str, text: str, 
                      description: str = '', headings: List[tuple] = None,
-                     doc_type: str = 'html'):
+                     doc_type: str = 'html', chunks: List[Dict[str, Any]] = None,
+                     doc_pages: int = 0):
         """
         Add a document to the index.
         
@@ -65,11 +66,13 @@ class BM25Index:
             description: Optional meta description
             headings: Optional list of (level, text) tuples
             doc_type: Document type ('html', 'pdf', etc.)
+            chunks: Optional list of {text, page, section, section_level} for PDFs
+            doc_pages: Total page count for PDFs
         """
         # Build headings text for field-aware ranking
         headings_text = ''
         if headings:
-            headings_text = ' '.join(text for _, text in headings)
+            headings_text = ' '.join(h_text for _, h_text in headings)
         
         # Store document metadata (including headings for field-aware reranking)
         self.documents[doc_id] = {
@@ -79,6 +82,12 @@ class BM25Index:
             'doc_type': doc_type,
             'headings_text': headings_text  # For field-aware ranking
         }
+        
+        # Store PDF-specific metadata for page/section tracking
+        if doc_type == 'pdf' and chunks:
+            self.documents[doc_id]['pdf_chunks'] = chunks
+            self.documents[doc_id]['doc_pages'] = doc_pages
+        
         self.url_to_id[url] = doc_id
         
         # Tokenize content (title gets more weight by being included multiple times)
@@ -177,7 +186,9 @@ class BM25Index:
                     text=text,
                     description=description,
                     headings=headings,
-                    doc_type=page.get('doc_type', 'html')
+                    doc_type=page.get('doc_type', 'html'),
+                    chunks=page.get('chunks'),  # PDF chunks with page/section info
+                    doc_pages=page.get('doc_pages', 0),
                 )
                 
                 doc_id += 1

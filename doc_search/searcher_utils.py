@@ -349,3 +349,72 @@ def format_results(
         lines.append("")
     
     return "\n".join(lines)
+
+
+def find_chunk_context(
+    snippet: str,
+    chunks: List[Dict[str, Any]],
+    threshold: float = 0.3
+) -> Optional[Dict[str, Any]]:
+    """
+    Find the PDF chunk that best matches a snippet.
+    
+    Given a snippet extracted from document text and a list of PDF chunks
+    (each with text, page, section, section_level), find the chunk that
+    contains the most overlap with the snippet.
+    
+    Args:
+        snippet: The snippet text to match
+        chunks: List of chunks with {text, page, section, section_level}
+        threshold: Minimum overlap ratio to consider a match
+        
+    Returns:
+        Dict with {page, section, section_level} or None if no match
+    """
+    if not snippet or not chunks:
+        return None
+    
+    # Normalize snippet for matching
+    snippet_lower = snippet.lower()
+    snippet_words = set(snippet_lower.split())
+    
+    if not snippet_words:
+        return None
+    
+    best_match = None
+    best_score = 0
+    
+    for chunk in chunks:
+        chunk_text = chunk.get('text', '')
+        if not chunk_text:
+            continue
+        
+        chunk_lower = chunk_text.lower()
+        
+        # Check for substring match first (most reliable)
+        # Strip highlighting markers for comparison
+        clean_snippet = re.sub(r'\*\*([^*]+)\*\*', r'\1', snippet_lower)
+        if clean_snippet[:50] in chunk_lower or chunk_lower[:50] in clean_snippet:
+            return {
+                'page': chunk.get('page'),
+                'section': chunk.get('section'),
+                'section_level': chunk.get('section_level', 0)
+            }
+        
+        # Fall back to word overlap scoring
+        chunk_words = set(chunk_lower.split())
+        if not chunk_words:
+            continue
+        
+        overlap = len(snippet_words & chunk_words)
+        score = overlap / len(snippet_words)
+        
+        if score > best_score and score >= threshold:
+            best_score = score
+            best_match = {
+                'page': chunk.get('page'),
+                'section': chunk.get('section'),
+                'section_level': chunk.get('section_level', 0)
+            }
+    
+    return best_match
