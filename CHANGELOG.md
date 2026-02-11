@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-02-11
+
+### Added
+- **Word (.docx) document support** (#202, #204)
+  - Pure Python implementation using stdlib (zipfile + xml.etree.ElementTree)
+  - Zero external dependencies
+  - Heading detection from Word styles (Heading 1, 2, 3, Title, Subtitle)
+  - Document properties extraction (title, author, created/modified dates)
+  - Headers and footers included in extracted text
+  - Word count calculation
+  - Blue DOCX badge in web UI search results
+  - Default extensions for `index-files` now: `xlsx,docx`
+
+### Usage
+```bash
+# Index Word and Excel files
+python -m doc_search index-files ./documents/
+
+# Or just Word files
+python -m doc_search index-files ./documents/ --extensions docx
+```
+
+### Note
+Only .docx (Office 2007+) supported. For legacy .doc files:
+```bash
+libreoffice --headless --convert-to docx *.doc
+```
+
 ## [1.19.0] - 2026-02-11
 
 ### Added
