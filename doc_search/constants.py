@@ -131,6 +131,9 @@ RERANK_TITLE_COVERAGE_BETA = 0.6
 # Full coverage bonus: extra boost when all query terms are present
 RERANK_FULL_COVERAGE_BONUS = 0.2
 
+# Maximum terms to consider for coverage (for very long queries)
+RERANK_MAX_COVERAGE_TERMS = 8
+
 
 # =============================================================================
 # Field-Aware Ranking Weights

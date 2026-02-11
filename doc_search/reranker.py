@@ -33,6 +33,7 @@ from .constants import (
     RERANK_COVERAGE_BETA,
     RERANK_TITLE_COVERAGE_BETA,
     RERANK_FULL_COVERAGE_BONUS,
+    RERANK_MAX_COVERAGE_TERMS,
     RERANK_RECALL_MULTIPLIER,
     RERANK_MAX_CANDIDATES,
     RERANK_CANDIDATE_LIMIT,
@@ -62,6 +63,7 @@ class RerankConfig:
         coverage_beta: Strength of coverage boost
         title_coverage_beta: Strength of title-specific coverage boost
         full_coverage_bonus: Extra bonus when all terms are present
+        max_coverage_terms: Maximum terms to consider for coverage scoring
     """
     recall_multiplier: int = RERANK_RECALL_MULTIPLIER
     max_candidates: int = RERANK_MAX_CANDIDATES
@@ -77,6 +79,7 @@ class RerankConfig:
     coverage_beta: float = RERANK_COVERAGE_BETA
     title_coverage_beta: float = RERANK_TITLE_COVERAGE_BETA
     full_coverage_bonus: float = RERANK_FULL_COVERAGE_BONUS
+    max_coverage_terms: int = RERANK_MAX_COVERAGE_TERMS
 
 
 @dataclass
@@ -233,7 +236,8 @@ class Reranker:
         self, 
         text: str, 
         terms: List[str],
-        beta: float
+        beta: float,
+        term_weights: Optional[Dict[str, float]] = None
     ) -> float:
         """
         Compute coverage boost based on how many query terms are matched.
@@ -243,10 +247,14 @@ class Reranker:
         - coverage=0.5 (half terms) → boost = 1 + 0.5β
         - coverage=0.0 (no terms) → boost = 1 (no boost)
         
+        For very long queries, only considers max_coverage_terms most important
+        terms to prevent dilution of the coverage signal.
+        
         Args:
             text: Document text to check
             terms: Original query terms (not expanded)
             beta: Boost strength (typically 0.2-0.6)
+            term_weights: Optional dict of term -> weight for weighted coverage
             
         Returns:
             Multiplier >= 1.0
@@ -254,14 +262,80 @@ class Reranker:
         if not terms or not text:
             return 1.0
         
+        # For long queries, limit terms considered
+        coverage_terms = terms
+        if len(terms) > self.config.max_coverage_terms:
+            if term_weights:
+                # Sort by weight and take top N
+                coverage_terms = sorted(
+                    terms, 
+                    key=lambda t: term_weights.get(t.lower(), 0), 
+                    reverse=True
+                )[:self.config.max_coverage_terms]
+            else:
+                # Without weights, just take first N
+                coverage_terms = terms[:self.config.max_coverage_terms]
+        
         text_lower = text.lower()
-        matched = sum(1 for term in terms if term.lower() in text_lower)
-        coverage = matched / len(terms)
+        
+        if term_weights:
+            # Weighted coverage: weight matches by term importance
+            matched_weight = sum(
+                term_weights.get(term.lower(), 1.0)
+                for term in coverage_terms
+                if term.lower() in text_lower
+            )
+            total_weight = sum(
+                term_weights.get(term.lower(), 1.0)
+                for term in coverage_terms
+            )
+            coverage = matched_weight / total_weight if total_weight > 0 else 0
+        else:
+            # Simple coverage: count matching terms
+            matched = sum(1 for term in coverage_terms if term.lower() in text_lower)
+            coverage = matched / len(coverage_terms)
         
         # Add bonus for full coverage
         bonus = self.config.full_coverage_bonus if coverage == 1.0 else 0.0
         
         return 1.0 + (beta * coverage) + bonus
+    
+    def _compute_weighted_coverage(
+        self,
+        text: str,
+        terms: List[str],
+        term_weights: Dict[str, float]
+    ) -> float:
+        """
+        Compute coverage weighted by term importance.
+        
+        This is useful when some query terms are more important than others
+        (e.g., original terms vs expanded/synonym terms).
+        
+        Args:
+            text: Document text to check
+            terms: Query terms
+            term_weights: Dict mapping term -> importance weight
+            
+        Returns:
+            Weighted coverage ratio (0-1)
+        """
+        if not terms or not text:
+            return 0.0
+        
+        text_lower = text.lower()
+        
+        matched_weight = sum(
+            term_weights.get(term.lower(), 1.0)
+            for term in terms
+            if term.lower() in text_lower
+        )
+        total_weight = sum(
+            term_weights.get(term.lower(), 1.0)
+            for term in terms
+        )
+        
+        return matched_weight / total_weight if total_weight > 0 else 0.0
     
     def _compute_phrase_score(
         self, 
@@ -381,7 +455,8 @@ class Reranker:
         body_text: Optional[str],
         original_terms: List[str],
         phrases: List[List[str]],
-        headings_text: Optional[str] = None
+        headings_text: Optional[str] = None,
+        term_weights: Optional[Dict[str, float]] = None
     ) -> Tuple[float, Dict[str, float]]:
         """
         Compute the final rerank score for a document.
@@ -389,7 +464,7 @@ class Reranker:
         Combines multiple signals:
         - Normalized BM25 score (from recall stage)
         - Field-aware term matches (title > headings > body)
-        - Query term coverage
+        - Query term coverage (optionally weighted by term importance)
         - Phrase/proximity matches
         
         Args:
@@ -398,6 +473,7 @@ class Reranker:
             original_terms: Original query terms (not expanded)
             phrases: Phrase groups from query
             headings_text: Concatenated heading text (optional, falls back to doc)
+            term_weights: Optional dict of term -> weight for weighted coverage
             
         Returns:
             Tuple of (final_score, score_components_dict)
@@ -418,17 +494,19 @@ class Reranker:
             terms=original_terms
         )
         
-        # Coverage scores
+        # Coverage scores (optionally weighted by term importance)
         body_coverage = 1.0
         title_coverage = 1.0
         
         if original_terms:
             if body_text:
                 body_coverage = self._compute_coverage_score(
-                    body_text, original_terms, self.config.coverage_beta
+                    body_text, original_terms, self.config.coverage_beta,
+                    term_weights=term_weights
                 )
             title_coverage = self._compute_coverage_score(
-                title, original_terms, self.config.title_coverage_beta
+                title, original_terms, self.config.title_coverage_beta,
+                term_weights=term_weights
             )
         
         # Phrase scores
