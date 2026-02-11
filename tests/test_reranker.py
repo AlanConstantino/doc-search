@@ -9,7 +9,8 @@ from doc_search.reranker import (
     Reranker, 
     RerankConfig, 
     RerankMetrics,
-    create_reranker
+    create_reranker,
+    check_phrase_proximity
 )
 
 
@@ -566,6 +567,133 @@ class TestRerankerWithPhrases(unittest.TestCase):
         
         # Doc with phrase in title should be first
         self.assertEqual(result[0]['url'], "http://example.com/1")
+
+
+class TestPhraseProximityScoring(unittest.TestCase):
+    """Tests for phrase proximity scoring."""
+    
+    def setUp(self):
+        self.reranker = Reranker()
+    
+    def test_exact_phrase_highest_score(self):
+        """Exact phrase match should score highest."""
+        exact_score = self.reranker._compute_phrase_score(
+            "python tutorial guide",
+            [["python", "tutorial"]],
+            in_title=True
+        )
+        # Should get the exact match boost
+        self.assertEqual(exact_score, self.reranker.config.phrase_exact_title)
+    
+    def test_proximity_match_medium_score(self):
+        """Close proximity match should score lower than exact."""
+        # Words within slop distance
+        proximity_score = self.reranker._compute_phrase_score(
+            "python is a tutorial",
+            [["python", "tutorial"]],
+            in_title=True
+        )
+        exact_score = self.reranker._compute_phrase_score(
+            "python tutorial",
+            [["python", "tutorial"]],
+            in_title=True
+        )
+        self.assertLess(proximity_score, exact_score)
+        self.assertGreater(proximity_score, 0)
+    
+    def test_far_apart_low_score(self):
+        """Terms far apart should score lower than proximity."""
+        # Very far apart (>10 words)
+        far_score = self.reranker._compute_phrase_score(
+            "python is a great language for programming and scripting and here is a tutorial",
+            [["python", "tutorial"]],
+            in_title=False
+        )
+        # Within slop distance
+        close_score = self.reranker._compute_phrase_score(
+            "python is a tutorial",  # span = 3, within slop
+            [["python", "tutorial"]],
+            in_title=False
+        )
+        self.assertLess(far_score, close_score)
+    
+    def test_find_min_phrase_span_exact(self):
+        """Adjacent words should have span of 1."""
+        span = self.reranker._find_min_phrase_span(
+            "python tutorial guide",
+            ["python", "tutorial"]
+        )
+        self.assertEqual(span, 1)
+    
+    def test_find_min_phrase_span_with_gap(self):
+        """Words with gap should report correct span."""
+        span = self.reranker._find_min_phrase_span(
+            "python is a tutorial",
+            ["python", "tutorial"]
+        )
+        self.assertEqual(span, 3)  # python(0) to tutorial(3)
+    
+    def test_find_min_phrase_span_missing_term(self):
+        """Should return None if term is missing."""
+        span = self.reranker._find_min_phrase_span(
+            "python basics",
+            ["python", "tutorial"]
+        )
+        self.assertIsNone(span)
+    
+    def test_body_scores_lower_than_title(self):
+        """Body phrase scores should be lower than title."""
+        title_score = self.reranker._compute_phrase_score(
+            "python tutorial",
+            [["python", "tutorial"]],
+            in_title=True
+        )
+        body_score = self.reranker._compute_phrase_score(
+            "python tutorial",
+            [["python", "tutorial"]],
+            in_title=False
+        )
+        self.assertGreater(title_score, body_score)
+
+
+class TestCheckPhraseProximity(unittest.TestCase):
+    """Tests for the check_phrase_proximity helper function."""
+    
+    def test_exact_match(self):
+        """Should return True for exact phrase match."""
+        self.assertTrue(check_phrase_proximity(
+            "python tutorial guide",
+            ["python", "tutorial"]
+        ))
+    
+    def test_within_slop(self):
+        """Should return True for terms within slop distance."""
+        # Default slop is 3
+        self.assertTrue(check_phrase_proximity(
+            "python is a tutorial",  # span=3
+            ["python", "tutorial"],
+            max_slop=3
+        ))
+    
+    def test_beyond_slop(self):
+        """Should return False for terms beyond slop distance."""
+        self.assertFalse(check_phrase_proximity(
+            "python is a great language tutorial",  # span=5
+            ["python", "tutorial"],
+            max_slop=3
+        ))
+    
+    def test_missing_term(self):
+        """Should return False if a term is missing."""
+        self.assertFalse(check_phrase_proximity(
+            "python basics",
+            ["python", "tutorial"]
+        ))
+    
+    def test_empty_phrase(self):
+        """Should return True for empty/single-word phrase."""
+        self.assertTrue(check_phrase_proximity("text", []))
+        self.assertTrue(check_phrase_proximity("text", ["text"]))
 
 
 class TestCreateReranker(unittest.TestCase):
