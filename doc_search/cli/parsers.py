@@ -8,7 +8,7 @@ import argparse
 from .. import __version__
 from .commands import (
     cmd_crawl, cmd_index, cmd_search, cmd_autocomplete,
-    cmd_interactive, cmd_stats, cmd_list, cmd_serve
+    cmd_interactive, cmd_stats, cmd_list, cmd_delete, cmd_serve
 )
 
 
@@ -55,6 +55,7 @@ Examples:
     _add_interactive_parser(subparsers)
     _add_stats_parser(subparsers)
     _add_list_parser(subparsers)
+    _add_delete_parser(subparsers)
     _add_serve_parser(subparsers)
     
     return parser
@@ -196,6 +197,17 @@ def _add_list_parser(subparsers):
     """Add the list command parser."""
     list_parser = subparsers.add_parser('list', help='List crawled sites')
     list_parser.set_defaults(func=cmd_list)
+
+
+def _add_delete_parser(subparsers):
+    """Add the delete command parser."""
+    delete_parser = subparsers.add_parser('delete', help='Delete crawled site(s)')
+    delete_parser.add_argument('site', nargs='?', help='Site URL or hash ID to delete')
+    delete_parser.add_argument('--all', '-a', action='store_true',
+                              help='Delete all crawled sites')
+    delete_parser.add_argument('--dry-run', '-n', action='store_true',
+                              help='Show what would be deleted without actually deleting')
+    delete_parser.set_defaults(func=cmd_delete)
 
 
 def _add_serve_parser(subparsers):
