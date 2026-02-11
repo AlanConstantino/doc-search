@@ -1495,6 +1495,9 @@ JAVASCRIPT = """
                 appendResults(data.results);
                 allLoadedResults = allLoadedResults.concat(data.results);
                 
+                // Update "showing X-Y" text to reflect all loaded results
+                updateResultsInfo(allLoadedResults.length, data.total);
+                
                 if (currentPage < totalPages) {
                     createScrollSentinel();
                 } else {
@@ -1702,6 +1705,13 @@ JAVASCRIPT = """
         });
         
         setupCopyLinkButtons();
+    }
+    
+    function updateResultsInfo(loaded, total) {
+        const resultsQuery = document.querySelector('.results-query');
+        if (resultsQuery) {
+            resultsQuery.textContent = `showing 1-${loaded} of ${total} for "${currentQuery}"`;
+        }
     }
     
     function renderResults(data) {
