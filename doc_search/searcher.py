@@ -841,57 +841,106 @@ class EnhancedSearchEngine(SearchEngine):
             return []
         return matcher.find_similar(term, max_distance, max_results)
     
-    def _expand_fuzzy_terms(self, terms: List[str], max_distance: int = 2,
-                            max_expansions: int = 3) -> List[str]:
+    def _expand_fuzzy_terms(
+        self, 
+        terms: List[str], 
+        query: str = '',
+        max_distance: int = 2,
+        max_expansions: int = 3,
+        low_df_threshold: int = 2,
+        min_term_length: int = 4
+    ) -> Tuple[List[str], Dict[str, int]]:
         """
-        Expand terms using Levenshtein automaton (like Lucene's fuzzy search).
+        Expand terms using Levenshtein automaton with smart rules.
         
-        For each term NOT in vocabulary, find similar terms within edit distance
-        and include them in the search. This allows "pythom" to match documents
-        containing "python".
+        Fuzzy matching is ALLOWED when:
+        1. Term NOT in vocabulary (most important)
+        2. Term has very low document frequency (df <= threshold) AND query has multiple terms
+        
+        Fuzzy matching is BLOCKED when:
+        - Term length < min_term_length (default 4) - too many false matches
+        - Term already has strong matches (df above threshold)
+        - Query contains quotes (exact phrase intent)
+        - Term contains wildcard (e.g., "pyth*")
+        
+        Returns:
+            Tuple of (expanded_terms, fuzzy_corrections) where fuzzy_corrections
+            maps fuzzy term -> edit_distance. The weights are applied by
+            _build_term_weights based on these distances.
         
         Args:
             terms: List of query terms
-            max_distance: Maximum edit distance for fuzzy matching (default: 1)
+            query: Original query string (for phrase detection)
+            max_distance: Maximum edit distance for fuzzy matching (default: 2)
             max_expansions: Max fuzzy expansions per term (default: 3)
-            
-        Returns:
-            Expanded list of terms including fuzzy matches
+            low_df_threshold: Document frequency threshold for "low df" rule
+            min_term_length: Minimum term length for fuzzy (default: 4)
         """
         if not self._levenshtein_enabled:
-            return terms
+            return terms, {}
         
         vocabulary = set(self.index.index.keys())
         expanded = []
+        fuzzy_corrections: Dict[str, int] = {}  # term -> edit_distance
+        
+        # Check if query contains quotes (exact phrase intent)
+        has_quotes = '"' in query
+        
+        # Multi-term query check (for low-df rule)
+        is_multi_term = len(terms) > 1
         
         for term in terms:
             term_lower = term.lower()
             
-            # If term exists in vocabulary, keep it as-is
-            if term_lower in vocabulary:
-                expanded.append(term)
+            # Always include original term
+            expanded.append(term)
+            
+            # === SKIP FUZZY CONDITIONS ===
+            
+            # Rule: Skip if query has quotes (exact phrase intent)
+            if has_quotes:
                 continue
             
-            # Skip very short terms (too many false matches)
-            if len(term) < 3:
-                expanded.append(term)
+            # Rule: Skip if term length < min_term_length
+            if len(term) < min_term_length:
                 continue
             
-            # Find fuzzy matches using Levenshtein automaton
+            # Rule: Skip if term contains wildcard
+            if '*' in term or '?' in term:
+                continue
+            
+            # === CHECK IF FUZZY SHOULD RUN ===
+            
+            should_fuzzy = False
+            
+            # Rule 1: Term NOT in vocabulary → fuzzy allowed (most important)
+            if term_lower not in vocabulary:
+                should_fuzzy = True
+            
+            # Rule 2: Term exists but very low df AND multi-term query
+            elif is_multi_term:
+                df = self.index.get_document_frequency(term_lower)
+                if df is not None and df <= low_df_threshold:
+                    should_fuzzy = True
+            
+            if not should_fuzzy:
+                continue
+            
+            # === FIND FUZZY MATCHES ===
+            
             matches = self.find_fuzzy_matches(term, max_distance, max_expansions)
             
-            if matches:
-                # Add the original term (might partially match)
-                expanded.append(term)
-                # Add fuzzy matches (these exist in vocabulary)
-                for match_term, distance in matches:
-                    if match_term not in expanded:
-                        expanded.append(match_term)
-            else:
-                # No matches found, keep original
-                expanded.append(term)
+            for match_term, distance in matches:
+                if match_term.lower() == term_lower:
+                    continue  # Skip exact match
+                if match_term in expanded:
+                    continue  # Already added
+                    
+                # Add fuzzy match with edit distance for weighting
+                expanded.append(match_term)
+                fuzzy_corrections[match_term.lower()] = distance
         
-        return expanded
+        return expanded, fuzzy_corrections
     
     def _expand_ngram_terms(self, terms: List[str]) -> List[str]:
         """
@@ -1284,7 +1333,11 @@ class EnhancedSearchEngine(SearchEngine):
         
         # Fuzzy expand terms using Levenshtein automaton (like Lucene)
         # Terms not in vocabulary get expanded to similar terms within edit distance
-        fuzzy_expanded_terms = self._expand_fuzzy_terms(ngram_expanded_terms)
+        # Returns (expanded_terms, fuzzy_weights) where weights are edit distance based
+        fuzzy_expanded_terms, fuzzy_weights = self._expand_fuzzy_terms(
+            ngram_expanded_terms, 
+            query=query
+        )
         
         # Check for spelling suggestions (for "Did you mean?" display)
         # Uses SymSpell if available, falls back to traditional spellchecker
@@ -1295,6 +1348,7 @@ class EnhancedSearchEngine(SearchEngine):
         # Track expansion sources for weighted scoring
         synonym_terms: Set[str] = set()
         wildcard_terms: Set[str] = set()
+        fuzzy_terms: Set[str] = set(fuzzy_weights.keys())
         
         # Track which terms came from wildcard expansion
         if has_wildcards or self.ngram_enabled:
@@ -1363,7 +1417,7 @@ class EnhancedSearchEngine(SearchEngine):
         term_weights = self._build_term_weights(
             original_terms=original_terms,
             expanded_terms=expanded_terms,
-            fuzzy_corrections=None,  # TODO: track fuzzy corrections
+            fuzzy_corrections=fuzzy_weights,  # edit distance map from Levenshtein expansion
             synonym_terms=synonym_terms,
             wildcard_terms=wildcard_terms
         )
