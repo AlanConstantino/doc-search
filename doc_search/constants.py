@@ -115,13 +115,10 @@ RERANK_MAX_CANDIDATES = 500
 RERANK_CANDIDATE_LIMIT = 100
 
 # Score component weights (must sum to ~1.0)
-RERANK_WEIGHT_BM25 = 0.4           # Base BM25 relevance
-RERANK_WEIGHT_TITLE_MATCH = 0.25   # Title term matches
-RERANK_WEIGHT_COVERAGE = 0.20     # Query term coverage
+RERANK_WEIGHT_BM25 = 0.35          # Base BM25 relevance
+RERANK_WEIGHT_FIELD = 0.30         # Field-aware term matching (title > headings > body)
+RERANK_WEIGHT_COVERAGE = 0.20      # Query term coverage
 RERANK_WEIGHT_PHRASE = 0.15        # Phrase/proximity matches
-
-# Title match boost: how much more valuable title matches are vs body
-RERANK_TITLE_BOOST = 3.0
 
 # Coverage boost strength (beta parameter)
 # coverage=1.0 (all terms) → boost = 1 + beta
@@ -133,3 +130,17 @@ RERANK_TITLE_COVERAGE_BETA = 0.6
 
 # Full coverage bonus: extra boost when all query terms are present
 RERANK_FULL_COVERAGE_BONUS = 0.2
+
+
+# =============================================================================
+# Field-Aware Ranking Weights
+# =============================================================================
+
+# Field weights for term matching (title > headings > body)
+# Based on Elasticsearch/Lucene field boosting recommendations
+FIELD_WEIGHT_TITLE = 5.0       # Title matches are 5x more valuable
+FIELD_WEIGHT_HEADINGS = 2.5    # Heading matches are 2.5x more valuable  
+FIELD_WEIGHT_BODY = 1.0        # Body is the baseline
+
+# Maximum field score (normalized to prevent field domination)
+FIELD_MAX_SCORE = 1.0

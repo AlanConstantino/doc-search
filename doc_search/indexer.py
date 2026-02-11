@@ -66,12 +66,18 @@ class BM25Index:
             headings: Optional list of (level, text) tuples
             doc_type: Document type ('html', 'pdf', etc.)
         """
-        # Store document metadata
+        # Build headings text for field-aware ranking
+        headings_text = ''
+        if headings:
+            headings_text = ' '.join(text for _, text in headings)
+        
+        # Store document metadata (including headings for field-aware reranking)
         self.documents[doc_id] = {
             'url': url,
             'title': title,
             'description': description,
-            'doc_type': doc_type
+            'doc_type': doc_type,
+            'headings_text': headings_text  # For field-aware ranking
         }
         self.url_to_id[url] = doc_id
         
