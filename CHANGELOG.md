@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-02-10
+
+### Added
+- **SymSpell fuzzy search** - Fast "Did you mean?" suggestions using Symmetric Delete algorithm (#185)
+  - Enabled by default, use `--no-symspell` to disable
+  - Pure Python implementation, no dependencies
+- **N-gram prefix search** - Wildcard search with `*` suffix (e.g., `pyth*` → python, pythonic, ...)
+  - Use `--no-ngram` to disable
+  - Works on older indexes via fallback prefix matching
+- **Wildcard highlighting** - Expanded terms are now highlighted in search result snippets
+
+### Changed
+- **2.6x faster snippet generation** - Optimized `find_best_snippet` for wildcard queries
+  - Pre-lowercase words once instead of per-window
+  - Only check windows around actual term matches
+
+### Fixed
+- Wildcard `*` character preserved in queries (was being stripped by tokenizer)
+- Expanded terms now highlighted in snippets (was showing raw wildcard)
+
 ## [1.16.1] - 2026-02-10
 
 ### Added
