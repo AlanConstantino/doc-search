@@ -148,6 +148,10 @@ def _add_index_files_parser(subparsers):
                                     help='Maximum rows to extract per sheet (default: no limit)')
     index_files_parser.add_argument('--quiet', '-q', action='store_true',
                                     help='Suppress progress output')
+    index_files_parser.add_argument('--force', '-f', action='store_true',
+                                    help='Force re-index all files (ignore cache)')
+    index_files_parser.add_argument('--clean', action='store_true',
+                                    help='Remove documents for deleted source files')
     index_files_parser.set_defaults(func=cmd_index_files)
 
 

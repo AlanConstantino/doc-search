@@ -57,6 +57,7 @@ _EMOJI_MAP = {
     'books': ('📚', 'D:'),
     'ruler': ('📏', 'A:'),
     'sparkles': ('✨', '*'),
+    'skip': ('⏭', '-'),
 }
 
 def _e(name: str) -> str:
@@ -964,9 +965,26 @@ def cmd_index_files(args):
     pages_dir = site_dir / 'pages'
     pages_dir.mkdir(exist_ok=True)
     
+    # Load file cache for incremental indexing
+    cache_file = site_dir / '.file_cache.json'
+    file_cache = {}
+    force_reindex = getattr(args, 'force', False)
+    clean_stale = getattr(args, 'clean', False)
+    
+    if not force_reindex and cache_file.exists():
+        try:
+            with open(cache_file, 'r') as f:
+                file_cache = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            file_cache = {}
+    
     print(f"Indexing: {directory}")
     print(f"Extensions: {', '.join(sorted(extensions))}")
     print(f"Data directory: {site_dir}")
+    if force_reindex:
+        print(style_info("Force mode: re-indexing all files"))
+    elif file_cache:
+        print(style_info(f"Incremental mode: {len(file_cache)} files in cache"))
     print()
     
     # Set up extractors
@@ -1010,13 +1028,56 @@ def cmd_index_files(args):
             files_to_process.append(f)
     
     files_found = len(files_to_process)
-    print(f"Found {files_found} files to process...")
+    
+    # Track which files we've seen for stale detection
+    seen_files = set()
+    skipped = 0
+    
+    # Helper to check if file has changed
+    def file_changed(fp: Path) -> bool:
+        """Check if file has changed since last indexing."""
+        if force_reindex:
+            return True
+        
+        file_key = str(fp.absolute())
+        if file_key not in file_cache:
+            return True
+        
+        cached = file_cache[file_key]
+        stat = fp.stat()
+        
+        # Check mtime and size (fast check)
+        if stat.st_mtime != cached.get('mtime') or stat.st_size != cached.get('size'):
+            return True
+        
+        return False
+    
+    # Helper to update cache entry
+    def update_cache(fp: Path, doc_ids: list):
+        """Update cache entry for a file."""
+        stat = fp.stat()
+        file_cache[str(fp.absolute())] = {
+            'mtime': stat.st_mtime,
+            'size': stat.st_size,
+            'doc_ids': doc_ids,
+            'indexed_at': time.time()
+        }
+    
+    print(f"Found {files_found} files to check...")
     print()
     
     quiet = getattr(args, 'quiet', False)
     
     for file_path in files_to_process:
         ext = file_path.suffix.lower()
+        seen_files.add(str(file_path.absolute()))
+        
+        # Skip unchanged files
+        if not file_changed(file_path):
+            skipped += 1
+            if not quiet:
+                print(f"  {_e('skip')} {file_path.name} (unchanged)")
+            continue
         
         try:
             if ext == '.xlsx':
@@ -1044,7 +1105,8 @@ def cmd_index_files(args):
                 # Skip unsupported extensions
                 continue
             
-            # Save each document
+            # Save each document and track doc_ids for cache
+            file_doc_ids = []
             for doc in documents:
                 if doc.get('error'):
                     if not quiet:
@@ -1053,8 +1115,8 @@ def cmd_index_files(args):
                     continue
                 
                 # Generate document ID from URL
-                import hashlib
                 doc_id = hashlib.sha256(doc['url'].encode()).hexdigest()[:16]
+                file_doc_ids.append(doc_id)
                 
                 # Save as JSON (same format as crawled pages)
                 doc_file = pages_dir / f"{doc_id}.json"
@@ -1076,14 +1138,39 @@ def cmd_index_files(args):
                 
                 if not quiet:
                     print(f"  {_e('check')} {doc['title'][:60]}")
+            
+            # Update cache for this file
+            if file_doc_ids:
+                update_cache(file_path, file_doc_ids)
         
         except Exception as e:
             if not quiet:
                 print(style_error(f"  {_e('cross')} {file_path.name}: {e}"))
             errors += 1
     
+    # Clean stale documents (files that no longer exist)
+    stale_removed = 0
+    if clean_stale:
+        stale_files = set(file_cache.keys()) - seen_files
+        for stale_file in stale_files:
+            cached = file_cache[stale_file]
+            for doc_id in cached.get('doc_ids', []):
+                doc_file = pages_dir / f"{doc_id}.json"
+                if doc_file.exists():
+                    doc_file.unlink()
+                    stale_removed += 1
+            del file_cache[stale_file]
+        if stale_removed and not quiet:
+            print(style_info(f"Removed {stale_removed} stale documents from {len(stale_files)} deleted files"))
+    
+    # Save the file cache
+    with open(cache_file, 'w') as f:
+        json.dump(file_cache, f, indent=2)
+    
     print()
-    print(f"Extracted {docs_extracted} documents from {files_found} files")
+    processed = files_found - skipped
+    print(f"Processed {processed} files, skipped {skipped} unchanged")
+    print(f"Extracted {docs_extracted} documents")
     if errors:
         print(style_error(f"Errors: {errors}"))
     
