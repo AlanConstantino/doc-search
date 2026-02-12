@@ -126,14 +126,14 @@ def _add_index_parser(subparsers):
 
 
 def _add_index_files_parser(subparsers):
-    """Add the index-files command parser for local Office documents."""
+    """Add the index-files command parser for local documents."""
     index_files_parser = subparsers.add_parser(
         'index-files', 
-        help='Index local Office documents (.xlsx, .docx)'
+        help='Index local documents (.xlsx, .docx, .pdf)'
     )
     index_files_parser.add_argument('directory', help='Directory containing files to index')
-    index_files_parser.add_argument('--extensions', '-e', default='xlsx,docx',
-                                    help='Comma-separated file extensions to include (default: xlsx,docx)')
+    index_files_parser.add_argument('--extensions', '-e', default='xlsx,docx,pdf',
+                                    help='Comma-separated file extensions to include (default: xlsx,docx,pdf)')
     index_files_parser.add_argument('--no-recursive', action='store_true',
                                     help='Do not scan subdirectories (default: recursive)')
     index_files_parser.add_argument('--exclude', action='append', metavar='PATTERN',

@@ -922,9 +922,10 @@ def cmd_delete(args):
 
 
 def cmd_index_files(args):
-    """Index local Office documents (.xlsx, .docx)."""
+    """Index local documents (.xlsx, .docx, .pdf)."""
     from ..excel_extractor import ExcelExtractor
     from ..word_extractor import WordExtractor
+    from ..pdf_extractor import PDFExtractor
     import hashlib
     
     directory = Path(args.directory)
@@ -937,7 +938,7 @@ def cmd_index_files(args):
         return 1
     
     # Parse extensions
-    extensions_str = getattr(args, 'extensions', 'xlsx,docx')
+    extensions_str = getattr(args, 'extensions', 'xlsx,docx,pdf')
     extensions = set('.' + ext.strip().lower().lstrip('.') for ext in extensions_str.split(','))
     
     # Determine site name and directory
@@ -976,6 +977,7 @@ def cmd_index_files(args):
         max_rows=max_rows
     )
     word_extractor = WordExtractor()
+    pdf_extractor = PDFExtractor()
     
     # Find and process files
     recursive = not getattr(args, 'no_recursive', False)
@@ -1021,6 +1023,23 @@ def cmd_index_files(args):
                 documents = excel_extractor.extract(file_path)
             elif ext == '.docx':
                 documents = word_extractor.extract(file_path)
+            elif ext == '.pdf':
+                # PDF extractor returns a single dict, wrap in list for consistency
+                pdf_result = pdf_extractor.extract_from_file(file_path)
+                # Convert to document format matching Excel/Word extractors
+                documents = [{
+                    'url': f"file://{file_path.absolute()}",
+                    'title': pdf_result.get('title') or file_path.stem,
+                    'text': pdf_result.get('text', ''),
+                    'headings': pdf_result.get('headings', []),
+                    'metadata': {
+                        'doc_type': 'pdf',
+                        'pages': pdf_result.get('pages', 0),
+                        'source_file': str(file_path),
+                        **pdf_result.get('metadata', {})
+                    },
+                    'error': pdf_result.get('error')
+                }]
             else:
                 # Skip unsupported extensions
                 continue
