@@ -4853,6 +4853,52 @@ class TestGetSiteDirValidation(CLITestCase):
         
         error_msg = str(ctx.exception)
         self.assertIn('Directory not found', error_msg)
+    
+    def test_get_site_dir_with_hash_files_prefix(self):
+        """get_site_dir should find files_xxx directories by hash."""
+        # Create a files_xxx directory
+        test_hash = "abc123def456"
+        files_dir = DEFAULT_DATA_DIR / f"files_{test_hash}"
+        files_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Should find by full name
+            result = get_site_dir(f"files_{test_hash}")
+            self.assertEqual(result, files_dir)
+            
+            # Should find by hash only
+            result = get_site_dir(test_hash)
+            self.assertEqual(result, files_dir)
+        finally:
+            # Cleanup
+            files_dir.rmdir()
+    
+    def test_get_site_dir_with_hash_site_prefix(self):
+        """get_site_dir should find site_xxx directories by hash."""
+        # Create a site_xxx directory
+        test_hash = "xyz789uvw012"
+        site_dir = DEFAULT_DATA_DIR / f"site_{test_hash}"
+        site_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Should find by full name
+            result = get_site_dir(f"site_{test_hash}")
+            self.assertEqual(result, site_dir)
+            
+            # Should find by hash only
+            result = get_site_dir(test_hash)
+            self.assertEqual(result, site_dir)
+        finally:
+            # Cleanup
+            site_dir.rmdir()
+    
+    def test_get_site_dir_with_nonexistent_hash(self):
+        """get_site_dir should raise ValueError for non-existent hash."""
+        with self.assertRaises(ValueError) as ctx:
+            get_site_dir('nonexistenthash123')
+        
+        error_msg = str(ctx.exception)
+        self.assertIn('Directory not found', error_msg)
 
 
 class TestSiteDirValidationInCommands(CLITestCase):

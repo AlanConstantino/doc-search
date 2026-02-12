@@ -70,23 +70,47 @@ DEFAULT_DATA_DIR = Path.home() / '.doc_search' / 'sites'
 
 
 def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
-    """Get site data directory from URL or existing path.
+    """Get site data directory from URL, existing path, or hash.
     
     Args:
-        url_or_path: URL or existing directory path
+        url_or_path: URL, existing directory path, or site hash
         include_path: If True, include URL path in hash (separate storage per path)
     
     Returns:
         Path to the site data directory
     
     Raises:
-        ValueError: If input is neither a valid URL nor an existing directory
+        ValueError: If input is not a valid URL, existing directory, or known hash
+    
+    Hash lookup supports:
+        - Full hash: "a1b2c3d4e5f6" → looks for files_a1b2c3d4e5f6 or site_a1b2c3d4e5f6
+        - With prefix: "files_a1b2c3d4e5f6" → direct lookup
     """
     # Check if it's a URL (http:// or https://)
     if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
         return DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=include_path)
     
-    # Not a URL - must be an existing directory path
+    # Check if it's a hash (alphanumeric, typically 12 chars)
+    # Support both raw hash and prefixed versions (files_xxx, site_xxx)
+    if url_or_path.replace('_', '').replace('-', '').isalnum():
+        # Try various prefixes
+        candidates = []
+        
+        if url_or_path.startswith('files_') or url_or_path.startswith('site_'):
+            # Already has prefix
+            candidates.append(DEFAULT_DATA_DIR / url_or_path)
+        else:
+            # Try with common prefixes
+            candidates.append(DEFAULT_DATA_DIR / f"files_{url_or_path}")
+            candidates.append(DEFAULT_DATA_DIR / f"site_{url_or_path}")
+            # Also try as-is (might be a full directory name)
+            candidates.append(DEFAULT_DATA_DIR / url_or_path)
+        
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+    
+    # Not a URL or hash - check if it's an existing directory path
     path = Path(url_or_path)
     
     # Check if path exists
@@ -94,6 +118,7 @@ def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
         raise ValueError(
             f"Directory not found: {url_or_path}\n"
             f"If this is a URL, it must start with http:// or https://\n"
+            f"If this is a hash, ensure the site exists in {DEFAULT_DATA_DIR}\n"
             f"If this is a path, the directory must exist."
         )
     
