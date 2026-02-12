@@ -429,6 +429,21 @@ class BM25Index:
         """
         return self.documents.get(doc_id)
     
+    def get_document_frequency(self, term: str) -> Optional[int]:
+        """
+        Get the document frequency for a term (number of documents containing it).
+        
+        Args:
+            term: The term to look up (should be lowercase)
+            
+        Returns:
+            Number of documents containing the term, or None if not in index
+        """
+        postings = self.index.get(term.lower())
+        if postings is None:
+            return None
+        return len(postings)
+    
     def has_url(self, url: str) -> bool:
         """
         Check if a URL is in the index.

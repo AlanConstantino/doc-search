@@ -1505,6 +1505,9 @@ JAVASCRIPT = """
                 appendResults(data.results);
                 allLoadedResults = allLoadedResults.concat(data.results);
                 
+                // Update "showing X-Y" text to reflect all loaded results
+                updateResultsInfo(allLoadedResults.length, data.total);
+                
                 if (currentPage < totalPages) {
                     createScrollSentinel();
                 } else {
@@ -1712,6 +1715,13 @@ JAVASCRIPT = """
         });
         
         setupCopyLinkButtons();
+    }
+    
+    function updateResultsInfo(loaded, total) {
+        const resultsQuery = document.querySelector('.results-query');
+        if (resultsQuery) {
+            resultsQuery.textContent = `showing 1-${loaded} of ${total} for "${currentQuery}"`;
+        }
     }
     
     function renderResults(data) {
@@ -2505,11 +2515,15 @@ class SearchHandler(BaseHTTPRequestHandler):
                 page = 1
                 page_results = filtered_results[:per_page]
             
-            # Check for spelling suggestions when results are low
+            # Get spelling suggestion from search engine
+            # With two-pass architecture, suggestion is generated during search
+            # and stored in last_suggestion (display only - user must click to use)
             suggestion = None
-            if total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+            if hasattr(self.engine, 'last_suggestion'):
+                suggestion = self.engine.last_suggestion
+            elif total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+                # Fallback for basic search engine
                 suggestion = self.engine.get_spelling_suggestion(query)
-                # Only show suggestion if it's different from the query
                 if suggestion and suggestion.lower() == query.lower():
                     suggestion = None
             
@@ -2728,9 +2742,13 @@ class SearchHandler(BaseHTTPRequestHandler):
             end_idx = start_idx + per_page
             page_results = filtered_results[start_idx:end_idx]
             
-            # Check for spelling suggestions when results are low
+            # Get spelling suggestion from search engine
+            # With two-pass architecture, suggestion is generated during search
             suggestion = None
-            if total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+            if hasattr(self.engine, 'last_suggestion'):
+                suggestion = self.engine.last_suggestion
+            elif total_results == 0 and hasattr(self.engine, 'get_spelling_suggestion'):
+                # Fallback for basic search engine
                 suggestion = self.engine.get_spelling_suggestion(query)
                 if suggestion and suggestion.lower() == query.lower():
                     suggestion = None
