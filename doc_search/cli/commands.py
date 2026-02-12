@@ -945,9 +945,14 @@ def cmd_index_files(args):
     # Determine site name and directory
     site_name = getattr(args, 'site_name', None) or directory.name
     
-    # Create site directory using hash of directory path
-    dir_hash = hashlib.sha256(str(directory.absolute()).encode()).hexdigest()[:12]
-    site_dir = DEFAULT_DATA_DIR / f"files_{dir_hash}"
+    # Create site directory with meaningful name: files_<dirname>_<short_hash>
+    # Sanitize directory name (remove special chars, limit length)
+    import re
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', directory.name)[:30].strip('_')
+    if not safe_name:
+        safe_name = 'files'
+    dir_hash = hashlib.sha256(str(directory.absolute()).encode()).hexdigest()[:8]
+    site_dir = DEFAULT_DATA_DIR / f"files_{safe_name}_{dir_hash}"
     
     # Check for merge
     merge_with = getattr(args, 'merge_with', None)
