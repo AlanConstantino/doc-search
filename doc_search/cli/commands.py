@@ -919,7 +919,7 @@ def cmd_index_files(args):
     site_name = getattr(args, 'site_name', None) or directory.name
     
     # Create site directory using hash of directory path
-    dir_hash = hashlib.md5(str(directory.absolute()).encode()).hexdigest()[:12]
+    dir_hash = hashlib.sha256(str(directory.absolute()).encode()).hexdigest()[:12]
     site_dir = DEFAULT_DATA_DIR / f"files_{dir_hash}"
     
     # Check for merge
@@ -1010,7 +1010,7 @@ def cmd_index_files(args):
                 
                 # Generate document ID from URL
                 import hashlib
-                doc_id = hashlib.md5(doc['url'].encode()).hexdigest()[:16]
+                doc_id = hashlib.sha256(doc['url'].encode()).hexdigest()[:16]
                 
                 # Save as JSON (same format as crawled pages)
                 doc_file = pages_dir / f"{doc_id}.json"
