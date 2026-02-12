@@ -167,15 +167,37 @@ PHRASE_HARD_FILTER_QUOTED = True
 
 
 # =============================================================================
+# Two-Pass Search Configuration
+# =============================================================================
+
+# Minimum results from Pass 1 before triggering fuzzy recall (Pass 2)
+# If Pass 1 returns fewer than this, Levenshtein expansion kicks in
+MIN_RESULTS_FOR_FUZZY_FALLBACK = 5
+
+# Minimum term length for fuzzy matching (shorter terms have too many false matches)
+FUZZY_MIN_TERM_LENGTH = 4
+
+# Maximum fuzzy expansions per term
+FUZZY_MAX_EXPANSIONS = 5
+
+# Edit distance caps by term length
+FUZZY_MAX_DISTANCE_SHORT = 1   # For terms 4-6 chars
+FUZZY_MAX_DISTANCE_LONG = 2    # For terms 7+ chars
+
+# Minimum document frequency for SymSpell suggestions
+SYMSPELL_MIN_DF = 3
+
+
+# =============================================================================
 # Term Expansion Weights
 # =============================================================================
 
 # Original query terms get full weight
 TERM_WEIGHT_ORIGINAL = 1.0
 
-# Fuzzy corrections by edit distance
-TERM_WEIGHT_FUZZY_DIST_1 = 0.5   # Edit distance 1 (likely typo)
-TERM_WEIGHT_FUZZY_DIST_2 = 0.3   # Edit distance 2 (less certain)
+# Fuzzy corrections by edit distance (Levenshtein fallback)
+TERM_WEIGHT_FUZZY_DIST_1 = 0.35  # Edit distance 1 (likely typo)
+TERM_WEIGHT_FUZZY_DIST_2 = 0.15  # Edit distance 2 (less certain)
 
 # Synonym expansions
 TERM_WEIGHT_SYNONYM = 0.5

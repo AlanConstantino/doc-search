@@ -845,23 +845,27 @@ class EnhancedSearchEngine(SearchEngine):
         self, 
         terms: List[str], 
         query: str = '',
-        max_distance: int = 2,
-        max_expansions: int = 3,
-        low_df_threshold: int = 2,
-        min_term_length: int = 4
+        low_df_threshold: int = 2
     ) -> Tuple[List[str], Dict[str, int]]:
         """
         Expand terms using Levenshtein automaton with smart rules.
         
+        This is the RECALL FALLBACK - only called when Pass 1 returns weak results.
+        
         Fuzzy matching is ALLOWED when:
-        1. Term NOT in vocabulary (most important)
-        2. Term has very low document frequency (df <= threshold) AND query has multiple terms
+        1. Term NOT in vocabulary (most important - likely a typo)
+        2. Term has very low document frequency (df <= threshold) AND multi-term query
         
         Fuzzy matching is BLOCKED when:
-        - Term length < min_term_length (default 4) - too many false matches
-        - Term already has strong matches (df above threshold)
+        - Term length < 4 (too many false matches)
+        - Term already in vocab with decent df (not a typo)
         - Query contains quotes (exact phrase intent)
-        - Term contains wildcard (e.g., "pyth*")
+        - Term contains wildcard (already handled by n-gram)
+        - Term looks like code/ID (x86_64, sha256, h264, 0x1f, etc.)
+        
+        Distance caps by term length:
+        - 4-6 chars: max distance 1
+        - 7+ chars: max distance 2
         
         Returns:
             Tuple of (expanded_terms, fuzzy_corrections) where fuzzy_corrections
@@ -871,11 +875,15 @@ class EnhancedSearchEngine(SearchEngine):
         Args:
             terms: List of query terms
             query: Original query string (for phrase detection)
-            max_distance: Maximum edit distance for fuzzy matching (default: 2)
-            max_expansions: Max fuzzy expansions per term (default: 3)
             low_df_threshold: Document frequency threshold for "low df" rule
-            min_term_length: Minimum term length for fuzzy (default: 4)
         """
+        from .constants import (
+            FUZZY_MIN_TERM_LENGTH,
+            FUZZY_MAX_EXPANSIONS,
+            FUZZY_MAX_DISTANCE_SHORT,
+            FUZZY_MAX_DISTANCE_LONG,
+        )
+        
         if not self._levenshtein_enabled:
             return terms, {}
         
@@ -889,6 +897,17 @@ class EnhancedSearchEngine(SearchEngine):
         # Multi-term query check (for low-df rule)
         is_multi_term = len(terms) > 1
         
+        # Pattern to detect code/IDs (x86_64, sha256, h264, 0x1f, uuid, etc.)
+        code_pattern = re.compile(r'''
+            ^(
+                0x[0-9a-f]+          |  # Hex literals
+                [a-z]+\d+[a-z0-9_]*  |  # Mixed alpha-numeric (x86, sha256, h264)
+                [a-z0-9_]*\d+[a-z]+  |  # Mixed alpha-numeric reversed
+                [a-f0-9]{8,}         |  # Long hex (commit hashes, uuids)
+                \d+\.\d+(\.\d+)*        # Version numbers (3.14.2)
+            )$
+        ''', re.IGNORECASE | re.VERBOSE)
+        
         for term in terms:
             term_lower = term.lower()
             
@@ -901,12 +920,16 @@ class EnhancedSearchEngine(SearchEngine):
             if has_quotes:
                 continue
             
-            # Rule: Skip if term length < min_term_length
-            if len(term) < min_term_length:
+            # Rule: Skip if term length < min
+            if len(term) < FUZZY_MIN_TERM_LENGTH:
                 continue
             
             # Rule: Skip if term contains wildcard
             if '*' in term or '?' in term:
+                continue
+            
+            # Rule: Skip if term looks like code/ID
+            if code_pattern.match(term):
                 continue
             
             # === CHECK IF FUZZY SHOULD RUN ===
@@ -928,7 +951,13 @@ class EnhancedSearchEngine(SearchEngine):
             
             # === FIND FUZZY MATCHES ===
             
-            matches = self.find_fuzzy_matches(term, max_distance, max_expansions)
+            # Cap distance by term length
+            if len(term) <= 6:
+                max_distance = FUZZY_MAX_DISTANCE_SHORT  # 1
+            else:
+                max_distance = FUZZY_MAX_DISTANCE_LONG   # 2
+            
+            matches = self.find_fuzzy_matches(term, max_distance, FUZZY_MAX_EXPANSIONS)
             
             for match_term, distance in matches:
                 if match_term.lower() == term_lower:
@@ -1263,11 +1292,15 @@ class EnhancedSearchEngine(SearchEngine):
         enable_reranking: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Search the index with enhanced features using two-stage retrieval.
+        Search the index with two-pass retrieval architecture.
         
-        Two-Stage Architecture:
-            Stage 1 (Recall): Fast BM25 lookup to fetch broad candidate set
-            Stage 2 (Rerank): Combine multiple signals for precise ranking
+        Two-Pass Architecture:
+            Pass 1 (Precision): BM25 with original terms + wildcards + synonyms
+            Pass 2 (Recall Fallback): If Pass 1 returns < MIN_RESULTS,
+                                      expand with Levenshtein fuzzy matching
+        
+        SymSpell generates "Did you mean?" suggestions for display only.
+        The suggestion is NOT auto-executed - user must click to re-search.
         
         Returns the same type as SearchEngine.search() for LSP compliance.
         Enhanced metadata (suggestion, facets, expanded_query, rerank_metrics) 
@@ -1288,6 +1321,8 @@ class EnhancedSearchEngine(SearchEngine):
         Returns:
             List of result dictionaries (same as SearchEngine.search())
         """
+        from .constants import MIN_RESULTS_FOR_FUZZY_FALLBACK
+        
         # Reset last search metadata
         self.last_suggestion = None
         self.last_facets = {}
@@ -1324,6 +1359,15 @@ class EnhancedSearchEngine(SearchEngine):
         if not terms and not phrases:
             return []
         
+        # =====================================================================
+        # SYMSPELL SUGGESTION (for display only - DO NOT auto-execute)
+        # =====================================================================
+        # Generate "Did you mean?" suggestion before searching
+        # User must click to re-search with the suggestion
+        suggestion = self.get_spelling_suggestion(query)
+        if suggestion and suggestion.lower() != query.lower():
+            self.last_suggestion = suggestion
+        
         # Expand wildcard terms using n-gram index (e.g., "pyth*" → ["python", "pythonic"])
         # Also handles wildcards when ngram is disabled via fallback prefix matching
         ngram_expanded_terms = list(terms)
@@ -1331,24 +1375,10 @@ class EnhancedSearchEngine(SearchEngine):
         if self.ngram_enabled or has_wildcards:
             ngram_expanded_terms = self._expand_ngram_terms(terms)
         
-        # Fuzzy expand terms using Levenshtein automaton (like Lucene)
-        # Terms not in vocabulary get expanded to similar terms within edit distance
-        # Returns (expanded_terms, fuzzy_weights) where weights are edit distance based
-        fuzzy_expanded_terms, fuzzy_weights = self._expand_fuzzy_terms(
-            ngram_expanded_terms, 
-            query=query
-        )
-        
-        # Check for spelling suggestions (for "Did you mean?" display)
-        # Uses SymSpell if available, falls back to traditional spellchecker
-        suggestion = self.get_spelling_suggestion(query)
-        if suggestion and suggestion.lower() != query.lower():
-            self.last_suggestion = suggestion
-        
         # Track expansion sources for weighted scoring
         synonym_terms: Set[str] = set()
         wildcard_terms: Set[str] = set()
-        fuzzy_terms: Set[str] = set(fuzzy_weights.keys())
+        fuzzy_weights: Dict[str, int] = {}  # Will be populated in Pass 2 if needed
         
         # Track which terms came from wildcard expansion
         if has_wildcards or self.ngram_enabled:
@@ -1356,24 +1386,24 @@ class EnhancedSearchEngine(SearchEngine):
             ngram_term_set = {t.lower() for t in ngram_expanded_terms}
             wildcard_terms = ngram_term_set - original_term_set
         
-        # Expand query with synonyms
-        expanded_terms = list(fuzzy_expanded_terms)
+        # Expand query with synonyms (applies to Pass 1)
+        pass1_terms = list(ngram_expanded_terms)
         if expand_synonyms and self._synonyms and ngram_expanded_terms:
             pre_expansion_set = set(ngram_expanded_terms)
-            expanded_terms = self._synonyms.expand_terms(ngram_expanded_terms, max_per_term=2)
-            if expanded_terms != list(ngram_expanded_terms):
-                self.last_expanded_query = ' '.join(expanded_terms)
+            pass1_terms = self._synonyms.expand_terms(ngram_expanded_terms, max_per_term=2)
+            if pass1_terms != list(ngram_expanded_terms):
+                self.last_expanded_query = ' '.join(pass1_terms)
                 # Track which terms came from synonym expansion
-                synonym_terms = set(expanded_terms) - pre_expansion_set
+                synonym_terms = set(pass1_terms) - pre_expansion_set
         
         # Flatten phrases into terms for BM25 scoring
-        all_terms = list(expanded_terms)
+        all_terms_pass1 = list(pass1_terms)
         for phrase in phrases:
-            all_terms.extend(phrase)
+            all_terms_pass1.extend(phrase)
         
         # =====================================================================
-        # STAGE 1: RECALL
-        # Cast wide net with BM25 to find candidates
+        # PASS 1: PRECISION
+        # BM25 with original terms + wildcards + synonyms (NO fuzzy)
         # =====================================================================
         if enable_reranking:
             # Fetch more candidates for reranking
@@ -1382,12 +1412,12 @@ class EnhancedSearchEngine(SearchEngine):
             # Legacy behavior: just fetch what we need plus some buffer
             recall_k = top_k * 3 if phrases or facet_filters else top_k
         
-        bm25_results = self.index.search(' '.join(all_terms), top_k=recall_k)
+        bm25_results = self.index.search(' '.join(all_terms_pass1), top_k=recall_k)
         
         if min_score > 0:
             bm25_results = [r for r in bm25_results if r['score'] >= min_score]
         
-        # Apply facet filters before reranking (reduces candidate set)
+        # Apply facet filters (reduces candidate set)
         if facet_filters and self._facets:
             filtered_urls = set()
             all_doc_ids = set()
@@ -1405,7 +1435,57 @@ class EnhancedSearchEngine(SearchEngine):
             bm25_results = [r for r in bm25_results if r['url'] in filtered_urls]
         
         # =====================================================================
-        # STAGE 2: RERANK
+        # PASS 2: RECALL FALLBACK (only if Pass 1 is weak)
+        # If results < MIN_RESULTS, expand with Levenshtein fuzzy matching
+        # =====================================================================
+        expanded_terms = pass1_terms  # Default to Pass 1 terms
+        
+        if len(bm25_results) < MIN_RESULTS_FOR_FUZZY_FALLBACK and self._levenshtein_enabled:
+            # Pass 1 returned weak results - trigger fuzzy expansion
+            fuzzy_expanded_terms, fuzzy_weights = self._expand_fuzzy_terms(
+                ngram_expanded_terms, 
+                query=query
+            )
+            
+            # Only re-search if we actually expanded something
+            if fuzzy_weights:
+                # Build Pass 2 terms (original + synonyms + fuzzy)
+                expanded_terms = list(fuzzy_expanded_terms)
+                if expand_synonyms and self._synonyms:
+                    expanded_terms = self._synonyms.expand_terms(fuzzy_expanded_terms, max_per_term=2)
+                
+                # Flatten phrases
+                all_terms_pass2 = list(expanded_terms)
+                for phrase in phrases:
+                    all_terms_pass2.extend(phrase)
+                
+                # Re-run BM25 with expanded terms
+                bm25_results = self.index.search(' '.join(all_terms_pass2), top_k=recall_k)
+                
+                if min_score > 0:
+                    bm25_results = [r for r in bm25_results if r['score'] >= min_score]
+                
+                # Re-apply facet filters
+                if facet_filters and self._facets:
+                    filtered_urls = set()
+                    all_doc_ids = set()
+                    for r in bm25_results:
+                        doc_id = self.index.get_doc_id(r['url'])
+                        if doc_id is not None:
+                            all_doc_ids.add(doc_id)
+                    filtered_doc_ids = self._facets.filter_by_facets(all_doc_ids, facet_filters)
+                    
+                    for doc_id in filtered_doc_ids:
+                        doc = self.index.get_document(doc_id)
+                        if doc:
+                            filtered_urls.add(doc['url'])
+                    bm25_results = [r for r in bm25_results if r['url'] in filtered_urls]
+                
+                # Update expanded query display
+                self.last_expanded_query = ' '.join(expanded_terms)
+        
+        # =====================================================================
+        # RERANKING
         # Apply sophisticated scoring to reorder candidates
         # =====================================================================
         # Get the original query terms (before expansion) for coverage scoring
@@ -1417,7 +1497,7 @@ class EnhancedSearchEngine(SearchEngine):
         term_weights = self._build_term_weights(
             original_terms=original_terms,
             expanded_terms=expanded_terms,
-            fuzzy_corrections=fuzzy_weights,  # edit distance map from Levenshtein expansion
+            fuzzy_corrections=fuzzy_weights,  # edit distance map (empty if Pass 2 not triggered)
             synonym_terms=synonym_terms,
             wildcard_terms=wildcard_terms
         )
