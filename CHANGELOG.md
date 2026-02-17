@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-02-16
+
+### Added
+- **Page-based PDF chunking** for better search granularity (#205, #206)
+  - Each PDF page indexed as a separate document
+  - URLs include `#page=N` fragment for direct page linking
+  - Titles show `{Document Title} - Page {N}` format
+  - Metadata includes: page, total_pages, source_file, parent_title
+  - Headings detected per-page for field-aware ranking
+  - Better BM25 ranking (smaller documents = more accurate scoring)
+
+### Changed
+- `index-files` CLI now uses page-based extraction for PDFs
+- A 50-page PDF creates 50 indexed documents (instead of 1)
+
 ## [1.21.1] - 2026-02-11
 
 ### Fixed
