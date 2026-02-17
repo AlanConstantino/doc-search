@@ -45,3 +45,4 @@ Thumbs.db
 # Project specific
 test_data/
 *.json.gz
+.venv
