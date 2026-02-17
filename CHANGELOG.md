@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-02-17
+
+### Added
+- **Multi-site search** (#144)
+  - New `search-all` CLI command to search across all crawled sites simultaneously
+  - Results merged and ranked by BM25 score across sites
+  - Each result annotated with source site
+  - `--sites` flag to filter specific sites by URL, name, or hash prefix
+  - `--all` flag on `serve` command for multi-site web UI
+  - JSON output support via `--json` flag
+  - New `multi_search.py` module with `MultiSiteSearchEngine` class
+
+- **Incremental index updates** (#141)
+  - Re-indexing only processes new/changed/deleted pages instead of full rebuild
+  - Content hashes (SHA-256) tracked per page for change detection
+  - Stats output: "X new, Y updated, Z removed, W unchanged"
+  - `--full` flag to force complete rebuild
+  - `remove_document()` method on `BM25Index` for targeted removal
+  - Content hashes persist across save/load cycles
+
 ## [1.22.0] - 2026-02-16
 
 ### Added
