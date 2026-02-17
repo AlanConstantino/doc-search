@@ -120,6 +120,8 @@ def _add_index_parser(subparsers):
                              help='Use if site was crawled with --separate-paths')
     index_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
                              help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
+    index_parser.add_argument('--full', action='store_true',
+                             help='Force a complete rebuild (skip incremental)')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
