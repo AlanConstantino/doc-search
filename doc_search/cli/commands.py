@@ -1216,63 +1216,148 @@ def cmd_index_files(args):
     return 0
 
 
+def cmd_search_all(args):
+    """Search across all crawled sites."""
+    from ..multi_search import MultiSiteSearchEngine
+    
+    site_filters = getattr(args, 'sites', None)
+    
+    engine = MultiSiteSearchEngine(site_filters=site_filters)
+    
+    if engine.site_count == 0:
+        print(style_error("Error: No indexed sites found."))
+        print("Run 'doc_search crawl <url>' and 'doc_search index <url>' first.")
+        return 1
+    
+    if not args.quiet and not args.json:
+        print(style_info(f"Searching across {engine.site_count} site(s)..."))
+    
+    # Time the search
+    start_time = time.perf_counter()
+    results = engine.search(
+        args.query,
+        top_k=args.limit,
+        highlight=True,
+        snippet_length=150,
+    )
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    
+    # Get query terms for highlighting
+    terms, phrases = parse_query(args.query)
+    query_terms = set(terms)
+    for phrase in phrases:
+        query_terms.update(phrase)
+    
+    if args.json:
+        output = {
+            'query': args.query,
+            'elapsed_ms': round(elapsed_ms, 2),
+            'sites_searched': engine.site_count,
+            'count': len(results),
+            'results': results,
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print()
+        if results:
+            for i, r in enumerate(results, 1):
+                site_label = r.get('site', 'unknown')
+                score_str = f" [{r['score']:.4f}]" if args.scores else ""
+                print(f"  {i}. {style_title(r.get('title', 'Untitled'))}{score_str}")
+                print(f"     {style_url(r['url'])}")
+                print(f"     {_e('globe')} {style_info(site_label)}")
+                if r.get('snippet'):
+                    print(f"     {r['snippet']}")
+                print()
+            print(style_info(f"  {len(results)} result(s) across {engine.site_count} site(s) ({elapsed_ms:.1f}ms)"))
+        else:
+            print(style_info("  No results found."))
+        print()
+    
+    return 0
+
+
 def cmd_serve(args):
     """Start the web UI server for searching."""
     import webbrowser
     from ..server import run_server
     
-    separate_paths = getattr(args, 'separate_paths', False)
-    try:
-        site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
-    except ValueError as e:
-        print(style_error(f"Error: {e}"))
-        return 1
+    multi_site = getattr(args, 'all', False)
     
-    # Find index file
-    index_path = None
-    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-        if candidate.exists():
-            index_path = candidate
-            break
-    
-    if not index_path:
-        print(style_error(f"Error: No index found in {site_dir}"))
-        print("Run 'doc_search index <site_dir>' first.")
-        return 1
-    
-    # Load index (use EnhancedSearchEngine for spellcheck, autocomplete, facets)
-    print(style_info(f"Loading index from: {index_path}"))
-    enable_synonyms = getattr(args, 'synonyms', True)
-    cache_size = getattr(args, 'cache_size', 128)
-    cache_ttl_arg = getattr(args, 'cache_ttl', 0)
-    cache_file = getattr(args, 'cache_file', None)
-    # TTL of 0 means never expire (None internally)
-    cache_ttl = None if cache_ttl_arg == 0 else cache_ttl_arg
-    # Default cache path is <site_dir>/.cache.db, or user-specified path
-    if cache_file:
-        cache_path = Path(cache_file)
-    elif cache_size > 0:
-        cache_path = site_dir / '.cache.db'
+    if multi_site:
+        # Multi-site mode: use MultiSiteSearchEngine wrapped as a SearchEngine-like object
+        from ..multi_search import MultiSiteSearchEngine
+        
+        site_filters = getattr(args, 'sites', None)
+        multi_engine = MultiSiteSearchEngine(site_filters=site_filters)
+        
+        if multi_engine.site_count == 0:
+            print(style_error("Error: No indexed sites found."))
+            return 1
+        
+        print(style_info(f"Multi-site mode: {multi_engine.site_count} site(s)"))
+        for s in multi_engine.sites:
+            print(style_info(f"  - {s.get('url') or s['name']}"))
+        
+        engine = multi_engine
+        stats = multi_engine.get_stats()
+        site_dir = DEFAULT_DATA_DIR
     else:
-        cache_path = None
-    engine = EnhancedSearchEngine.load(
-        index_path,
-        enable_spellcheck=True,
-        enable_autocomplete=True,
-        enable_facets=True,
-        enable_synonyms=enable_synonyms,
-        enable_symspell=not getattr(args, 'no_symspell', False),
-        enable_ngram=not getattr(args, 'no_ngram', False),
-        cache_size=cache_size,
-        cache_ttl=cache_ttl,
-        cache_path=cache_path
-    )
-    
-    if engine.cache_enabled:
-        ttl_str = "no expiry" if cache_ttl is None else f"{cache_ttl}s TTL"
-        print(style_info(f"Search cache: {cache_size} queries, {ttl_str}, persistent ({cache_path})"))
-    
-    stats = engine.get_stats()
+        if not args.site_dir:
+            print(style_error("Error: site_dir is required (or use --all for multi-site mode)"))
+            return 1
+        separate_paths = getattr(args, 'separate_paths', False)
+        try:
+            site_dir = get_site_dir(args.site_dir, include_path=separate_paths)
+        except ValueError as e:
+            print(style_error(f"Error: {e}"))
+            return 1
+        
+        # Find index file
+        index_path = None
+        for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+            if candidate.exists():
+                index_path = candidate
+                break
+        
+        if not index_path:
+            print(style_error(f"Error: No index found in {site_dir}"))
+            print("Run 'doc_search index <site_dir>' first.")
+            return 1
+        
+        # Load index (use EnhancedSearchEngine for spellcheck, autocomplete, facets)
+        print(style_info(f"Loading index from: {index_path}"))
+        enable_synonyms = getattr(args, 'synonyms', True)
+        cache_size = getattr(args, 'cache_size', 128)
+        cache_ttl_arg = getattr(args, 'cache_ttl', 0)
+        cache_file = getattr(args, 'cache_file', None)
+        # TTL of 0 means never expire (None internally)
+        cache_ttl = None if cache_ttl_arg == 0 else cache_ttl_arg
+        # Default cache path is <site_dir>/.cache.db, or user-specified path
+        if cache_file:
+            cache_path = Path(cache_file)
+        elif cache_size > 0:
+            cache_path = site_dir / '.cache.db'
+        else:
+            cache_path = None
+        engine = EnhancedSearchEngine.load(
+            index_path,
+            enable_spellcheck=True,
+            enable_autocomplete=True,
+            enable_facets=True,
+            enable_synonyms=enable_synonyms,
+            enable_symspell=not getattr(args, 'no_symspell', False),
+            enable_ngram=not getattr(args, 'no_ngram', False),
+            cache_size=cache_size,
+            cache_ttl=cache_ttl,
+            cache_path=cache_path
+        )
+        
+        if engine.cache_enabled:
+            ttl_str = "no expiry" if cache_ttl is None else f"{cache_ttl}s TTL"
+            print(style_info(f"Search cache: {cache_size} queries, {ttl_str}, persistent ({cache_path})"))
+        
+        stats = engine.get_stats()
     
     # Start server
     log_requests = getattr(args, 'log_requests', False)

@@ -4080,8 +4080,8 @@ class TestCLIParsersModule(unittest.TestCase):
         for cmd in expected_commands:
             self.assertIn(cmd, registered_commands, f"Command '{cmd}' should be registered")
     
-    def test_subcommand_count_is_exactly_ten(self):
-        """Parser should have exactly 10 subcommands."""
+    def test_subcommand_count_is_exactly_eleven(self):
+        """Parser should have exactly 11 subcommands."""
         parser = create_parser()
         
         subparsers_action = None
@@ -4090,14 +4090,14 @@ class TestCLIParsersModule(unittest.TestCase):
                 subparsers_action = action
                 break
         
-        self.assertEqual(len(subparsers_action.choices), 10)
+        self.assertEqual(len(subparsers_action.choices), 11)
     
     def test_each_subcommand_has_func(self):
         """Each subcommand should have a func default set."""
         parser = create_parser()
         
-        commands = ['crawl', 'index', 'index-files', 'search', 'autocomplete',
-                   'interactive', 'stats', 'list', 'delete', 'serve']
+        commands = ['crawl', 'index', 'index-files', 'search', 'search-all',
+                   'autocomplete', 'interactive', 'stats', 'list', 'delete', 'serve']
         
         for cmd in commands:
             # Get the subparser for this command
