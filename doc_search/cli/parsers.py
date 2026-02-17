@@ -7,8 +7,8 @@ This module defines all CLI argument parsers and their options.
 import argparse
 from .. import __version__
 from .commands import (
-    cmd_crawl, cmd_index, cmd_index_files, cmd_search, cmd_autocomplete,
-    cmd_interactive, cmd_stats, cmd_list, cmd_delete, cmd_serve
+    cmd_crawl, cmd_index, cmd_index_files, cmd_search, cmd_search_all,
+    cmd_autocomplete, cmd_interactive, cmd_stats, cmd_list, cmd_delete, cmd_serve
 )
 
 
@@ -52,6 +52,7 @@ Examples:
     _add_index_parser(subparsers)
     _add_index_files_parser(subparsers)
     _add_search_parser(subparsers)
+    _add_search_all_parser(subparsers)
     _add_autocomplete_parser(subparsers)
     _add_interactive_parser(subparsers)
     _add_stats_parser(subparsers)
@@ -194,6 +195,28 @@ def _add_search_parser(subparsers):
     search_parser.set_defaults(func=cmd_search)
 
 
+def _add_search_all_parser(subparsers):
+    """Add the search-all command parser."""
+    search_all_parser = subparsers.add_parser(
+        'search-all', 
+        help='Search across all crawled sites'
+    )
+    search_all_parser.add_argument('query', help='Search query')
+    search_all_parser.add_argument('--limit', '-l', type=int, default=10,
+                                   help='Total number of results (default: 10)')
+    search_all_parser.add_argument('--sites', nargs='+', metavar='SITE',
+                                   help='Filter to specific sites (by URL substring or hash prefix)')
+    search_all_parser.add_argument('--scores', '-s', action='store_true',
+                                   help='Show BM25 scores')
+    search_all_parser.add_argument('--json', '-j', action='store_true',
+                                   help='Output as JSON')
+    search_all_parser.add_argument('--quiet', '-q', action='store_true',
+                                   help='Suppress loading messages')
+    search_all_parser.add_argument('--no-color', action='store_true',
+                                   help='Disable colored output')
+    search_all_parser.set_defaults(func=cmd_search_all)
+
+
 def _add_autocomplete_parser(subparsers):
     """Add the autocomplete command parser."""
     auto_parser = subparsers.add_parser('autocomplete', help='Get autocomplete suggestions')
@@ -256,7 +279,12 @@ def _add_delete_parser(subparsers):
 def _add_serve_parser(subparsers):
     """Add the serve command parser."""
     serve_parser = subparsers.add_parser('serve', help='Start web UI server')
-    serve_parser.add_argument('site_dir', help='Site data directory or original URL')
+    serve_parser.add_argument('site_dir', nargs='?', default=None,
+                             help='Site data directory or original URL (not needed with --all)')
+    serve_parser.add_argument('--all', '-a', action='store_true',
+                             help='Multi-site mode: search across all indexed sites')
+    serve_parser.add_argument('--sites', nargs='+', metavar='SITE',
+                             help='Filter to specific sites in multi-site mode (by URL or hash prefix)')
     serve_parser.add_argument('--port', '-p', type=int, default=8080,
                              help='Port to listen on (default: 8080)')
     serve_parser.add_argument('--host', default='127.0.0.1',
