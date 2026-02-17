@@ -2,6 +2,7 @@
 Search index building with BM25 scoring.
 """
 
+import hashlib
 import json
 import gzip
 import math
@@ -50,6 +51,9 @@ class BM25Index:
         
         # Term document frequencies
         self.doc_freqs: Dict[str, int] = defaultdict(int)  # term -> number of docs containing term
+        
+        # Content hashes for incremental indexing: url -> content hash
+        self.content_hashes: Dict[str, str] = {}
     
     def add_document(self, doc_id: int, url: str, title: str, text: str, 
                      description: str = '', headings: List[tuple] = None,
@@ -180,6 +184,10 @@ class BM25Index:
                     doc_type=page.get('doc_type', 'html')
                 )
                 
+                # Store content hash for incremental indexing
+                hash_page = {'title': title, 'text': text, 'description': description, 'headings': headings}
+                self.content_hashes[page['url']] = self._compute_content_hash(hash_page)
+                
                 doc_id += 1
                 
                 if verbose and (i + 1) % 500 == 0:
@@ -203,6 +211,167 @@ class BM25Index:
                 print(f"  Re-parsed from raw HTML: {reparsed_count}")
         
         return self.total_docs
+    
+    def remove_document(self, doc_id: int):
+        """
+        Remove a document from the index.
+        
+        Args:
+            doc_id: Document ID to remove
+        """
+        if doc_id not in self.documents:
+            return
+        
+        url = self.documents[doc_id]['url']
+        
+        # Remove from inverted index
+        terms_to_remove = []
+        for term, postings in self.index.items():
+            original_len = len(postings)
+            self.index[term] = [(did, freq) for did, freq in postings if did != doc_id]
+            if len(self.index[term]) < original_len:
+                self.doc_freqs[term] -= 1
+                if self.doc_freqs[term] <= 0:
+                    terms_to_remove.append(term)
+        
+        # Clean up empty terms
+        for term in terms_to_remove:
+            del self.index[term]
+            del self.doc_freqs[term]
+        
+        # Remove from document storage
+        del self.documents[doc_id]
+        del self.url_to_id[url]
+        del self.doc_lengths[doc_id]
+        self.content_hashes.pop(url, None)
+        
+        self.total_docs -= 1
+        self._update_avg_doc_length()
+    
+    @staticmethod
+    def _compute_content_hash(page: dict) -> str:
+        """Compute a hash of page content for change detection."""
+        # Hash the fields that affect indexing
+        content = json.dumps({
+            'title': page.get('title', ''),
+            'text': page.get('text', ''),
+            'description': page.get('description', ''),
+            'headings': page.get('headings', []),
+        }, sort_keys=True)
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+    
+    def build_from_pages_incremental(self, pages_dir: Path, verbose: bool = True,
+                                      parser: str = 'dom') -> dict:
+        """
+        Incrementally update index from crawled page files.
+        
+        Only processes new/changed pages, removes deleted pages.
+        
+        Args:
+            pages_dir: Directory containing page JSON files
+            verbose: Print progress messages
+            parser: Parser for text extraction ('dom' or 'stream')
+            
+        Returns:
+            Dict with stats: {'new': int, 'updated': int, 'removed': int, 'unchanged': int}
+        """
+        from .parser import extract_text
+        from .dom import extract_text_dom
+        
+        pages_dir = Path(pages_dir)
+        page_files = list(pages_dir.glob('*.json'))
+        
+        if verbose:
+            print(f"Incremental indexing from {len(page_files)} page files (parser: {parser})...")
+        
+        # Build mapping of url -> page data for current pages
+        current_pages = {}  # url -> (page_data, file_path)
+        for page_file in page_files:
+            try:
+                with open(page_file, 'r') as f:
+                    page = json.load(f)
+                
+                # Re-extract from raw HTML if available
+                if 'raw_html' in page and page['raw_html']:
+                    if parser == 'dom':
+                        extracted = extract_text_dom(page['raw_html'])
+                    else:
+                        extracted = extract_text(page['raw_html'])
+                    page['text'] = extracted.get('text', '')
+                    page['title'] = extracted.get('title', page.get('title', ''))
+                    page['description'] = extracted.get('description', page.get('description', ''))
+                    page['headings'] = extracted.get('headings', page.get('headings', []))
+                
+                if not page.get('text', '').strip():
+                    continue
+                
+                current_pages[page['url']] = page
+            except (json.JSONDecodeError, IOError, KeyError):
+                continue
+        
+        current_urls = set(current_pages.keys())
+        indexed_urls = set(self.content_hashes.keys())
+        
+        # Determine what changed
+        new_urls = current_urls - indexed_urls
+        removed_urls = indexed_urls - current_urls
+        possibly_changed = current_urls & indexed_urls
+        
+        updated_urls = set()
+        unchanged_urls = set()
+        for url in possibly_changed:
+            page = current_pages[url]
+            new_hash = self._compute_content_hash(page)
+            if new_hash != self.content_hashes.get(url):
+                updated_urls.add(url)
+            else:
+                unchanged_urls.add(url)
+        
+        # Remove deleted pages
+        for url in removed_urls:
+            doc_id = self.url_to_id.get(url)
+            if doc_id is not None:
+                self.remove_document(doc_id)
+        
+        # Remove updated pages (will be re-added)
+        for url in updated_urls:
+            doc_id = self.url_to_id.get(url)
+            if doc_id is not None:
+                self.remove_document(doc_id)
+        
+        # Determine next doc_id
+        next_doc_id = max(self.documents.keys()) + 1 if self.documents else 0
+        
+        # Add new and updated pages
+        for url in sorted(new_urls | updated_urls):
+            page = current_pages[url]
+            self.add_document(
+                doc_id=next_doc_id,
+                url=page['url'],
+                title=page.get('title', ''),
+                text=page.get('text', ''),
+                description=page.get('description', ''),
+                headings=page.get('headings', []),
+                doc_type=page.get('doc_type', 'html')
+            )
+            self.content_hashes[url] = self._compute_content_hash(page)
+            next_doc_id += 1
+        
+        stats = {
+            'new': len(new_urls),
+            'updated': len(updated_urls),
+            'removed': len(removed_urls),
+            'unchanged': len(unchanged_urls),
+        }
+        
+        if verbose:
+            print(f"Incremental indexing complete!")
+            print(f"  {stats['new']} new, {stats['updated']} updated, "
+                  f"{stats['removed']} removed, {stats['unchanged']} unchanged")
+            print(f"  Total documents: {self.total_docs}")
+            print(f"  Unique terms: {len(self.index)}")
+        
+        return stats
     
     def _idf(self, term: str) -> float:
         """Calculate IDF for a term using BM25 formula."""
@@ -302,7 +471,8 @@ class BM25Index:
             'doc_lengths': {str(k): v for k, v in self.doc_lengths.items()},
             'avg_doc_length': self.avg_doc_length,
             'total_docs': self.total_docs,
-            'doc_freqs': dict(self.doc_freqs)
+            'doc_freqs': dict(self.doc_freqs),
+            'content_hashes': self.content_hashes
         }
         
         json_data = json.dumps(data)
@@ -352,6 +522,7 @@ class BM25Index:
         index.avg_doc_length = data['avg_doc_length']
         index.total_docs = data['total_docs']
         index.doc_freqs = defaultdict(int, data['doc_freqs'])
+        index.content_hashes = data.get('content_hashes', {})
         
         return index
     

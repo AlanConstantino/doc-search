@@ -223,11 +223,41 @@ def cmd_index(args):
     
     print(f"Building index from: {pages_dir}")
     
-    # Build index
     stem = not getattr(args, 'no_stemming', False)
     parser = getattr(args, 'parser', 'dom')
-    index = BM25Index(k1=args.k1, b=args.b, stem=stem)
-    num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet, parser=parser)
+    full_rebuild = getattr(args, 'full', False)
+    
+    # Try incremental indexing if not forced full and existing index available
+    existing_index = None
+    if not full_rebuild:
+        for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+            if candidate.exists():
+                try:
+                    existing_index = BM25Index.load(candidate)
+                    # Check if params match; if not, force full rebuild
+                    if existing_index.k1 != args.k1 or existing_index.b != args.b or existing_index.stem != stem:
+                        if not args.quiet:
+                            print("Index parameters changed, performing full rebuild...")
+                        existing_index = None
+                except Exception:
+                    existing_index = None
+                break
+    
+    if existing_index is not None and existing_index.content_hashes:
+        # Incremental update
+        if not args.quiet:
+            print("Performing incremental index update...")
+        index = existing_index
+        incr_stats = index.build_from_pages_incremental(pages_dir, verbose=not args.quiet, parser=parser)
+        num_docs = index.total_docs
+    else:
+        # Full rebuild
+        if not args.quiet:
+            if not full_rebuild and existing_index is not None:
+                print("No content hashes in existing index, performing full rebuild...")
+            print("Performing full index build...")
+        index = BM25Index(k1=args.k1, b=args.b, stem=stem)
+        num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet, parser=parser)
     
     if not args.quiet:
         print(f"Stemming: {'enabled' if stem else 'disabled'}")
