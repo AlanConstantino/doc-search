@@ -1199,7 +1199,7 @@ def cmd_search_all(args):
         print("Run 'doc_search crawl <url>' and 'doc_search index <url>' first.")
         return 1
     
-    if not args.quiet:
+    if not args.quiet and not args.json:
         print(style_info(f"Searching across {engine.site_count} site(s)..."))
     
     # Time the search
