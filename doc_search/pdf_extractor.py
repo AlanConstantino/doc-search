@@ -468,6 +468,185 @@ class PDFExtractor:
         
         return result
     
+    def _extract_single_page(
+        self,
+        page,
+        page_num: int
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        Extract text from a single PDF page using visitor pattern.
+        
+        Args:
+            page: pypdf Page object
+            page_num: 0-indexed page number
+            
+        Returns:
+            Tuple of (text_elements, plain_text)
+        """
+        text_elements = []
+        plain_text = ''
+        
+        try:
+            def visitor(text, cm, tm, font_dict, font_size):
+                """Visitor callback to collect text with font info."""
+                if text and text.strip():
+                    font_name = ''
+                    if font_dict:
+                        try:
+                            font_name = str(font_dict.get('/BaseFont', ''))
+                        except Exception:
+                            pass
+                    
+                    text_elements.append({
+                        'text': text.strip(),
+                        'font_size': font_size if font_size else 0,
+                        'font_name': font_name,
+                        'page': page_num + 1,
+                    })
+            
+            page.extract_text(visitor_text=visitor)
+            plain_text = page.extract_text() or ''
+            
+        except Exception:
+            try:
+                plain_text = page.extract_text() or ''
+                if plain_text:
+                    text_elements.append({
+                        'text': plain_text,
+                        'font_size': 0,
+                        'font_name': '',
+                        'page': page_num + 1,
+                    })
+            except Exception:
+                plain_text = f"[Page {page_num + 1}: extraction failed]"
+        
+        return text_elements, plain_text
+    
+    def extract_pages_from_file(self, file_path: Path) -> List[Dict[str, Any]]:
+        """
+        Extract PDF as multiple documents, one per page.
+        
+        This is the preferred method for indexing as it enables
+        page-level search granularity.
+        
+        Args:
+            file_path: Path to the PDF file
+            
+        Returns:
+            List of document dicts, one per page. Each has:
+            - url: file URL with #page=N fragment
+            - title: "{doc_title} - Page {N}"
+            - text: page text content
+            - headings: headings detected on this page
+            - metadata: doc_type, page, total_pages, source_file, etc.
+            - error: error message if extraction failed
+        """
+        file_path = Path(file_path)
+        documents = []
+        
+        try:
+            reader = PdfReader(file_path)
+            total_pages = len(reader.pages)
+            
+            # Get document-level metadata
+            doc_title = file_path.stem
+            doc_metadata = {}
+            if reader.metadata:
+                doc_metadata = {
+                    'author': reader.metadata.get('/Author', ''),
+                    'subject': reader.metadata.get('/Subject', ''),
+                    'creator': reader.metadata.get('/Creator', ''),
+                }
+                if reader.metadata.get('/Title'):
+                    doc_title = reader.metadata.get('/Title')
+            
+            # Extract each page as a separate document
+            for page_num, page in enumerate(reader.pages):
+                page_number = page_num + 1  # 1-indexed for display
+                
+                # Extract text and elements for this page
+                text_elements, plain_text = self._extract_single_page(page, page_num)
+                
+                # Detect headings on this page
+                headings, body_parts = self._detect_headings(text_elements)
+                
+                # Use body parts if available, otherwise plain text
+                page_text = '\n\n'.join(body_parts) if body_parts else plain_text
+                
+                # Create page document
+                doc = {
+                    'url': f"file://{file_path.absolute()}#page={page_number}",
+                    'title': f"{doc_title} - Page {page_number}",
+                    'text': page_text,
+                    'headings': headings,
+                    'metadata': {
+                        'doc_type': 'pdf',
+                        'page': page_number,
+                        'total_pages': total_pages,
+                        'source_file': str(file_path.absolute()),
+                        'parent_title': doc_title,
+                        **doc_metadata
+                    },
+                    'error': None
+                }
+                
+                # Skip empty pages but note them
+                if not page_text.strip():
+                    doc['text'] = f"[Page {page_number}: no text content]"
+                
+                documents.append(doc)
+                
+        except PdfReadError as e:
+            documents.append({
+                'url': f"file://{file_path.absolute()}",
+                'title': file_path.stem,
+                'text': '',
+                'headings': [],
+                'metadata': {'doc_type': 'pdf', 'source_file': str(file_path)},
+                'error': f"PDF read error: {e}"
+            })
+        except Exception as e:
+            documents.append({
+                'url': f"file://{file_path.absolute()}",
+                'title': file_path.stem,
+                'text': '',
+                'headings': [],
+                'metadata': {'doc_type': 'pdf', 'source_file': str(file_path)},
+                'error': f"Extraction error: {e}"
+            })
+        
+        return documents
+    
+    def extract_pages(self, source: str) -> List[Dict[str, Any]]:
+        """
+        Extract PDF as multiple documents, one per page (auto-detect file vs URL).
+        
+        Args:
+            source: File path or URL
+            
+        Returns:
+            List of document dicts, one per page
+        """
+        # For now, only file paths are supported for page extraction
+        # URL support can be added later if needed
+        if source.startswith(('http://', 'https://')):
+            # Fall back to single-document extraction for URLs
+            result = self.extract_from_url(source)
+            return [{
+                'url': source,
+                'title': result.get('title', ''),
+                'text': result.get('text', ''),
+                'headings': result.get('headings', []),
+                'metadata': {
+                    'doc_type': 'pdf',
+                    'pages': result.get('pages', 0),
+                    **result.get('metadata', {})
+                },
+                'error': result.get('error')
+            }]
+        else:
+            return self.extract_pages_from_file(Path(source))
+    
     def extract(self, source: str) -> Dict[str, Any]:
         """
         Extract text and headings from a PDF (auto-detect file vs URL).

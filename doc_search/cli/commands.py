@@ -1090,22 +1090,8 @@ def cmd_index_files(args):
             elif ext == '.docx':
                 documents = word_extractor.extract(file_path)
             elif ext == '.pdf':
-                # PDF extractor returns a single dict, wrap in list for consistency
-                pdf_result = pdf_extractor.extract_from_file(file_path)
-                # Convert to document format matching Excel/Word extractors
-                documents = [{
-                    'url': f"file://{file_path.absolute()}",
-                    'title': pdf_result.get('title') or file_path.stem,
-                    'text': pdf_result.get('text', ''),
-                    'headings': pdf_result.get('headings', []),
-                    'metadata': {
-                        'doc_type': 'pdf',
-                        'pages': pdf_result.get('pages', 0),
-                        'source_file': str(file_path),
-                        **pdf_result.get('metadata', {})
-                    },
-                    'error': pdf_result.get('error')
-                }]
+                # Extract PDF as one document per page for better search granularity
+                documents = pdf_extractor.extract_pages_from_file(file_path)
             else:
                 # Skip unsupported extensions
                 continue

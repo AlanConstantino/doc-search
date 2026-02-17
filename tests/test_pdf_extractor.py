@@ -779,5 +779,261 @@ class TestHeadingIntegration(unittest.TestCase):
         self.assertEqual(result['headings'], [])
 
 
+# ============================================================================
+# Multi-Page PDF Helper
+# ============================================================================
+
+def create_multi_page_pdf(pages: list[str], title: str = "") -> bytes:
+    """
+    Create a multi-page PDF with given text content per page.
+    
+    Args:
+        pages: List of text content strings, one per page
+        title: Optional document title
+        
+    Returns:
+        PDF bytes
+    """
+    from io import BytesIO
+    
+    num_pages = len(pages)
+    objects = []
+    
+    # Object 1: Catalog
+    objects.append(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj")
+    
+    # Object 2: Pages (kids will be objects 3, 4, 5... for each page)
+    # Each page needs 2 objects: Page and Content stream
+    # So page refs are at: 3, 5, 7, 9, ... (odd numbers starting at 3)
+    page_refs = ' '.join([f"{3 + i*2} 0 R" for i in range(num_pages)])
+    objects.append(f"2 0 obj\n<< /Type /Pages /Kids [{page_refs}] /Count {num_pages} >>\nendobj".encode())
+    
+    # Font will be the object after all pages
+    font_obj_num = 3 + num_pages * 2
+    
+    # Create page and content objects for each page
+    for i, text in enumerate(pages):
+        page_obj_num = 3 + i * 2
+        content_obj_num = 4 + i * 2
+        
+        # Page object
+        page_obj = f"{page_obj_num} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_obj_num} 0 R /Resources << /Font << /F1 {font_obj_num} 0 R >> >> >>\nendobj"
+        objects.append(page_obj.encode())
+        
+        # Content stream
+        content = f"BT /F1 12 Tf 100 700 Td ({text}) Tj ET".encode()
+        content_obj = f"{content_obj_num} 0 obj\n<< /Length {len(content)} >>\nstream\n".encode() + content + b"\nendstream\nendobj"
+        objects.append(content_obj)
+    
+    # Font object
+    objects.append(f"{font_obj_num} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj".encode())
+    
+    # Info object (metadata) if title provided
+    info_obj_num = font_obj_num + 1
+    if title:
+        objects.append(f"{info_obj_num} 0 obj\n<< /Title ({title}) >>\nendobj".encode())
+    
+    # Build PDF
+    pdf = BytesIO()
+    pdf.write(b"%PDF-1.4\n")
+    
+    # Track object positions for xref
+    positions = []
+    
+    for obj in objects:
+        positions.append(pdf.tell())
+        pdf.write(obj + b"\n")
+    
+    # Write xref
+    xref_pos = pdf.tell()
+    pdf.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    pdf.write(b"0000000000 65535 f \n")
+    for pos in positions:
+        pdf.write(f"{pos:010d} 00000 n \n".encode())
+    
+    # Write trailer
+    trailer_info = f"/Info {info_obj_num} 0 R " if title else ""
+    pdf.write(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R {trailer_info}>>\n".encode())
+    pdf.write(f"startxref\n{xref_pos}\n".encode())
+    pdf.write(b"%%EOF")
+    
+    return pdf.getvalue()
+
+
+# ============================================================================
+# Page-Based Extraction Tests
+# ============================================================================
+
+class TestExtractPagesFromFile(unittest.TestCase):
+    """Tests for page-based PDF extraction."""
+    
+    def test_returns_list_of_documents(self):
+        """Should return a list of documents, one per page."""
+        pdf_content = create_multi_page_pdf(["Page one content", "Page two content", "Page three content"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 3)
+    
+    def test_each_page_has_correct_structure(self):
+        """Each page document should have required fields."""
+        pdf_content = create_multi_page_pdf(["Page content"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            page = result[0]
+            self.assertIn('url', page)
+            self.assertIn('title', page)
+            self.assertIn('text', page)
+            self.assertIn('headings', page)
+            self.assertIn('metadata', page)
+            self.assertIn('error', page)
+    
+    def test_url_includes_page_fragment(self):
+        """Each page URL should include #page=N fragment."""
+        pdf_content = create_multi_page_pdf(["First", "Second"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertIn('#page=1', result[0]['url'])
+            self.assertIn('#page=2', result[1]['url'])
+    
+    def test_title_includes_page_number(self):
+        """Each page title should include page number."""
+        pdf_content = create_multi_page_pdf(["Content"], title="My Document")
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertIn('Page 1', result[0]['title'])
+    
+    def test_metadata_includes_page_info(self):
+        """Metadata should include page number and total pages."""
+        pdf_content = create_multi_page_pdf(["One", "Two", "Three"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertEqual(result[0]['metadata']['page'], 1)
+            self.assertEqual(result[1]['metadata']['page'], 2)
+            self.assertEqual(result[2]['metadata']['page'], 3)
+            
+            for page in result:
+                self.assertEqual(page['metadata']['total_pages'], 3)
+                self.assertEqual(page['metadata']['doc_type'], 'pdf')
+    
+    def test_metadata_includes_source_file(self):
+        """Metadata should include source file path."""
+        pdf_content = create_multi_page_pdf(["Content"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertIn('source_file', result[0]['metadata'])
+            self.assertIn(f.name, result[0]['metadata']['source_file'])
+    
+    def test_metadata_includes_parent_title(self):
+        """Metadata should include parent document title."""
+        pdf_content = create_multi_page_pdf(["Content"], title="Original Title")
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertIn('parent_title', result[0]['metadata'])
+    
+    def test_handles_nonexistent_file(self):
+        """Should return error document for nonexistent file."""
+        extractor = PDFExtractor()
+        result = extractor.extract_pages_from_file(Path("/nonexistent/file.pdf"))
+        
+        self.assertEqual(len(result), 1)
+        self.assertIsNotNone(result[0]['error'])
+    
+    def test_handles_corrupted_pdf(self):
+        """Should return error document for corrupted PDF."""
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(b"This is not a valid PDF")
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertEqual(len(result), 1)
+            self.assertIsNotNone(result[0]['error'])
+    
+    def test_single_page_pdf(self):
+        """Should handle single-page PDFs correctly."""
+        pdf_content = create_minimal_pdf("Single page content")
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages_from_file(Path(f.name))
+            
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]['metadata']['page'], 1)
+            self.assertEqual(result[0]['metadata']['total_pages'], 1)
+
+
+class TestExtractPages(unittest.TestCase):
+    """Tests for the extract_pages convenience method."""
+    
+    def test_detects_file_path(self):
+        """Should use page extraction for file paths."""
+        pdf_content = create_multi_page_pdf(["Page 1", "Page 2"])
+        
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_content)
+            f.flush()
+            
+            extractor = PDFExtractor()
+            result = extractor.extract_pages(f.name)
+            
+            self.assertEqual(len(result), 2)
+    
+    def test_url_falls_back_to_single_doc(self):
+        """Should fall back to single document for URLs (not yet implemented)."""
+        extractor = PDFExtractor()
+        # This will fail to fetch, but tests the URL detection path
+        result = extractor.extract_pages("https://example.com/test.pdf")
+        
+        self.assertEqual(len(result), 1)
+        self.assertIsNotNone(result[0]['error'])
+
+
 if __name__ == '__main__':
     unittest.main()
