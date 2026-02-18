@@ -699,6 +699,7 @@ class EnhancedSearchEngine(SearchEngine):
         self._synonyms: Optional[SynonymExpander] = None
         self._symspell: Optional[SymSpell] = symspell_index
         self._ngram: Optional[NGramIndex] = ngram_index
+        self._title_suggester = None  # Loaded lazily from disk
         # Initialize reranker for two-stage retrieval
         self._reranker: Reranker = Reranker()
         
@@ -757,6 +758,27 @@ class EnhancedSearchEngine(SearchEngine):
         if self._ngram_enabled and self._ngram is None:
             # Try to load n-gram index from disk
             self._ngram = self._load_ngram_index()
+        
+        # Try to load title suggestion index from disk
+        if self._title_suggester is None:
+            self._title_suggester = self._load_title_suggester()
+    
+    def _load_title_suggester(self):
+        """Try to load title suggestion index from disk."""
+        if not self._index_path:
+            return None
+        
+        parent = Path(self._index_path).parent
+        
+        for candidate in [parent / 'titles.json.gz', parent / 'titles.json']:
+            if candidate.exists():
+                try:
+                    from .title_suggester import TitleSuggester
+                    return TitleSuggester.load(str(candidate))
+                except Exception:
+                    return None
+        
+        return None
     
     def _load_ngram_index(self) -> Optional[NGramIndex]:
         """Try to load n-gram index from disk."""
@@ -1044,6 +1066,33 @@ class EnhancedSearchEngine(SearchEngine):
                     suggestions = [prev_words + word for word, _, _ in fuzzy_matches[:max_suggestions]]
         
         return suggestions
+    
+    def get_title_suggestions(self, prefix: str, 
+                               max_suggestions: int = 8) -> List[Dict[str, Any]]:
+        """
+        Get title/heading-based suggestions for autocomplete.
+        
+        Returns richer suggestions with title text, doc type, and URL.
+        Falls back to word-level suggestions if no title matches.
+        
+        Args:
+            prefix: Search prefix
+            max_suggestions: Maximum results
+            
+        Returns:
+            List of dicts with 'text', 'doc_type', 'url' keys.
+            If no title matches, returns word suggestions as
+            [{'text': word, 'doc_type': None, 'url': None}, ...]
+        """
+        # Try title suggestions first
+        if self._title_suggester:
+            results = self._title_suggester.suggest(prefix, max_suggestions)
+            if results:
+                return results
+        
+        # Fall back to word-level suggestions
+        word_suggestions = self.get_autocomplete_suggestions(prefix, max_suggestions)
+        return [{'text': w, 'doc_type': None, 'url': None} for w in word_suggestions]
     
     def get_facet_counts(self, 
                          results: Optional[List[Dict[str, Any]]] = None

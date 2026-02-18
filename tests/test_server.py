@@ -1065,9 +1065,10 @@ class TestSuggestEndpoint(ServerTestCase):
         status, headers, body = self.make_request('/suggest?q=python')
         data = json.loads(body)
         
-        # All suggestions should start with 'python'
+        # All suggestions should contain text starting with 'python'
         for suggestion in data['suggestions']:
-            self.assertTrue(suggestion.startswith('python'))
+            text = suggestion['text'] if isinstance(suggestion, dict) else suggestion
+            self.assertTrue(text.startswith('python'))
     
     def test_suggest_respects_limit(self):
         """GET /suggest should respect limit parameter."""

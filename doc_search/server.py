@@ -1243,6 +1243,10 @@ JAVASCRIPT = """
         return dropdown;
     }
 
+    const DOC_TYPE_ICONS = {
+        'html': '🌐', 'pdf': '📄', 'docx': '📝', 'xlsx': '📊',
+    };
+
     function showSuggestDropdown(suggestions, query) {
         if (!suggestions || suggestions.length === 0) {
             hideSuggestDropdown();
@@ -1254,19 +1258,24 @@ JAVASCRIPT = """
         const queryLower = query.toLowerCase();
         let html = '';
         suggestions.forEach((s, i) => {
+            // Support both string and object formats
+            const text = typeof s === 'string' ? s : (s.text || '');
+            const docType = typeof s === 'object' ? s.doc_type : null;
+            const icon = docType ? (DOC_TYPE_ICONS[docType] || '🔍') : '🔍';
+
             // Highlight the matching prefix
-            const sLower = s.toLowerCase();
+            const textLower = text.toLowerCase();
             let display;
-            const idx = sLower.indexOf(queryLower);
+            const idx = textLower.indexOf(queryLower);
             if (idx >= 0) {
-                display = escapeHtml(s.substring(0, idx))
-                    + '<mark>' + escapeHtml(s.substring(idx, idx + query.length)) + '</mark>'
-                    + escapeHtml(s.substring(idx + query.length));
+                display = escapeHtml(text.substring(0, idx))
+                    + '<mark>' + escapeHtml(text.substring(idx, idx + query.length)) + '</mark>'
+                    + escapeHtml(text.substring(idx + query.length));
             } else {
-                display = escapeHtml(s);
+                display = escapeHtml(text);
             }
-            html += '<div class="suggest-item" data-index="' + i + '" data-value="' + escapeHtml(s) + '">'
-                + '<span class="suggest-icon">🔍</span>'
+            html += '<div class="suggest-item" data-index="' + i + '" data-value="' + escapeHtml(text) + '">'
+                + '<span class="suggest-icon">' + icon + '</span>'
                 + '<span class="suggest-text">' + display + '</span>'
                 + '</div>';
         });
@@ -2889,8 +2898,15 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         try:
-            suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
-            self.send_json({'suggestions': suggestions})
+            # Use title suggestions if available (richer results)
+            if hasattr(self.engine, 'get_title_suggestions'):
+                title_results = self.engine.get_title_suggestions(prefix, limit)
+                self.send_json({'suggestions': title_results})
+            else:
+                suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
+                self.send_json({'suggestions': [
+                    {'text': s, 'doc_type': None, 'url': None} for s in suggestions
+                ]})
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     

@@ -320,6 +320,19 @@ def cmd_index(args):
         print(f"N-gram index saved to: {ngram_path}")
         print(f"N-gram index: {stats['term_count']} terms, {stats['ngram_count']} trigrams")
     
+    # Build and save title suggestion index
+    if not args.quiet:
+        print(f"\nBuilding title suggestion index...")
+    
+    from ..title_suggester import TitleSuggester
+    title_suggester = TitleSuggester()
+    title_suggester.build_from_pages(pages_dir, verbose=not args.quiet)
+    title_path = title_suggester.save(str(site_dir / 'titles'), compress=not args.no_compress)
+    
+    stats = title_suggester.get_stats()
+    print(f"Title suggestions saved to: {title_path}")
+    print(f"Title suggestions: {stats['total_entries']} entries")
+    
     return 0
 
 
