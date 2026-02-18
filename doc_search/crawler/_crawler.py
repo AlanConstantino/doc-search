@@ -181,6 +181,32 @@ class Crawler:
             with self._print_lock:
                 print(message)
     
+    def _log_checkpoint(self):
+        """Save checkpoint and log progress summary."""
+        with self.state._lock:
+            self.state.stats['last_checkpoint'] = time.time()
+            crawled = self.state.stats['pages_crawled']
+            docs = self.state.stats.get('docs_extracted', 0)
+            failed = self.state.stats['pages_failed']
+            pending = len(self.state.pending)
+            mb = self.state.stats['bytes_downloaded'] / 1024 / 1024
+            start = self.state.stats.get('start_time', time.time())
+        
+        elapsed = time.time() - start
+        rate = crawled / elapsed * 60 if elapsed > 0 else 0
+        
+        parts = [f"💾 Checkpoint: {crawled} pages"]
+        if docs:
+            parts.append(f"{docs} docs extracted")
+        if failed:
+            parts.append(f"{failed} failed")
+        parts.append(f"{pending} queued")
+        parts.append(f"{mb:.1f} MB")
+        parts.append(f"{rate:.0f} pages/min")
+        
+        self._log(f"  {' · '.join(parts)}")
+        self.state.save()
+
     def _update_stat(self, stat_name: str, value: int):
         """Update a crawl statistic (thread-safe)."""
         self.state.increment_stat(stat_name, value)
@@ -291,7 +317,7 @@ class Crawler:
                 last_modified = existing_meta.get('last_modified')
         
         # Fetch the page (Fetcher handles rate limiting, retries, decompression)
-        self._log(f"{self.state.get_progress(self.max_pages)} Crawling: {url}")
+        self._log(f"{self.state.get_progress(self.max_pages)} 🌐 Crawling: {url}")
         fetch_result = self._fetcher.fetch(url, etag=etag, last_modified=last_modified)
         
         # Handle 304 Not Modified
@@ -313,7 +339,7 @@ class Crawler:
         # Handle binary content (PDF, etc.) - use raw_bytes
         if fetch_result.raw_bytes is not None:
             if self.extract_docs and 'application/pdf' in content_type.lower():
-                self._log(f"  Detected PDF by Content-Type, extracting...")
+                self._log(f"  📄 Detected PDF by Content-Type, extracting...")
                 return self._process_pdf_content(url, fetch_result.raw_bytes, depth)
             
             self._log(f"  Skipping binary content: {content_type}")
@@ -359,10 +385,24 @@ class Crawler:
         
         Returns empty list (documents don't contain links to crawl).
         """
-        self._log(f"{self.state.get_progress(self.max_pages)} Extracting: {url}")
-        
         parsed = urlparse(url)
         path = parsed.path.lower()
+        
+        # Determine doc type emoji for logging
+        if path.endswith('.pdf'):
+            doc_emoji = '📄'
+            doc_label = 'PDF'
+        elif path.endswith('.docx'):
+            doc_emoji = '📝'
+            doc_label = 'Word'
+        elif path.endswith('.xlsx'):
+            doc_emoji = '📊'
+            doc_label = 'Excel'
+        else:
+            doc_emoji = '📎'
+            doc_label = 'Document'
+        
+        self._log(f"{self.state.get_progress(self.max_pages)} {doc_emoji} Extracting {doc_label}: {url}")
         
         if path.endswith('.pdf'):
             result = self._pdf_extractor.extract_from_url(url)
@@ -594,10 +634,7 @@ class Crawler:
             
             pages_since_checkpoint += 1
             if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
-                self._log(f"  Saving checkpoint...")
-                with self.state._lock:
-                    self.state.stats['last_checkpoint'] = time.time()
-                self.state.save()
+                self._log_checkpoint()
                 pages_since_checkpoint = 0
     
     def _crawl_parallel(self):
@@ -655,10 +692,7 @@ class Crawler:
                         pages_since_checkpoint += 1
                         
                         if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
-                            self._log(f"  Saving checkpoint...")
-                            with self.state._lock:
-                                self.state.stats['last_checkpoint'] = time.time()
-                            self.state.save()
+                            self._log_checkpoint()
                             pages_since_checkpoint = 0
                     
                     active_futures -= done_futures
