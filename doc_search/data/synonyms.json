@@ -1,0 +1,51 @@
+{
+  "_comment": "Synonym groups for search query expansion. Each group is a list of equivalent terms. Edit freely — changes take effect on next server/search start.",
+  "groups": [
+    ["string", "str", "text", "char"],
+    ["integer", "int", "number", "numeric"],
+    ["float", "double", "decimal", "real"],
+    ["boolean", "bool", "true", "false"],
+    ["list", "array", "sequence", "collection"],
+    ["dictionary", "dict", "map", "hashmap", "mapping"],
+    ["tuple", "pair", "record"],
+    ["set", "unique", "distinct"],
+
+    ["function", "method", "procedure", "routine", "subroutine"],
+    ["class", "object", "type", "struct", "structure"],
+    ["variable", "var", "attribute", "property", "field"],
+    ["constant", "const", "immutable", "readonly"],
+    ["parameter", "param", "argument", "arg"],
+    ["return", "output", "result"],
+
+    ["loop", "iteration", "iterate", "repeat"],
+    ["condition", "if", "conditional", "branch"],
+    ["exception", "error", "fault", "failure"],
+    ["try", "catch", "except", "handle"],
+
+    ["file", "stream", "io"],
+    ["read", "input", "load", "get"],
+    ["write", "output", "save", "put"],
+    ["print", "display", "show", "output"],
+
+    ["create", "make", "new", "initialize", "init"],
+    ["delete", "remove", "destroy", "drop"],
+    ["update", "modify", "change", "edit"],
+    ["find", "search", "lookup", "locate", "query"],
+    ["sort", "order", "arrange"],
+    ["filter", "select", "where"],
+
+    ["async", "asynchronous", "await", "concurrent"],
+    ["thread", "process", "parallel", "concurrent"],
+    ["lock", "mutex", "synchronize", "semaphore"],
+
+    ["http", "https", "web", "request"],
+    ["url", "uri", "link", "address"],
+    ["api", "endpoint", "interface"],
+    ["json", "data", "payload"],
+
+    ["documentation", "docs", "manual", "guide"],
+    ["tutorial", "guide", "howto", "walkthrough"],
+    ["example", "sample", "demo", "snippet"],
+    ["reference", "api", "spec", "specification"]
+  ]
+}

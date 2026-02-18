@@ -369,15 +369,15 @@ def cmd_search(args):
     synonyms_file = getattr(args, 'synonyms_file', None)
     if synonyms_file:
         try:
-            with open(synonyms_file, 'r') as f:
-                data = json.load(f)
-            # Expect {"groups": [["term1", "term2"], ["term3", "term4"]]}
-            custom_synonyms = [set(group) for group in data.get('groups', [])]
+            from ..synonyms import load_synonyms_file
+            custom_synonyms = load_synonyms_file(synonyms_file)
             if not args.quiet:
                 print(style_info(f"Loaded {len(custom_synonyms)} synonym groups from {synonyms_file}"))
         except (IOError, json.JSONDecodeError) as e:
             print(style_error(f"Error loading synonyms file: {e}"))
             return 1
+    
+    enable_synonyms = getattr(args, 'synonyms', True)
     
     if use_enhanced:
         engine = EnhancedSearchEngine.load(
@@ -385,7 +385,7 @@ def cmd_search(args):
             enable_spellcheck=True,
             enable_autocomplete=True,
             enable_facets=not getattr(args, 'no_facets', False),
-            enable_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None,
+            enable_synonyms=enable_synonyms,
             enable_symspell=not getattr(args, 'no_symspell', False),
             enable_ngram=not getattr(args, 'no_ngram', False),
             synonym_groups=custom_synonyms
@@ -409,7 +409,7 @@ def cmd_search(args):
             args.query, 
             top_k=args.limit,
             facet_filters=facet_filters if facet_filters else None,
-            expand_synonyms=getattr(args, 'synonyms', False) or custom_synonyms is not None
+            expand_synonyms=enable_synonyms
         )
         results = response['results']
         suggestion = response.get('suggestion')
@@ -529,6 +529,20 @@ def cmd_interactive(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
+    # Load custom synonyms if file provided
+    custom_synonyms = None
+    synonyms_file = getattr(args, 'synonyms_file', None)
+    if synonyms_file:
+        try:
+            from ..synonyms import load_synonyms_file
+            custom_synonyms = load_synonyms_file(synonyms_file)
+            print(style_info(f"Loaded {len(custom_synonyms)} synonym groups from {synonyms_file}"))
+        except (IOError, json.JSONDecodeError) as e:
+            print(style_error(f"Error loading synonyms file: {e}"))
+            return 1
+    
+    enable_synonyms = getattr(args, 'synonyms', True)
+    
     # Load enhanced engine with caching
     print(style_info(f"Loading index from: {index_path}"))
     cache_path = site_dir / '.cache.db'
@@ -536,8 +550,10 @@ def cmd_interactive(args):
         index_path,
         cache_size=128,
         cache_path=cache_path,
+        enable_synonyms=enable_synonyms,
         enable_symspell=not getattr(args, 'no_symspell', False),
-        enable_ngram=not getattr(args, 'no_ngram', False)
+        enable_ngram=not getattr(args, 'no_ngram', False),
+        synonym_groups=custom_synonyms
     )
     
     stats = engine.get_stats()
@@ -1527,7 +1543,20 @@ def cmd_serve(args):
         
         # Load index (use EnhancedSearchEngine for spellcheck, autocomplete, facets)
         print(style_info(f"Loading index from: {index_path}"))
-        enable_synonyms = getattr(args, 'synonyms', True)
+        
+        # Load custom synonyms if file provided
+        custom_synonyms = None
+        synonyms_file = getattr(args, 'synonyms_file', None)
+        if synonyms_file:
+            try:
+                from ..synonyms import load_synonyms_file
+                custom_synonyms = load_synonyms_file(synonyms_file)
+                print(style_info(f"Loaded {len(custom_synonyms)} synonym groups from {synonyms_file}"))
+            except (IOError, json.JSONDecodeError) as e:
+                print(style_error(f"Error loading synonyms file: {e}"))
+                return 1
+        
+        enable_synonyms = getattr(args, 'synonyms', True) if not hasattr(args, 'enable_synonyms') else args.enable_synonyms
         cache_size = getattr(args, 'cache_size', 128)
         cache_ttl_arg = getattr(args, 'cache_ttl', 0)
         cache_file = getattr(args, 'cache_file', None)
@@ -1548,6 +1577,7 @@ def cmd_serve(args):
             enable_synonyms=enable_synonyms,
             enable_symspell=not getattr(args, 'no_symspell', False),
             enable_ngram=not getattr(args, 'no_ngram', False),
+            synonym_groups=custom_synonyms,
             cache_size=cache_size,
             cache_ttl=cache_ttl,
             cache_path=cache_path

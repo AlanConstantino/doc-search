@@ -2,69 +2,46 @@
 Synonym expansion for query enhancement.
 
 Expands queries with related terms to improve recall.
+Defaults are loaded from data/synonyms.json (editable).
 """
 
+import json
+from pathlib import Path
 from typing import List, Dict, Set, Optional, Tuple
 from collections import defaultdict
 
 
+def load_default_synonyms() -> List[Set[str]]:
+    """Load default synonym groups from the bundled JSON file."""
+    json_path = Path(__file__).parent / 'data' / 'synonyms.json'
+    if json_path.exists():
+        try:
+            with open(json_path) as f:
+                data = json.load(f)
+            return [set(group) for group in data.get('groups', [])]
+        except (json.JSONDecodeError, IOError):
+            pass
+    # Fallback to empty if file is missing/broken
+    return []
+
+
+def load_synonyms_file(path: str) -> List[Set[str]]:
+    """Load synonym groups from a user-provided JSON file.
+    
+    Args:
+        path: Path to JSON file with {"groups": [["term1", "term2"], ...]}
+    
+    Returns:
+        List of synonym group sets
+    """
+    with open(path) as f:
+        data = json.load(f)
+    return [set(group) for group in data.get('groups', [])]
+
+
 # Built-in programming/technical synonym groups
-DEFAULT_SYNONYM_GROUPS = [
-    # Data types
-    {'string', 'str', 'text', 'char'},
-    {'integer', 'int', 'number', 'numeric'},
-    {'float', 'double', 'decimal', 'real'},
-    {'boolean', 'bool', 'true', 'false'},
-    {'list', 'array', 'sequence', 'collection'},
-    {'dictionary', 'dict', 'map', 'hashmap', 'mapping'},
-    {'tuple', 'pair', 'record'},
-    {'set', 'unique', 'distinct'},
-    
-    # Programming concepts
-    {'function', 'method', 'procedure', 'routine', 'subroutine'},
-    {'class', 'object', 'type', 'struct', 'structure'},
-    {'variable', 'var', 'attribute', 'property', 'field'},
-    {'constant', 'const', 'immutable', 'readonly'},
-    {'parameter', 'param', 'argument', 'arg'},
-    {'return', 'output', 'result'},
-    
-    # Control flow
-    {'loop', 'iteration', 'iterate', 'repeat'},
-    {'condition', 'if', 'conditional', 'branch'},
-    {'exception', 'error', 'fault', 'failure'},
-    {'try', 'catch', 'except', 'handle'},
-    
-    # I/O
-    {'file', 'stream', 'io'},
-    {'read', 'input', 'load', 'get'},
-    {'write', 'output', 'save', 'put'},
-    {'print', 'display', 'show', 'output'},
-    
-    # Common operations
-    {'create', 'make', 'new', 'initialize', 'init'},
-    {'delete', 'remove', 'destroy', 'drop'},
-    {'update', 'modify', 'change', 'edit'},
-    {'find', 'search', 'lookup', 'locate', 'query'},
-    {'sort', 'order', 'arrange'},
-    {'filter', 'select', 'where'},
-    
-    # Async/concurrency
-    {'async', 'asynchronous', 'await', 'concurrent'},
-    {'thread', 'process', 'parallel', 'concurrent'},
-    {'lock', 'mutex', 'synchronize', 'semaphore'},
-    
-    # Web/network
-    {'http', 'https', 'web', 'request'},
-    {'url', 'uri', 'link', 'address'},
-    {'api', 'endpoint', 'interface'},
-    {'json', 'data', 'payload'},
-    
-    # Documentation
-    {'documentation', 'docs', 'manual', 'guide'},
-    {'tutorial', 'guide', 'howto', 'walkthrough'},
-    {'example', 'sample', 'demo', 'snippet'},
-    {'reference', 'api', 'spec', 'specification'},
-]
+# Load defaults from JSON file (editable at data/synonyms.json)
+DEFAULT_SYNONYM_GROUPS = load_default_synonyms()
 
 
 class SynonymExpander:

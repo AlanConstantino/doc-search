@@ -176,8 +176,12 @@ def _add_search_parser(subparsers):
     # Enhanced features
     search_parser.add_argument('--basic', action='store_true',
                               help='Use basic search (disable enhanced features)')
-    search_parser.add_argument('--synonyms', action='store_true',
-                              help='Enable synonym expansion (built-in programming terms)')
+    search_parser.add_argument('--synonyms', action='store_true', default=True,
+                              dest='synonyms',
+                              help='Enable synonym expansion (default: on)')
+    search_parser.add_argument('--no-synonyms', action='store_false',
+                              dest='synonyms',
+                              help='Disable synonym expansion')
     search_parser.add_argument('--synonyms-file', metavar='FILE',
                               help='Load custom synonyms from JSON file')
     search_parser.add_argument('--no-facets', action='store_true',
@@ -245,6 +249,14 @@ def _add_interactive_parser(subparsers):
                                    help='Disable SymSpell suggestions (use basic spellcheck)')
     interactive_parser.add_argument('--no-ngram', action='store_true',
                                    help='Disable n-gram prefix/substring search')
+    interactive_parser.add_argument('--synonyms', action='store_true', default=True,
+                                   dest='synonyms',
+                                   help='Enable synonym expansion (default: on)')
+    interactive_parser.add_argument('--no-synonyms', action='store_false',
+                                   dest='synonyms',
+                                   help='Disable synonym expansion')
+    interactive_parser.add_argument('--synonyms-file', metavar='FILE',
+                                   help='Load custom synonyms from JSON file')
     interactive_parser.add_argument('--separate-paths', action='store_true',
                                    help='Use if site was crawled with --separate-paths')
     interactive_parser.set_defaults(func=cmd_interactive)
@@ -309,6 +321,8 @@ def _add_serve_parser(subparsers):
     serve_parser.add_argument('--disable-synonyms', action='store_false',
                              dest='enable_synonyms',
                              help='Disable synonym expansion toggle')
+    serve_parser.add_argument('--synonyms-file', metavar='FILE',
+                             help='Load custom synonyms from JSON file')
     serve_parser.add_argument('--cache-size', type=int, default=128,
                              help='Number of search queries to cache (default: 128, 0 to disable)')
     serve_parser.add_argument('--cache-ttl', type=float, default=0,

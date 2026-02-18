@@ -1946,7 +1946,7 @@ class TestCmdSearchArgParsing(unittest.TestCase):
         self.assertEqual(args.limit, 10)  # Default limit
         self.assertFalse(args.json)
         self.assertFalse(args.scores)
-        self.assertFalse(args.synonyms)
+        self.assertTrue(args.synonyms)
         self.assertFalse(args.quiet)
     
     def test_parse_search_limit(self):
@@ -4663,7 +4663,7 @@ class TestParserDefaultValues(unittest.TestCase):
         self.assertFalse(args.quiet)
         self.assertFalse(args.no_color)
         self.assertFalse(args.basic)
-        self.assertFalse(args.synonyms)
+        self.assertTrue(args.synonyms)
         self.assertFalse(args.no_facets)
         self.assertFalse(args.show_facets)
         self.assertFalse(args.separate_paths)
