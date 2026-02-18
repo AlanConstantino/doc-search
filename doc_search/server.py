@@ -699,46 +699,32 @@ a:hover {
 }
 
 /* Copy link button */
-.copy-link-btn {
+.result-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.result-action-btn {
     background: none;
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 0.875rem;
-    padding: 0.25rem;
-    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    padding: 0.2rem 0;
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    transition: color 0.15s;
-}
-
-.copy-link-btn:hover {
-    color: var(--accent);
-}
-
-.copy-link-btn.copied {
-    color: #22c55e;
-}
-
-.download-btn {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.875rem;
-    padding: 0.25rem;
-    margin-top: 0.5rem;
-    margin-left: 0.5rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
+    gap: 0.3rem;
     transition: color 0.15s;
     text-decoration: none;
 }
 
-.download-btn:hover {
+.result-action-btn:hover {
     color: var(--accent);
+}
+
+.result-action-btn.copied {
+    color: #22c55e;
 }
 
 /* HTML5 <mark> element for semantic highlighting */
@@ -1606,34 +1592,22 @@ JAVASCRIPT = """
     // Copy Link Button
     // ========================================================================
     function setupCopyLinkButtons() {
-        document.querySelectorAll('.result').forEach(result => {
-            // Add copy link button if not exists
-            if (!result.querySelector('.copy-link-btn')) {
-                const url = result.querySelector('.result-title')?.href;
-                if (url) {
-                    const btn = document.createElement('button');
-                    btn.className = 'copy-link-btn';
-                    btn.innerHTML = 'Copy link';
-                    btn.addEventListener('click', () => copyLink(btn, url));
-                    
-                    // Add after snippet or at end of result
-                    const snippet = result.querySelector('.result-snippet');
-                    if (snippet) {
-                        snippet.parentNode.insertBefore(btn, snippet.nextSibling);
-                    } else {
-                        result.appendChild(btn);
-                    }
-                }
-            }
+        document.querySelectorAll('.copy-link-btn').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', () => {
+                const url = btn.dataset.url || btn.closest('.result')?.querySelector('.result-title')?.href;
+                if (url) copyLink(btn, url);
+            });
         });
     }
     
     function copyLink(btn, url) {
         navigator.clipboard.writeText(url).then(() => {
-            btn.innerHTML = '✓ Copied!';
+            btn.innerHTML = '📋 Copied!';
             btn.classList.add('copied');
             setTimeout(() => {
-                btn.innerHTML = 'Copy link';
+                btn.innerHTML = '📋 Copy link';
                 btn.classList.remove('copied');
             }, 2000);
         }).catch(() => {
@@ -1644,10 +1618,10 @@ JAVASCRIPT = """
             input.select();
             document.execCommand('copy');
             document.body.removeChild(input);
-            btn.innerHTML = '✓ Copied!';
+            btn.innerHTML = '📋 Copied!';
             btn.classList.add('copied');
             setTimeout(() => {
-                btn.innerHTML = 'Copy link';
+                btn.innerHTML = '📋 Copy link';
                 btn.classList.remove('copied');
             }, 2000);
         });
@@ -1853,10 +1827,17 @@ JAVASCRIPT = """
         const docType = r.doc_type || 'html';
         const docTypeBadge = `<span class="doc-type-badge ${docType}">${docType}</span>`;
         
-        // Download button for file results (PDF, DOCX, XLSX)
+        // Action buttons: web pages get Visit + Copy, files get Download + Copy
         const isFile = r.url.startsWith('/files/');
-        const downloadUrl = isFile ? r.url.split('#')[0] + '?download=1' : '';
-        const downloadBtn = isFile ? `<a href="${escapeHtml(downloadUrl)}" class="download-btn" title="Download file">⬇ Download</a>` : '';
+        let actionsHtml = '<div class="result-actions">';
+        if (isFile) {
+            const downloadUrl = r.url.split('#')[0] + '?download=1';
+            actionsHtml += `<a href="${escapeHtml(downloadUrl)}" class="result-action-btn" title="Download file">⬇ Download</a>`;
+        } else {
+            actionsHtml += `<a href="${escapeHtml(r.url)}" class="result-action-btn" target="_blank" rel="noopener" title="Visit site">🔗 Visit</a>`;
+        }
+        actionsHtml += `<button class="result-action-btn copy-link-btn" data-url="${escapeHtml(r.original_url || r.url)}" title="Copy link">📋 Copy link</button>`;
+        actionsHtml += '</div>';
         
         return `
             <div class="result" data-url="${escapeHtml(r.url)}">
@@ -1869,8 +1850,9 @@ JAVASCRIPT = """
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
                     </span>
                 </div>
-                <div class="result-url">${escapeHtml(r.original_url || r.url)}${downloadBtn}</div>
+                <div class="result-url">${escapeHtml(r.original_url || r.url)}</div>
                 ${snippet}
+                ${actionsHtml}
             </div>
         `;
     }
@@ -2409,8 +2391,12 @@ def render_page(
                         {doc_type_badge}
                         {score_html}
                     </div>
-                    <div class="result-url">{escape(raw_url) if raw_url.startswith('file://') else url}{f'<a href="{url.split("#")[0]}?download=1" class="download-btn" title="Download file">⬇ Download</a>' if raw_url.startswith('file://') else ''}</div>
+                    <div class="result-url">{escape(raw_url) if raw_url.startswith('file://') else url}</div>
                     {snippet_html}
+                    <div class="result-actions">
+                        {'<a href="' + url.split('#')[0] + '?download=1" class="result-action-btn" title="Download file">⬇ Download</a>' if raw_url.startswith('file://') else '<a href="' + url + '" class="result-action-btn" target="_blank" rel="noopener" title="Visit site">🔗 Visit</a>'}
+                        <button class="result-action-btn copy-link-btn" data-url="{escape(raw_url) if raw_url.startswith('file://') else url}" title="Copy link">📋 Copy link</button>
+                    </div>
                 </div>
                 '''
             results_html += '</div>'
