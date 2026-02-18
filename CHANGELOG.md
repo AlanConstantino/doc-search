@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] - 2026-02-17
+
+### Fixed
+- Fix `KeyError: 'unique_terms'` crash when serving in multi-site mode (`--all`)
+- Use `.get()` with fallback for stats keys across `cmd_serve`, `cmd_stats`, server footer, and `/health` endpoint
+
+### Removed
+- Levenshtein automaton module and all integrations (1,569 lines removed)
+- Two-pass fuzzy fallback search architecture
+- `docs/SEARCH_ARCHITECTURE.md`
+
 ## [1.23.0] - 2026-02-17
 
 ### Added
