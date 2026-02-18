@@ -106,8 +106,10 @@ class Crawler:
         self.incremental = incremental
         self.ignore_robots = ignore_robots
         
-        # Initialize PDF extractor if document extraction is enabled
+        # Initialize document extractors if document extraction is enabled
         self._pdf_extractor = None
+        self._word_extractor = None
+        self._excel_extractor = None
         if self.extract_docs:
             from ..pdf_extractor import PDFExtractor
             self._pdf_extractor = PDFExtractor(
@@ -116,6 +118,10 @@ class Crawler:
                 auth=auth,
                 auth_token=auth_token
             )
+            from ..word_extractor import WordExtractor
+            self._word_extractor = WordExtractor()
+            from ..excel_extractor import ExcelExtractor
+            self._excel_extractor = ExcelExtractor()
         
         # Setup directories
         self.pages_dir = self.data_dir / 'pages'
@@ -338,9 +344,17 @@ class Crawler:
         
         # Handle binary content (PDF, etc.) - use raw_bytes
         if fetch_result.raw_bytes is not None:
-            if self.extract_docs and 'application/pdf' in content_type.lower():
-                self._log(f"  📄 Detected PDF by Content-Type, extracting...")
-                return self._process_pdf_content(url, fetch_result.raw_bytes, depth)
+            ct_lower = content_type.lower()
+            if self.extract_docs:
+                if 'application/pdf' in ct_lower:
+                    self._log(f"  📄 Detected PDF by Content-Type, extracting...")
+                    return self._process_pdf_content(url, fetch_result.raw_bytes, depth)
+                elif 'wordprocessingml' in ct_lower or 'application/vnd.openxmlformats-officedocument.wordprocessingml' in ct_lower or url.lower().endswith('.docx'):
+                    self._log(f"  📝 Detected Word doc by Content-Type, extracting...")
+                    return self._process_docx_content(url, fetch_result.raw_bytes, depth)
+                elif 'spreadsheetml' in ct_lower or 'application/vnd.openxmlformats-officedocument.spreadsheetml' in ct_lower or url.lower().endswith('.xlsx'):
+                    self._log(f"  📊 Detected Excel file by Content-Type, extracting...")
+                    return self._process_xlsx_content(url, fetch_result.raw_bytes, depth)
             
             self._log(f"  Skipping binary content: {content_type}")
             self.state.increment_stat('pages_skipped')
@@ -436,7 +450,11 @@ class Crawler:
             self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
             return []
         
-        # DOCX/XLSX extraction not yet implemented
+        if path.endswith('.docx'):
+            return self._process_docx_url(url, depth)
+        elif path.endswith('.xlsx'):
+            return self._process_xlsx_url(url, depth)
+        
         self._log(f"  Skipping unsupported document type: {path}")
         self.state.increment_stat('pages_skipped')
         return []
@@ -482,6 +500,131 @@ class Crawler:
         headings_count = len(headings)
         self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
         return []
+    
+    def _download_to_temp(self, url: str, content_bytes: bytes = None, suffix: str = '') -> 'Path':
+        """Download a URL to a temp file, or write bytes to one. Returns Path."""
+        import tempfile
+        if content_bytes:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(content_bytes)
+            tmp.close()
+            return Path(tmp.name)
+        else:
+            import urllib.request
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.close()
+            urllib.request.urlretrieve(url, tmp.name)
+            return Path(tmp.name)
+    
+    def _process_docx_url(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Download and extract a Word document from a URL."""
+        try:
+            tmp_path = self._download_to_temp(url, suffix='.docx')
+            return self._extract_docx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  Word doc extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"DOCX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _process_docx_content(self, url: str, content_bytes: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Extract a Word document from bytes (Content-Type detection)."""
+        try:
+            tmp_path = self._download_to_temp(url, content_bytes=content_bytes, suffix='.docx')
+            return self._extract_docx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  Word doc extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"DOCX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _extract_docx(self, url: str, tmp_path: 'Path', depth: int) -> List[Tuple[str, int]]:
+        """Extract Word doc from a temp file path and save page data."""
+        import os
+        try:
+            result = self._word_extractor.extract(tmp_path)
+            if not result or (len(result) == 1 and result[0].get('error')):
+                error = result[0]['error'] if result else 'No content extracted'
+                self._log(f"  Word doc extraction failed: {error}")
+                self.state.record_error(url, 'parse', f"DOCX: {error}")
+                self.state.mark_failed(url, depth)
+                return []
+            
+            doc = result[0]
+            headings = doc.get('headings', [])
+            page_data = build_document_data(
+                url=url,
+                title=doc.get('title', '') or Path(urlparse(url).path).stem,
+                text=doc.get('text', ''),
+                depth=depth,
+                doc_type='docx',
+                headings=headings,
+            )
+            self._processor.save_page(url, page_data)
+            
+            self.state.increment_stat('pages_crawled')
+            self.state.increment_stat('docs_extracted')
+            self.state.increment_stat('docs_docx')
+            
+            self._log(f"  Extracted {len(doc.get('text', ''))} chars, {len(headings)} headings")
+            return []
+        finally:
+            os.unlink(tmp_path)
+    
+    def _process_xlsx_url(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Download and extract an Excel file from a URL."""
+        try:
+            tmp_path = self._download_to_temp(url, suffix='.xlsx')
+            return self._extract_xlsx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  Excel extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"XLSX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _process_xlsx_content(self, url: str, content_bytes: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Extract an Excel file from bytes (Content-Type detection)."""
+        try:
+            tmp_path = self._download_to_temp(url, content_bytes=content_bytes, suffix='.xlsx')
+            return self._extract_xlsx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  Excel extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"XLSX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _extract_xlsx(self, url: str, tmp_path: 'Path', depth: int) -> List[Tuple[str, int]]:
+        """Extract Excel file from a temp file path and save page data."""
+        import os
+        try:
+            documents = self._excel_extractor.extract(tmp_path)
+            if not documents:
+                self._log(f"  Excel extraction: no sheets extracted")
+                return []
+            
+            for doc in documents:
+                if doc.get('error'):
+                    self._log(f"  Excel sheet error: {doc['error']}")
+                    continue
+                
+                page_data = build_document_data(
+                    url=doc.get('url', url),
+                    title=doc.get('title', '') or Path(urlparse(url).path).stem,
+                    text=doc.get('text', ''),
+                    depth=depth,
+                    doc_type='xlsx',
+                    headings=doc.get('headings', []),
+                )
+                self._processor.save_page(doc.get('url', url), page_data)
+                
+                self.state.increment_stat('pages_crawled')
+                self.state.increment_stat('docs_extracted')
+                self.state.increment_stat('docs_xlsx')
+            
+            self._log(f"  Extracted {len(documents)} sheets")
+            return []
+        finally:
+            os.unlink(tmp_path)
     
     # -------------------------------------------------------------------------
     # Crawl execution (queue management and parallel coordination)
