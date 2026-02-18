@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] - 2026-02-18
+
+### Added
+- **Doc type badges in interactive terminal** — all search results now show `[WEB]`, `[PDF]`, `[DOCX]`, or `[XLSX]` badges, color-coded (red/green/blue/dim)
+- **File serving endpoint** (`/files/`) — local documents (PDF, Word, Excel) can now be opened from the web UI; browsers previously blocked `file://` URLs
+- **Text normalization for PDF/Word snippets** — `normalize_document_text()` cleans up extraction artifacts (broken lines, soft hyphens, unicode whitespace) for better snippet display
+- **Content type indicators in crawl logs** — emojis show what's being processed: 🌐 web, 📄 PDF, 📝 Word, 📊 Excel
+- **Informative checkpoint messages** — replaces bare "Saving checkpoint..." with progress summary (pages, docs, queue, MB, rate)
+- Updated `:type` filter to accept all document types with aliases (`web`, `word`, `excel`)
+
+### Fixed
+- File preview links in web UI now open correctly (PDF inline, Word/Excel download)
+- PDF and Word document snippets are now properly formatted in both web UI and terminal
+
 ## [1.24.0] - 2026-02-17
 
 ### Fixed
