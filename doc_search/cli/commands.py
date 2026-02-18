@@ -194,14 +194,28 @@ def cmd_crawl(args):
     # Start crawling
     stats = crawler.crawl(resume=not args.fresh)
     
-    # Count total pages on disk (not just this crawl run) for accurate metadata
+    # Count total pages and doc types on disk for accurate metadata
     pages_dir = site_dir / 'pages'
-    total_pages = len(list(pages_dir.glob('*.json'))) if pages_dir.exists() else stats.get('pages_crawled', 0)
+    total_pages = 0
+    doc_type_counts = {}
+    if pages_dir.exists():
+        for page_file in pages_dir.glob('*.json'):
+            total_pages += 1
+            try:
+                with open(page_file) as pf:
+                    page_data = json.load(pf)
+                doc_type = page_data.get('doc_type', 'html')
+            except (json.JSONDecodeError, IOError):
+                doc_type = 'html'
+            doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
+    else:
+        total_pages = stats.get('pages_crawled', 0)
     
     # Save site metadata
     metadata = {
         'url': args.url,
-        'stats': {**stats, 'pages_crawled': total_pages}
+        'stats': {**stats, 'pages_crawled': total_pages},
+        'doc_type_counts': doc_type_counts
     }
     with open(site_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
@@ -814,6 +828,22 @@ def cmd_stats(args):
     return 0
 
 
+def _scan_doc_type_counts(pages_dir: Path) -> dict:
+    """Scan page files to build doc_type_counts. Slow but accurate."""
+    type_counts = {}
+    if not pages_dir.exists():
+        return type_counts
+    for page_file in pages_dir.glob('*.json'):
+        try:
+            with open(page_file) as pf:
+                page_data = json.load(pf)
+            doc_type = page_data.get('doc_type', 'html')
+        except (json.JSONDecodeError, IOError):
+            doc_type = 'html'
+        type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
+    return type_counts
+
+
 def cmd_list(args):
     """List all crawled sites."""
     if not DEFAULT_DATA_DIR.exists():
@@ -824,6 +854,8 @@ def cmd_list(args):
     if not sites:
         print("No sites crawled yet.")
         return 0
+    
+    refresh = getattr(args, 'refresh', False)
     
     print(f"Crawled sites ({len(sites)}):")
     print()
@@ -838,22 +870,26 @@ def cmd_list(args):
                 metadata = json.load(f)
             url = metadata.get('url') or metadata.get('source') or metadata.get('site_name') or 'Unknown'
             
-            # Count doc types from page files on disk
             pages_dir = site_dir / 'pages'
-            type_counts = {}
-            total_pages = 0
-            if pages_dir.exists():
-                for page_file in pages_dir.glob('*.json'):
-                    total_pages += 1
-                    try:
-                        with open(page_file) as pf:
-                            page_data = json.load(pf)
-                        doc_type = page_data.get('doc_type', 'html')
-                        type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
-                    except (json.JSONDecodeError, IOError):
-                        type_counts['html'] = type_counts.get('html', 0) + 1
+            
+            if refresh:
+                # Rebuild doc type counts from page files
+                type_counts = _scan_doc_type_counts(pages_dir)
+                total_pages = sum(type_counts.values()) if type_counts else 0
+                # Update metadata cache
+                metadata['doc_type_counts'] = type_counts
+                with open(metadata_file, 'w') as f:
+                    json.dump(metadata, f, indent=2)
             else:
-                total_pages = metadata.get('stats', {}).get('pages_crawled', 0)
+                # Use cached doc_type_counts from metadata (fast path)
+                type_counts = metadata.get('doc_type_counts', {})
+                if type_counts:
+                    total_pages = sum(type_counts.values())
+                elif pages_dir.exists():
+                    # Fallback: just count files (no JSON parsing)
+                    total_pages = sum(1 for _ in pages_dir.glob('*.json'))
+                else:
+                    total_pages = metadata.get('stats', {}).get('pages_crawled', 0)
             
             # Build display string
             is_files = metadata.get('type') == 'files'
@@ -1233,6 +1269,18 @@ def cmd_index_files(args):
     if errors:
         print(style_error(f"Errors: {errors}"))
     
+    # Count doc types from extracted pages for fast listing
+    doc_type_counts = {}
+    if pages_dir.exists():
+        for page_file in pages_dir.glob('*.json'):
+            try:
+                with open(page_file) as pf:
+                    page_data = json.load(pf)
+                doc_type = page_data.get('doc_type', 'unknown')
+            except (json.JSONDecodeError, IOError):
+                doc_type = 'unknown'
+            doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
+    
     # Save metadata
     metadata = {
         'source': str(directory.absolute()),
@@ -1243,7 +1291,8 @@ def cmd_index_files(args):
             'docs_extracted': docs_extracted,
             'errors': errors,
             'extensions': list(extensions)
-        }
+        },
+        'doc_type_counts': doc_type_counts
     }
     with open(site_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)

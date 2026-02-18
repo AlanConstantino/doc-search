@@ -264,6 +264,8 @@ def _add_stats_parser(subparsers):
 def _add_list_parser(subparsers):
     """Add the list command parser."""
     list_parser = subparsers.add_parser('list', help='List crawled sites')
+    list_parser.add_argument('--refresh', action='store_true',
+                             help='Rebuild doc type counts from page files (slow, updates metadata cache)')
     list_parser.set_defaults(func=cmd_list)
 
 
