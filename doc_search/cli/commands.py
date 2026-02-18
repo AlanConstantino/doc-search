@@ -194,10 +194,14 @@ def cmd_crawl(args):
     # Start crawling
     stats = crawler.crawl(resume=not args.fresh)
     
+    # Count total pages on disk (not just this crawl run) for accurate metadata
+    pages_dir = site_dir / 'pages'
+    total_pages = len(list(pages_dir.glob('*.json'))) if pages_dir.exists() else stats.get('pages_crawled', 0)
+    
     # Save site metadata
     metadata = {
         'url': args.url,
-        'stats': stats
+        'stats': {**stats, 'pages_crawled': total_pages}
     }
     with open(site_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
