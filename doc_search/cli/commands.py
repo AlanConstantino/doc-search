@@ -1373,7 +1373,29 @@ def cmd_index_files(args):
         json.dump(metadata, f, indent=2)
     
     print(f"\nDocuments saved to: {pages_dir}")
-    print(f"Run 'doc_search index {site_dir}' to build the search index")
+    
+    # Automatically build the search index
+    print(f"\nBuilding search index...")
+    
+    import argparse
+    index_args = argparse.Namespace(
+        site_dir=str(site_dir),
+        k1=1.5,
+        b=0.75,
+        no_compress=False,
+        no_stemming=False,
+        no_symspell=False,
+        no_ngram=False,
+        separate_paths=False,
+        parser='dom',
+        full=True,  # Always full rebuild for file indexing
+        quiet=quiet,
+    )
+    
+    result = cmd_index(index_args)
+    if result != 0:
+        print(style_error("Failed to build search index"))
+        return result
     
     return 0
 
