@@ -1407,6 +1407,11 @@ JAVASCRIPT = """
     }
     
     function handleKeyboardNavigation(e) {
+        // Don't navigate results while suggest dropdown is open
+        if (suggestDropdown && suggestDropdown.classList.contains('visible')) {
+            return;
+        }
+        
         const results = getResultElements();
         
         // Cmd+F / Ctrl+F for search within results
