@@ -831,7 +831,7 @@ def cmd_list(args):
         if metadata_file.exists():
             with open(metadata_file) as f:
                 metadata = json.load(f)
-            url = metadata.get('url', 'Unknown')
+            url = metadata.get('url') or metadata.get('source') or metadata.get('site_name') or 'Unknown'
             
             # Count doc types from page files on disk
             pages_dir = site_dir / 'pages'
@@ -851,14 +851,16 @@ def cmd_list(args):
                 total_pages = metadata.get('stats', {}).get('pages_crawled', 0)
             
             # Build display string
+            is_files = metadata.get('type') == 'files'
+            label = 'docs' if is_files else 'pages'
             if len(type_counts) > 1:
                 type_parts = []
                 for dtype in sorted(type_counts.keys()):
                     count = type_counts[dtype]
                     type_parts.append(f"{count} {dtype}")
-                type_str = f"{total_pages} pages ({', '.join(type_parts)})"
+                type_str = f"{total_pages} {label} ({', '.join(type_parts)})"
             else:
-                type_str = f"{total_pages} pages"
+                type_str = f"{total_pages} {label}"
             
             print(f"  {site_dir.name}: {url} ({type_str})")
         else:
