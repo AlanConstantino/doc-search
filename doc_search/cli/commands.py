@@ -1112,6 +1112,7 @@ def cmd_index_files(args):
     
     files_found = 0
     docs_extracted = 0
+    docs_by_type = {}  # Track per-type counts: {'pdf': N, 'docx': N, 'xlsx': N}
     errors = 0
     
     # Collect files
@@ -1230,6 +1231,8 @@ def cmd_index_files(args):
                     json.dump(doc_json, f, ensure_ascii=False, indent=2)
                 
                 docs_extracted += 1
+                doc_type_key = ext.lstrip('.')
+                docs_by_type[doc_type_key] = docs_by_type.get(doc_type_key, 0) + 1
                 
                 if not quiet:
                     print(f"  {_e('check')} {doc['title'][:60]}")
@@ -1265,7 +1268,15 @@ def cmd_index_files(args):
     print()
     processed = files_found - skipped
     print(f"Processed {processed} files, skipped {skipped} unchanged")
-    print(f"Extracted {docs_extracted} documents")
+    if docs_by_type:
+        type_labels = {'pdf': 'PDFs', 'docx': 'Word docs', 'xlsx': 'Excel sheets'}
+        type_parts = []
+        for dtype in sorted(docs_by_type.keys()):
+            label = type_labels.get(dtype, dtype)
+            type_parts.append(f"{docs_by_type[dtype]} {label}")
+        print(f"Extracted {docs_extracted} documents ({', '.join(type_parts)})")
+    else:
+        print(f"Extracted {docs_extracted} documents")
     if errors:
         print(style_error(f"Errors: {errors}"))
     

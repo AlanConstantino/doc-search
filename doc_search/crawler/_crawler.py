@@ -430,6 +430,7 @@ class Crawler:
             # Update stats
             self.state.increment_stat('pages_crawled')
             self.state.increment_stat('docs_extracted')
+            self.state.increment_stat('docs_pdf')
             
             headings_count = len(headings)
             self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
@@ -476,6 +477,7 @@ class Crawler:
         # Update stats
         self.state.increment_stat('pages_crawled')
         self.state.increment_stat('docs_extracted')
+        self.state.increment_stat('docs_pdf')
         
         headings_count = len(headings)
         self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
@@ -592,6 +594,20 @@ class Crawler:
         
         self._log(f"\nCrawl complete!")
         self._log(f"  Pages crawled: {stats['pages_crawled']}")
+        
+        # Show document extraction breakdown
+        docs_extracted = stats.get('docs_extracted', 0)
+        if docs_extracted > 0:
+            doc_parts = []
+            for key, label in [('docs_pdf', 'PDFs'), ('docs_docx', 'Word docs'), ('docs_xlsx', 'Excel sheets')]:
+                count = stats.get(key, 0)
+                if count > 0:
+                    doc_parts.append(f"{count} {label}")
+            if doc_parts:
+                self._log(f"  Documents extracted: {docs_extracted} ({', '.join(doc_parts)})")
+            else:
+                self._log(f"  Documents extracted: {docs_extracted}")
+        
         if self.incremental and stats.get('pages_unchanged', 0) > 0:
             self._log(f"  Pages unchanged: {stats['pages_unchanged']}")
         self._log(f"  Pages skipped: {stats['pages_skipped']}")
