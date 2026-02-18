@@ -547,9 +547,10 @@ def cmd_interactive(args):
     print(style_info("  Filters: :type pdf|web|docx|xlsx|clear  :cat <category>|clear  :filters"))
     if READLINE_AVAILABLE:
         print(style_info("  History: Use ↑/↓ arrow keys to cycle through previous commands"))
+        print(style_info("  Tab: Press Tab for autocomplete suggestions"))
     print()
     
-    # Set up command history with readline
+    # Set up command history and tab completion with readline
     if READLINE_AVAILABLE:
         history_file = site_dir / '.history'
         try:
@@ -558,6 +559,31 @@ def cmd_interactive(args):
             pass  # No history file yet, that's fine
         readline.set_history_length(100)  # Keep last 100 commands
         atexit.register(readline.write_history_file, history_file)
+        
+        # Tab completion using autocomplete suggestions
+        if hasattr(engine, 'get_autocomplete_suggestions'):
+            def completer(text, state):
+                if state == 0:
+                    # Get the full input line and cursor position
+                    line = readline.get_line_buffer()
+                    # Use the last word as the prefix for completion
+                    words = line.split()
+                    prefix = words[-1] if words else ''
+                    if prefix:
+                        suggestions = engine.get_autocomplete_suggestions(prefix, max_suggestions=15)
+                        # Build completions: replace just the last word
+                        completer._matches = [s + ' ' for s in suggestions if s.startswith(prefix)]
+                    else:
+                        completer._matches = []
+                try:
+                    return completer._matches[state]
+                except IndexError:
+                    return None
+            
+            completer._matches = []
+            readline.set_completer(completer)
+            readline.set_completer_delims(' \t')
+            readline.parse_and_bind('tab: complete')
     
     prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
     page_prompt = f"{Colors.BRIGHT_CYAN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
