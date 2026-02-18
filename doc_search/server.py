@@ -2407,8 +2407,15 @@ class SearchHandler(BaseHTTPRequestHandler):
         """Handle a connection, suppressing broken pipe errors."""
         try:
             super().handle()
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # Client disconnected mid-request (common with instant search)
+    
+    def finish(self):
+        """Finish a connection, suppressing broken pipe errors."""
+        try:
+            super().finish()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # Client already disconnected
     
     def send_html(self, content: str, status: int = 200):
         """Send HTML response."""
@@ -2419,7 +2426,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', len(body))
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # Client disconnected (e.g., browser aborted request)
     
     def send_json(self, data: dict, status: int = 200):
@@ -2431,7 +2438,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', len(body))
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # Client disconnected (e.g., browser aborted request)
     
     @staticmethod
@@ -2891,7 +2898,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                     if not chunk:
                         break
                     self.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # Client disconnected
         except IOError as e:
             self.send_error(500, f"Error reading file: {e}")
