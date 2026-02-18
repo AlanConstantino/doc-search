@@ -2403,23 +2403,36 @@ class SearchHandler(BaseHTTPRequestHandler):
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
             print(f"[{timestamp}] {self.address_string()} - {message}")
     
+    def handle(self):
+        """Handle a connection, suppressing broken pipe errors."""
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected mid-request (common with instant search)
+    
     def send_html(self, content: str, status: int = 200):
         """Send HTML response."""
-        body = content.encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(body))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = content.encode('utf-8')
+            self.send_response(status)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected (e.g., browser aborted request)
     
     def send_json(self, data: dict, status: int = 200):
         """Send JSON response."""
-        body = json.dumps(data).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', len(body))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data).encode('utf-8')
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected (e.g., browser aborted request)
     
     @staticmethod
     def file_url_to_serve_url(url: str) -> str:
@@ -2878,6 +2891,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                     if not chunk:
                         break
                     self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected
         except IOError as e:
             self.send_error(500, f"Error reading file: {e}")
 
