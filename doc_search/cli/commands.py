@@ -530,7 +530,7 @@ def cmd_interactive(args):
     print()
     print(style_info("  Type a query and press Enter. Empty line or Ctrl+C to exit."))
     print(style_info("  Tip: Use \"quotes\" for phrase search"))
-    print(style_info("  Filters: :type pdf|html|clear  :cat <category>|clear  :filters"))
+    print(style_info("  Filters: :type pdf|web|docx|xlsx|clear  :cat <category>|clear  :filters"))
     if READLINE_AVAILABLE:
         print(style_info("  History: Use ↑/↓ arrow keys to cycle through previous commands"))
     print()
@@ -651,11 +651,16 @@ def cmd_interactive(args):
             if filter_val == 'clear':
                 type_filter = None
                 print(style_info("  Type filter cleared"))
-            elif filter_val in ('pdf', 'html'):
-                type_filter = filter_val
-                print(style_success(f"  Type filter set to: {type_filter}"))
             else:
-                print(style_error(f"  Unknown type: {filter_val} (use pdf, html, or clear)"))
+                # Normalize aliases
+                type_aliases = {'web': 'html', 'word': 'docx', 'excel': 'xlsx'}
+                normalized = type_aliases.get(filter_val, filter_val)
+                if normalized in ('pdf', 'html', 'docx', 'xlsx'):
+                    type_filter = normalized
+                    display_labels = {'html': 'web', 'pdf': 'pdf', 'docx': 'docx', 'xlsx': 'xlsx'}
+                    print(style_success(f"  Type filter set to: {display_labels[type_filter]}"))
+                else:
+                    print(style_error(f"  Unknown type: {filter_val} (use pdf, html/web, docx/word, xlsx/excel, or clear)"))
             # Re-run last query with new filter if we have one
             if last_query:
                 user_input = last_query

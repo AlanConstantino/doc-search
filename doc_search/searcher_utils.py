@@ -12,7 +12,7 @@ import re
 from functools import lru_cache
 from typing import List, Dict, Any, Optional, Set, FrozenSet, Pattern
 
-from .utils import highlight_match, style_title, style_url, style_score, style_number, style_info, style_success
+from .utils import Colors, highlight_match, style_title, style_url, style_score, style_number, style_info, style_success
 from .constants import (
     DEFAULT_SNIPPET_LENGTH, MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH,
     SNIPPET_WINDOW_WORDS, PHRASE_MATCH_BONUS, TERM_DIVERSITY_BONUS
@@ -323,12 +323,31 @@ def format_results(
                 snippet
             )
         
+        # Doc type badge for all result types
+        doc_type = result.get('doc_type', 'html') or 'html'
+        type_colors = {
+            'pdf': Colors.RED,
+            'xlsx': Colors.GREEN,
+            'docx': Colors.BLUE,
+            'html': Colors.DIM,
+        }
+        type_labels = {
+            'pdf': 'PDF',
+            'xlsx': 'XLSX',
+            'docx': 'DOCX',
+            'html': 'WEB',
+        }
+        color = type_colors.get(doc_type, Colors.YELLOW)
+        label = type_labels.get(doc_type, doc_type.upper())
+        type_badge = f" {color}[{label}]{Colors.RESET}"
+        type_badge_plain = f" [{label}]"
+        
         # Build the result lines with colors
         if colorize_output:
             if show_scores:
-                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}")
+                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}{type_badge}")
             else:
-                lines.append(f"{style_number(i)} {style_title(title)}")
+                lines.append(f"{style_number(i)} {style_title(title)}{type_badge}")
             
             lines.append(f"   {style_url(url)}")
             
@@ -337,9 +356,9 @@ def format_results(
         else:
             # Plain text output
             if show_scores:
-                lines.append(f"{i}. [{score:.4f}] {title}")
+                lines.append(f"{i}. [{score:.4f}] {title}{type_badge_plain}")
             else:
-                lines.append(f"{i}. {title}")
+                lines.append(f"{i}. {title}{type_badge_plain}")
             
             lines.append(f"   {url}")
             
