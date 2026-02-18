@@ -156,7 +156,6 @@ class MultiSiteSearchEngine:
                 enable_synonyms=False,
                 enable_symspell=False,
                 enable_ngram=False,
-                enable_levenshtein=False,
             )
         return self._engines[key]
     

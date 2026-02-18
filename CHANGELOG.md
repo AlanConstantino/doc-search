@@ -51,21 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.21.0] - 2026-02-11
 
 ### Added
-- **Two-pass search architecture** with Levenshtein fuzzy fallback (#186)
-  - Pass 1 (Precision): BM25 with original terms + wildcards + synonyms
-  - Pass 2 (Recall Fallback): Levenshtein expansion only if Pass 1 < 5 results
-  - Modeled after Confluence/Lucene search behavior
-
-- **Levenshtein automaton** for efficient fuzzy matching
-  - NFA-based automaton accepts strings within edit distance
-  - Trie traversal for vocabulary matching with early termination
-  - `levenshtein_distance()` and `damerau_levenshtein_distance()` functions
-
-- **Smart fuzzy matching rules**
-  - Skip: quotes (exact intent), wildcards, terms < 4 chars
-  - Skip: code/IDs (x86_64, sha256, h264, 0x1f, etc.)
-  - Distance caps: 4-6 chars → max dist 1, 7+ chars → max dist 2
-  - Weighted scoring: dist 1 → 0.35, dist 2 → 0.15
 
 - **SymSpell "Did you mean?" suggestions**
   - Generated before search, displayed for user to click
