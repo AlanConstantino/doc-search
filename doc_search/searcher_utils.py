@@ -139,6 +139,38 @@ def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
 _SNIPPET_WORD_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]*\b')
 
 
+def normalize_document_text(text: str) -> str:
+    """Normalize extracted document text for better snippet display.
+    
+    Cleans up common artifacts from PDF and Word extraction:
+    - Joins broken lines (mid-sentence line breaks from PDF column layout)
+    - Collapses excessive whitespace
+    - Removes orphaned bullets/numbers from broken formatting
+    - Normalizes unicode whitespace
+    """
+    if not text:
+        return text
+    
+    # Normalize unicode whitespace (non-breaking spaces, etc.)
+    text = re.sub(r'[\xa0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000]', ' ', text)
+    
+    # Remove soft hyphens
+    text = text.replace('\xad', '')
+    
+    # Collapse runs of whitespace first (preserve newline structure)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Join lines that are mid-sentence (single newline between lowercase chars)
+    # But preserve paragraph breaks (double newlines)
+    text = re.sub(r'(?<=[a-z,;:\-]) *\n(?!\n) *(?=[a-z])', ' ', text)
+    
+    # Clean up spaces around newlines
+    text = re.sub(r' *\n *', '\n', text)
+    
+    return text.strip()
+
+
 def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]], 
                        snippet_length: int = DEFAULT_SNIPPET_LENGTH) -> str:
     """

@@ -23,7 +23,7 @@ from .ngram import NGramIndex
 from .reranker import Reranker, RerankConfig, RerankMetrics
 from .searcher_utils import (
     highlight_terms, highlight_terms_ansi, find_best_snippet,
-    format_results, check_phrase_match
+    format_results, check_phrase_match, normalize_document_text
 )
 
 
@@ -562,7 +562,9 @@ class SearchEngine:
             # Generate better snippet
             snippet = r.get('description', '')
             if page_text:
-                snippet = find_best_snippet(page_text, terms_set, phrases, snippet_length)
+                # Normalize text for cleaner snippets (fixes PDF/Word artifacts)
+                normalized_text = normalize_document_text(page_text)
+                snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
             
             # Highlight terms if requested
             if highlight and snippet:
@@ -1269,7 +1271,9 @@ class EnhancedSearchEngine(SearchEngine):
             # Generate snippet
             snippet = r.get('description', '')
             if page_text:
-                snippet = find_best_snippet(page_text, terms_set, phrases, snippet_length)
+                # Normalize text for cleaner snippets (fixes PDF/Word artifacts)
+                normalized_text = normalize_document_text(page_text)
+                snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
             
             if highlight and snippet:
                 snippet = highlight_terms(snippet, terms_set)

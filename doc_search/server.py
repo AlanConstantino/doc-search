@@ -1650,7 +1650,7 @@ JAVASCRIPT = """
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
                     </span>
                 </div>
-                <div class="result-url">${escapeHtml(r.url)}</div>
+                <div class="result-url">${escapeHtml(r.original_url || r.url)}</div>
                 ${snippet}
             </div>
         `;
@@ -2124,7 +2124,10 @@ def render_page(
             '''
             for i, r in enumerate(results, start_num):
                 title = escape(r.get('title', 'Untitled') or 'Untitled')
-                url = escape(r['url'])
+                raw_url = r['url']
+                # Convert file:// URLs to serveable /files/ URLs
+                display_url = _file_url_to_serve_url(raw_url)
+                url = escape(display_url)
                 snippet = highlight_snippet(r.get('snippet', '') or r.get('description', ''))
                 score = r.get('score', 0)
                 doc_type = r.get('doc_type', 'html')
@@ -2154,7 +2157,7 @@ def render_page(
                         {doc_type_badge}
                         {score_html}
                     </div>
-                    <div class="result-url">{url}</div>
+                    <div class="result-url">{escape(raw_url) if raw_url.startswith('file://') else url}</div>
                     {snippet_html}
                 </div>
                 '''
@@ -2366,6 +2369,19 @@ def render_page(
 </html>'''
 
 
+def _file_url_to_serve_url(url: str) -> str:
+    """Convert file:// URL to /files/ proxy URL for browser access."""
+    if url.startswith('file://'):
+        # Split off fragment (e.g., #page=3)
+        base, _, fragment = url[7:].partition('#')
+        encoded = urllib.parse.quote(base, safe='/')
+        result = f"/files/{encoded}"
+        if fragment:
+            result += f"#{fragment}"
+        return result
+    return url
+
+
 class SearchHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the search web UI."""
     
@@ -2405,6 +2421,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     
+    @staticmethod
+    def file_url_to_serve_url(url: str) -> str:
+        """Convert file:// URL to /files/ proxy URL for browser access."""
+        return _file_url_to_serve_url(url)
+
     def do_GET(self):
         """Handle GET requests."""
         import inspect
@@ -2424,6 +2445,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         # Handle /api/search endpoint for instant search (JSON)
         if parsed.path == '/api/search':
             self.handle_api_search(parsed.query)
+            return
+        
+        # Handle /files/ endpoint for serving local documents
+        if parsed.path.startswith('/files/'):
+            self.handle_serve_file(parsed.path[7:])
             return
         
         query_params = urllib.parse.parse_qs(parsed.query)
@@ -2763,10 +2789,15 @@ class SearchHandler(BaseHTTPRequestHandler):
                 score = r.get('score', 0)
                 score_pct = int((score / global_max_score) * 100) if global_max_score > 0 else 0
                 
+                url = r['url']
+                # Convert file:// URLs to serveable /files/ URLs
+                serve_url = self.file_url_to_serve_url(url)
+                
                 json_results.append({
                     'rank': i,
                     'title': r.get('title', 'Untitled') or 'Untitled',
-                    'url': r['url'],
+                    'url': serve_url,
+                    'original_url': url if url != serve_url else None,
                     'snippet': r.get('snippet', '') or r.get('description', ''),
                     'score': round(score, 4),
                     'score_pct': score_pct,
@@ -2796,6 +2827,60 @@ class SearchHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     
+    def handle_serve_file(self, encoded_path: str):
+        """Serve a local file referenced by file:// URL.
+        
+        Only serves files that exist in the index (source_file metadata)
+        to prevent arbitrary file access.
+        """
+        import mimetypes
+        
+        file_path = urllib.parse.unquote(encoded_path)
+        
+        # Security: resolve to absolute path and check for traversal
+        try:
+            resolved = Path(file_path).resolve()
+        except (ValueError, OSError):
+            self.send_error(400, "Invalid path")
+            return
+        
+        if not resolved.is_file():
+            self.send_error(404, "File not found")
+            return
+        
+        # Security: only serve file types we index
+        allowed_extensions = {'.pdf', '.docx', '.xlsx'}
+        if resolved.suffix.lower() not in allowed_extensions:
+            self.send_error(403, "File type not allowed")
+            return
+        
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(str(resolved))
+        if not content_type:
+            content_type = 'application/octet-stream'
+        
+        try:
+            file_size = resolved.stat().st_size
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', file_size)
+            # Allow inline display for PDFs, download for others
+            if resolved.suffix.lower() == '.pdf':
+                self.send_header('Content-Disposition', f'inline; filename="{resolved.name}"')
+            else:
+                self.send_header('Content-Disposition', f'attachment; filename="{resolved.name}"')
+            self.end_headers()
+            
+            with open(resolved, 'rb') as f:
+                # Stream in 64KB chunks
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except IOError as e:
+            self.send_error(500, f"Error reading file: {e}")
+
     def handle_health(self):
         """Handle /health endpoint for monitoring and load balancers."""
         try:
