@@ -3835,17 +3835,17 @@ class TestCmdDelete(unittest.TestCase):
     
     def test_delete_no_sites(self):
         """Delete with no sites should report no sites."""
-        args = argparse.Namespace(site=None, all=False, dry_run=False)
+        args = argparse.Namespace(site=[], all=False, dry_run=False)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
         self.assertEqual(code, 1)
         # Error message goes to stdout via style_error
-        self.assertIn('Must specify a site or use --all', stdout.getvalue())
+        self.assertIn('Must specify one or more sites or use --all', stdout.getvalue())
     
     def test_delete_nonexistent_site(self):
         """Delete nonexistent site should report error."""
-        args = argparse.Namespace(site='nonexistent', all=False, dry_run=False)
+        args = argparse.Namespace(site=['nonexistent'], all=False, dry_run=False)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3857,7 +3857,7 @@ class TestCmdDelete(unittest.TestCase):
         """Delete by hash with dry-run should not actually delete."""
         site_dir = self._create_test_site('abc123', 'https://example.com')
         
-        args = argparse.Namespace(site='abc123', all=False, dry_run=True)
+        args = argparse.Namespace(site=['abc123'], all=False, dry_run=True)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3871,7 +3871,7 @@ class TestCmdDelete(unittest.TestCase):
         site_dir = self._create_test_site('abc123', 'https://example.com')
         self.assertTrue(site_dir.exists())
         
-        args = argparse.Namespace(site='abc123', all=False, dry_run=False)
+        args = argparse.Namespace(site=['abc123'], all=False, dry_run=False)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3886,7 +3886,7 @@ class TestCmdDelete(unittest.TestCase):
         hash_id = compute_hash(url)
         site_dir = self._create_test_site(hash_id, url)
         
-        args = argparse.Namespace(site=url, all=False, dry_run=True)
+        args = argparse.Namespace(site=[url], all=False, dry_run=True)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3900,7 +3900,7 @@ class TestCmdDelete(unittest.TestCase):
         self._create_test_site('site2', 'https://example2.com', 5)
         self._create_test_site('site3', 'https://example3.com', 2)
         
-        args = argparse.Namespace(site=None, all=True, dry_run=True)
+        args = argparse.Namespace(site=[], all=True, dry_run=True)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3921,7 +3921,7 @@ class TestCmdDelete(unittest.TestCase):
         self._create_test_site('site1', 'https://example1.com')
         self._create_test_site('site2', 'https://example2.com')
         
-        args = argparse.Namespace(site=None, all=True, dry_run=False)
+        args = argparse.Namespace(site=[], all=True, dry_run=False)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3941,7 +3941,7 @@ class TestCmdDelete(unittest.TestCase):
         with open(metadata_file, 'w') as f:
             json.dump(metadata, f)
         
-        args = argparse.Namespace(site='abc123', all=False, dry_run=True)
+        args = argparse.Namespace(site=['abc123'], all=False, dry_run=True)
         with capture_output() as (stdout, stderr):
             code = cmd_delete(args)
         
@@ -3968,8 +3968,8 @@ class TestCmdDeleteArgParsing(unittest.TestCase):
         parser = create_parser()
         args = parser.parse_args(['delete'])
         
-        # site should be None
-        self.assertIsNone(args.site)
+        # site should be empty list
+        self.assertEqual(args.site, [])
         self.assertFalse(args.all)
     
     def test_delete_with_site_arg(self):
@@ -3977,7 +3977,7 @@ class TestCmdDeleteArgParsing(unittest.TestCase):
         parser = create_parser()
         args = parser.parse_args(['delete', 'abc123'])
         
-        self.assertEqual(args.site, 'abc123')
+        self.assertEqual(args.site, ['abc123'])
         self.assertFalse(args.all)
         self.assertFalse(args.dry_run)
     
@@ -3986,7 +3986,7 @@ class TestCmdDeleteArgParsing(unittest.TestCase):
         parser = create_parser()
         args = parser.parse_args(['delete', '--all'])
         
-        self.assertIsNone(args.site)
+        self.assertEqual(args.site, [])
         self.assertTrue(args.all)
     
     def test_delete_with_all_short_flag(self):
@@ -4001,7 +4001,7 @@ class TestCmdDeleteArgParsing(unittest.TestCase):
         parser = create_parser()
         args = parser.parse_args(['delete', 'abc123', '--dry-run'])
         
-        self.assertEqual(args.site, 'abc123')
+        self.assertEqual(args.site, ['abc123'])
         self.assertTrue(args.dry_run)
     
     def test_delete_with_dry_run_short_flag(self):
