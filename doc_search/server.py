@@ -721,6 +721,26 @@ a:hover {
     color: #22c55e;
 }
 
+.download-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.875rem;
+    padding: 0.25rem;
+    margin-top: 0.5rem;
+    margin-left: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: color 0.15s;
+    text-decoration: none;
+}
+
+.download-btn:hover {
+    color: var(--accent);
+}
+
 /* HTML5 <mark> element for semantic highlighting */
 mark {
     background: var(--highlight-bg);
@@ -1833,6 +1853,11 @@ JAVASCRIPT = """
         const docType = r.doc_type || 'html';
         const docTypeBadge = `<span class="doc-type-badge ${docType}">${docType}</span>`;
         
+        // Download button for file results (PDF, DOCX, XLSX)
+        const isFile = r.url.startsWith('/files/');
+        const downloadUrl = isFile ? r.url.split('#')[0] + '?download=1' : '';
+        const downloadBtn = isFile ? `<a href="${escapeHtml(downloadUrl)}" class="download-btn" title="Download file">⬇ Download</a>` : '';
+        
         return `
             <div class="result" data-url="${escapeHtml(r.url)}">
                 <div class="result-header">
@@ -1844,7 +1869,7 @@ JAVASCRIPT = """
                         <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
                     </span>
                 </div>
-                <div class="result-url">${escapeHtml(r.original_url || r.url)}</div>
+                <div class="result-url">${escapeHtml(r.original_url || r.url)}${downloadBtn}</div>
                 ${snippet}
             </div>
         `;
@@ -2384,7 +2409,7 @@ def render_page(
                         {doc_type_badge}
                         {score_html}
                     </div>
-                    <div class="result-url">{escape(raw_url) if raw_url.startswith('file://') else url}</div>
+                    <div class="result-url">{escape(raw_url) if raw_url.startswith('file://') else url}{f'<a href="{url.split("#")[0]}?download=1" class="download-btn" title="Download file">⬇ Download</a>' if raw_url.startswith('file://') else ''}</div>
                     {snippet_html}
                 </div>
                 '''
@@ -2696,7 +2721,7 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         # Handle /files/ endpoint for serving local documents
         if parsed.path.startswith('/files/'):
-            self.handle_serve_file(parsed.path[7:])
+            self.handle_serve_file(parsed.path[7:], parsed.query)
             return
         
         query_params = urllib.parse.parse_qs(parsed.query)
@@ -3074,8 +3099,11 @@ class SearchHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     
-    def handle_serve_file(self, encoded_path: str):
+    def handle_serve_file(self, encoded_path: str, query_string: str = ''):
         """Serve a local file referenced by file:// URL.
+        
+        Query params:
+            download=1: Force download instead of inline display
         
         Only serves files that exist in the index (source_file metadata)
         to prevent arbitrary file access.
@@ -3083,6 +3111,8 @@ class SearchHandler(BaseHTTPRequestHandler):
         import mimetypes
         
         file_path = urllib.parse.unquote(encoded_path)
+        query_params = urllib.parse.parse_qs(query_string)
+        force_download = query_params.get('download', [''])[0] == '1'
         
         # Security: resolve to absolute path and check for traversal
         try:
@@ -3111,11 +3141,11 @@ class SearchHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', file_size)
-            # Allow inline display for PDFs, download for others
-            if resolved.suffix.lower() == '.pdf':
-                self.send_header('Content-Disposition', f'inline; filename="{resolved.name}"')
-            else:
+            # Force download or try inline display
+            if force_download:
                 self.send_header('Content-Disposition', f'attachment; filename="{resolved.name}"')
+            else:
+                self.send_header('Content-Disposition', f'inline; filename="{resolved.name}"')
             self.end_headers()
             
             with open(resolved, 'rb') as f:

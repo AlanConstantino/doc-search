@@ -903,11 +903,13 @@ def cmd_list(args):
             pages_dir = site_dir / 'pages'
             
             if refresh:
-                # Rebuild doc type counts from page files
+                # Rebuild doc type counts and size from page files
                 type_counts = _scan_doc_type_counts(pages_dir)
                 total_pages = sum(type_counts.values()) if type_counts else 0
+                site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
                 # Update metadata cache
                 metadata['doc_type_counts'] = type_counts
+                metadata['site_size_bytes'] = site_size
                 with open(metadata_file, 'w') as f:
                     json.dump(metadata, f, indent=2)
             else:
@@ -1036,8 +1038,10 @@ def cmd_delete(args):
             url = "(no metadata)"
             pages = 0
         
-        # Use cached size from metadata (written at crawl/index time)
+        # Use cached size from metadata, fall back to calculation for dry run
         site_size = metadata.get('site_size_bytes', 0)
+        if site_size == 0 and dry_run:
+            site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
         total_size += site_size
         
         size_str = f", {format_size(site_size)}" if site_size else ""
