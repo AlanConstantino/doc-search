@@ -1015,10 +1015,10 @@ def cmd_delete(args):
         return 0
     
     # Show what will be deleted
-    total_size = 0
     print(f"{'Would delete' if dry_run else 'Deleting'} {len(sites_to_delete)} site(s):")
     print()
     
+    total_size = 0
     for site_dir in sites_to_delete:
         # Get site info
         metadata_file = site_dir / 'metadata.json'
@@ -1031,23 +1031,23 @@ def cmd_delete(args):
             url = "(no metadata)"
             pages = 0
         
-        # Calculate size
-        site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
-        total_size += site_size
-        
-        print(f"  {_e('cross')} {site_dir.name}")
-        print(f"    URL: {url}")
-        print(f"    Pages: {pages}, Size: {format_size(site_size)}")
-        print()
-        
-        if not dry_run:
+        # Only calculate size for dry run (expensive for large sites)
+        if dry_run:
+            site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
+            total_size += site_size
+            print(f"  {_e('cross')} {site_dir.name}")
+            print(f"    URL: {url}")
+            print(f"    Pages: {pages}, Size: {format_size(site_size)}")
+        else:
+            print(f"  {_e('cross')} {site_dir.name}: {url} ({pages} pages)")
             shutil.rmtree(site_dir)
     
+    print()
     if dry_run:
         print(style_info(f"Dry run: Would free {format_size(total_size)}"))
         print(style_info("Run without --dry-run to actually delete."))
     else:
-        print(style_success(f"{_e('check')} Deleted {len(sites_to_delete)} site(s), freed {format_size(total_size)}"))
+        print(style_success(f"{_e('check')} Deleted {len(sites_to_delete)} site(s)"))
     
     return 0
 
