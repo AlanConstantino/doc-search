@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] - 2026-02-18
+
+### Added
+- **Suggest-as-you-type in web UI** — dropdown with autocomplete suggestions as you type (2+ chars), prefix highlighted, keyboard navigable (↑/↓/Enter/Escape), click to select
+- **Tab completion in interactive terminal** — press Tab to autocomplete search terms from the index vocabulary
+- **Doc type breakdown in crawl/index summaries** — shows PDFs, Word docs, Excel sheets extracted at end of crawl
+- **Informative checkpoint messages** — progress summary with pages, docs, queue, MB, rate
+
+### Fixed
+- **BrokenPipeError suppressed** — no more noisy tracebacks when browser aborts search requests (instant search typing)
+- **PDF snippet formatting in terminal** — aggressively joins broken lines, collapses newlines for clean single-line display
+- **Cleaner list format** — `(51 pages: 45 html, 6 pdf)` instead of nested parens
+
+### Changed
+- List command uses cached `doc_type_counts` from metadata (~40x faster for large sites)
+- `--refresh` flag on list to rebuild cache when needed
+
 ## [1.25.0] - 2026-02-18
 
 ### Added
