@@ -3931,8 +3931,15 @@ class TestCmdDelete(unittest.TestCase):
         self.assertIn('Deleted 2 site(s)', stdout.getvalue())
     
     def test_delete_shows_size(self):
-        """Delete should show size of deleted sites."""
+        """Delete should show cached size from metadata when available."""
         self._create_test_site('abc123', 'https://example.com', 10)
+        # Add cached size to metadata
+        metadata_file = Path(self.test_dir) / 'abc123' / 'metadata.json'
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+        metadata['site_size_bytes'] = 1024 * 1024  # 1 MB
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f)
         
         args = argparse.Namespace(site='abc123', all=False, dry_run=True)
         with capture_output() as (stdout, stderr):
@@ -3940,8 +3947,8 @@ class TestCmdDelete(unittest.TestCase):
         
         self.assertEqual(code, 0)
         output = stdout.getvalue()
-        # Should contain size information
-        self.assertIn('Size:', output)
+        # Should contain size from cached metadata
+        self.assertIn('1.0 MB', output)
 
 
 class TestCmdDeleteArgParsing(unittest.TestCase):

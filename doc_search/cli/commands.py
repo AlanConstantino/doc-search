@@ -211,11 +211,15 @@ def cmd_crawl(args):
     else:
         total_pages = stats.get('pages_crawled', 0)
     
+    # Calculate total site size on disk
+    site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
+    
     # Save site metadata
     metadata = {
         'url': args.url,
         'stats': {**stats, 'pages_crawled': total_pages},
-        'doc_type_counts': doc_type_counts
+        'doc_type_counts': doc_type_counts,
+        'site_size_bytes': site_size
     }
     with open(site_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
@@ -1021,33 +1025,39 @@ def cmd_delete(args):
     total_size = 0
     for site_dir in sites_to_delete:
         # Get site info
+        metadata = {}
         metadata_file = site_dir / 'metadata.json'
         if metadata_file.exists():
             with open(metadata_file) as f:
                 metadata = json.load(f)
-            url = metadata.get('url', 'Unknown')
+            url = metadata.get('url') or metadata.get('source') or 'Unknown'
             pages = metadata.get('stats', {}).get('pages_crawled', 0)
         else:
             url = "(no metadata)"
             pages = 0
         
-        # Only calculate size for dry run (expensive for large sites)
+        # Use cached size from metadata (written at crawl/index time)
+        site_size = metadata.get('site_size_bytes', 0)
+        total_size += site_size
+        
+        size_str = f", {format_size(site_size)}" if site_size else ""
+        
         if dry_run:
-            site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
-            total_size += site_size
             print(f"  {_e('cross')} {site_dir.name}")
             print(f"    URL: {url}")
-            print(f"    Pages: {pages}, Size: {format_size(site_size)}")
+            print(f"    Pages: {pages}{size_str}")
         else:
-            print(f"  {_e('cross')} {site_dir.name}: {url} ({pages} pages)")
+            print(f"  {_e('cross')} {site_dir.name}: {url} ({pages} pages{size_str})")
             shutil.rmtree(site_dir)
     
     print()
     if dry_run:
-        print(style_info(f"Dry run: Would free {format_size(total_size)}"))
+        size_note = f" ({format_size(total_size)})" if total_size else ""
+        print(style_info(f"Dry run: Would delete {len(sites_to_delete)} site(s){size_note}"))
         print(style_info("Run without --dry-run to actually delete."))
     else:
-        print(style_success(f"{_e('check')} Deleted {len(sites_to_delete)} site(s)"))
+        size_note = f", freed ~{format_size(total_size)}" if total_size else ""
+        print(style_success(f"{_e('check')} Deleted {len(sites_to_delete)} site(s){size_note}"))
     
     return 0
 
@@ -1318,6 +1328,9 @@ def cmd_index_files(args):
                 doc_type = 'unknown'
             doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
     
+    # Calculate total site size on disk
+    site_size = sum(f.stat().st_size for f in site_dir.rglob('*') if f.is_file())
+    
     # Save metadata
     metadata = {
         'source': str(directory.absolute()),
@@ -1329,7 +1342,8 @@ def cmd_index_files(args):
             'errors': errors,
             'extensions': list(extensions)
         },
-        'doc_type_counts': doc_type_counts
+        'doc_type_counts': doc_type_counts,
+        'site_size_bytes': site_size
     }
     with open(site_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
