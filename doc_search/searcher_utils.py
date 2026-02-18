@@ -161,12 +161,13 @@ def normalize_document_text(text: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     
-    # Join lines that are mid-sentence (single newline between lowercase chars)
-    # But preserve paragraph breaks (double newlines)
-    text = re.sub(r'(?<=[a-z,;:\-]) *\n(?!\n) *(?=[a-z])', ' ', text)
+    # Join broken lines — aggressively merge single newlines into spaces.
+    # Only preserve double newlines (paragraph breaks).
+    # PDF text is full of hard line breaks from column layouts, page widths, etc.
+    text = re.sub(r'(?<!\n)\n(?!\n)', ' ', text)
     
-    # Clean up spaces around newlines
-    text = re.sub(r' *\n *', '\n', text)
+    # Collapse any resulting double spaces
+    text = re.sub(r'  +', ' ', text)
     
     return text.strip()
 
@@ -341,6 +342,9 @@ def format_results(
         # Truncate title if too long
         if len(title) > MAX_TITLE_LENGTH:
             title = title[:MAX_TITLE_LENGTH - 3] + '...'
+        
+        # Collapse newlines for terminal display (HTML handles this via CSS)
+        snippet = re.sub(r'\s*\n\s*', ' ', snippet).strip()
         
         # Truncate snippet
         if len(snippet) > MAX_SNIPPET_LENGTH:

@@ -26,10 +26,11 @@ class TestNormalizeDocumentText(unittest.TestCase):
         self.assertIn('First paragraph.', result)
         self.assertIn('Second paragraph.', result)
 
-    def test_preserves_capitalized_new_lines(self):
+    def test_joins_capitalized_new_lines(self):
+        """Single newlines are joined even between sentences (PDF artifact)."""
         text = "End of sentence.\nStart of new sentence."
         result = normalize_document_text(text)
-        self.assertIn('\n', result)
+        self.assertEqual(result, "End of sentence. Start of new sentence.")
 
     def test_collapses_excessive_whitespace(self):
         text = "too   many    spaces"
