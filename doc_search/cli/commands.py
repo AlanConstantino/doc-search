@@ -899,7 +899,7 @@ def cmd_list(args):
                 for dtype in sorted(type_counts.keys()):
                     count = type_counts[dtype]
                     type_parts.append(f"{count} {dtype}")
-                type_str = f"{total_pages} {label} ({', '.join(type_parts)})"
+                type_str = f"{total_pages} {label}: {', '.join(type_parts)}"
             else:
                 type_str = f"{total_pages} {label}"
             
