@@ -153,7 +153,7 @@ class MultiSiteSearchEngine:
                 enable_spellcheck=True,
                 enable_autocomplete=False,
                 enable_facets=False,
-                enable_synonyms=False,
+                enable_synonyms=True,
                 enable_symspell=False,
                 enable_ngram=False,
             )
