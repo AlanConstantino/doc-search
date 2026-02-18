@@ -286,6 +286,59 @@ a:hover {
     background: var(--bg-tertiary);
 }
 
+/* Suggest-as-you-type dropdown */
+.suggest-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 110;
+    display: none;
+}
+
+.suggest-dropdown.visible {
+    display: block;
+}
+
+.suggest-item {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: background 0.1s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.suggest-item:hover,
+.suggest-item.active {
+    background: var(--bg-tertiary);
+}
+
+.suggest-item .suggest-icon {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.suggest-item .suggest-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.suggest-item .suggest-text mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 600;
+}
+
 /* Search options row */
 .search-options {
     display: flex;
@@ -1163,6 +1216,147 @@ JAVASCRIPT = """
     }
     
     // ========================================================================
+    // Suggest-as-you-type (#autocomplete)
+    // ========================================================================
+    let suggestDropdown = null;
+    let suggestActiveIndex = -1;
+    let suggestTimeout = null;
+    let suggestAbort = null;
+    const SUGGEST_DEBOUNCE_MS = 150;
+    const SUGGEST_MIN_CHARS = 2;
+
+    function createSuggestDropdown() {
+        if (suggestDropdown) return suggestDropdown;
+        const dropdown = document.createElement('div');
+        dropdown.className = 'suggest-dropdown';
+        const wrapper = document.querySelector('.search-input-wrapper');
+        if (wrapper) {
+            wrapper.appendChild(dropdown);
+        }
+        suggestDropdown = dropdown;
+        return dropdown;
+    }
+
+    function showSuggestDropdown(suggestions, query) {
+        if (!suggestions || suggestions.length === 0) {
+            hideSuggestDropdown();
+            return;
+        }
+        const dropdown = createSuggestDropdown();
+        suggestActiveIndex = -1;
+
+        const queryLower = query.toLowerCase();
+        let html = '';
+        suggestions.forEach((s, i) => {
+            // Highlight the matching prefix
+            const sLower = s.toLowerCase();
+            let display;
+            const idx = sLower.indexOf(queryLower);
+            if (idx >= 0) {
+                display = escapeHtml(s.substring(0, idx))
+                    + '<mark>' + escapeHtml(s.substring(idx, idx + query.length)) + '</mark>'
+                    + escapeHtml(s.substring(idx + query.length));
+            } else {
+                display = escapeHtml(s);
+            }
+            html += '<div class="suggest-item" data-index="' + i + '" data-value="' + escapeHtml(s) + '">'
+                + '<span class="suggest-icon">🔍</span>'
+                + '<span class="suggest-text">' + display + '</span>'
+                + '</div>';
+        });
+        dropdown.innerHTML = html;
+        dropdown.classList.add('visible');
+        hideHistoryDropdown();
+
+        // Click handlers
+        dropdown.querySelectorAll('.suggest-item').forEach(item => {
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // Prevent input blur
+                const val = item.dataset.value;
+                input.value = val;
+                hideSuggestDropdown();
+                clearTimeout(searchTimeout);
+                doSearch(val, 1);
+            });
+        });
+    }
+
+    function hideSuggestDropdown() {
+        if (suggestDropdown) {
+            suggestDropdown.classList.remove('visible');
+        }
+        suggestActiveIndex = -1;
+    }
+
+    function suggestNavigate(direction) {
+        if (!suggestDropdown || !suggestDropdown.classList.contains('visible')) return false;
+        const items = suggestDropdown.querySelectorAll('.suggest-item');
+        if (items.length === 0) return false;
+
+        // Remove current active
+        if (suggestActiveIndex >= 0 && suggestActiveIndex < items.length) {
+            items[suggestActiveIndex].classList.remove('active');
+        }
+
+        suggestActiveIndex += direction;
+        if (suggestActiveIndex < -1) suggestActiveIndex = items.length - 1;
+        if (suggestActiveIndex >= items.length) suggestActiveIndex = -1;
+
+        if (suggestActiveIndex >= 0) {
+            items[suggestActiveIndex].classList.add('active');
+            items[suggestActiveIndex].scrollIntoView({ block: 'nearest' });
+            input.value = items[suggestActiveIndex].dataset.value;
+        }
+        return true;
+    }
+
+    function suggestSelect() {
+        if (!suggestDropdown || !suggestDropdown.classList.contains('visible')) return false;
+        if (suggestActiveIndex < 0) return false;
+        const items = suggestDropdown.querySelectorAll('.suggest-item');
+        if (suggestActiveIndex < items.length) {
+            const val = items[suggestActiveIndex].dataset.value;
+            input.value = val;
+            hideSuggestDropdown();
+            clearTimeout(searchTimeout);
+            doSearch(val, 1);
+            return true;
+        }
+        return false;
+    }
+
+    function fetchSuggestions(query) {
+        clearTimeout(suggestTimeout);
+        if (suggestAbort) {
+            suggestAbort.abort();
+            suggestAbort = null;
+        }
+        if (!query || query.length < SUGGEST_MIN_CHARS) {
+            hideSuggestDropdown();
+            return;
+        }
+        suggestTimeout = setTimeout(() => {
+            const controller = new AbortController();
+            suggestAbort = controller;
+            fetch('/suggest?q=' + encodeURIComponent(query) + '&limit=8', { signal: controller.signal })
+                .then(r => r.json())
+                .then(data => {
+                    suggestAbort = null;
+                    if (data.suggestions && data.suggestions.length > 0 && input.value.trim() === query) {
+                        showSuggestDropdown(data.suggestions, query);
+                    } else {
+                        hideSuggestDropdown();
+                    }
+                })
+                .catch(e => {
+                    if (e.name !== 'AbortError') {
+                        hideSuggestDropdown();
+                    }
+                });
+        }, SUGGEST_DEBOUNCE_MS);
+    }
+
+    // ========================================================================
     // Keyboard Navigation (#175)
     // ========================================================================
     function getResultElements() {
@@ -1913,22 +2107,51 @@ JAVASCRIPT = """
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             clearTimeout(searchTimeout);
+            hideSuggestDropdown();
             currentFacet = null;
             doSearch(input.value, 1);
         });
         
-        // Input events for instant search
-        input.addEventListener('input', debouncedSearch);
+        // Input events for instant search + suggest-as-you-type
+        input.addEventListener('input', () => {
+            const val = input.value.trim();
+            fetchSuggestions(val);
+            debouncedSearch();
+        });
+        
+        // Keyboard handling for suggest dropdown
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                if (suggestDropdown && suggestDropdown.classList.contains('visible')) {
+                    e.preventDefault();
+                    suggestNavigate(1);
+                }
+            } else if (e.key === 'ArrowUp') {
+                if (suggestDropdown && suggestDropdown.classList.contains('visible')) {
+                    e.preventDefault();
+                    suggestNavigate(-1);
+                }
+            } else if (e.key === 'Enter') {
+                if (suggestSelect()) {
+                    e.preventDefault();
+                }
+            } else if (e.key === 'Escape') {
+                hideSuggestDropdown();
+            }
+        });
         
         // History dropdown
         input.addEventListener('focus', () => {
-            if (input.value.length < 3) {
+            if (input.value.length < SUGGEST_MIN_CHARS) {
                 showHistoryDropdown();
             }
         });
         
         input.addEventListener('blur', () => {
-            setTimeout(hideHistoryDropdown, 200);
+            setTimeout(() => {
+                hideHistoryDropdown();
+                hideSuggestDropdown();
+            }, 200);
         });
         
         // Clear button
@@ -1938,6 +2161,7 @@ JAVASCRIPT = """
                 input.value = '';
                 input.focus();
                 hideHistoryDropdown();
+                hideSuggestDropdown();
             });
         }
         
@@ -1984,6 +2208,9 @@ JAVASCRIPT = """
         setupFacetButtons();
         setupCopyLinkButtons();
         bindEvents();
+        
+        // Remove datalist binding when JS suggest dropdown is active
+        input.removeAttribute('list');
         
         // Get initial state from URL
         const urlParams = new URLSearchParams(window.location.search);
