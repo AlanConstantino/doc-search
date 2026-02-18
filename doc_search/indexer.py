@@ -15,6 +15,52 @@ from .utils import tokenize
 from .symspell import SymSpell
 from .ngram import NGramIndex
 
+import re
+
+# Regex: valid suggestion terms are 2-40 chars, start with a letter,
+# contain only letters/digits/hyphens, and aren't pure hex or IDs.
+_VALID_TERM_RE = re.compile(r'^[a-z][a-z0-9\-]{1,24}$')
+_HEX_LIKE_RE = re.compile(r'^[0-9a-f]{8,}$')
+_ID_LIKE_RE = re.compile(r'^[a-z]\d{3,}')  # e.g. s000712340000925x, v35i6
+
+
+def is_suggestion_worthy(term: str) -> bool:
+    """Check if a term is clean enough for autocomplete/spellcheck suggestions.
+    
+    Filters out:
+    - Too short (<2) or too long (>40)
+    - Terms not starting with a letter
+    - Hex-like strings (8+ hex chars)
+    - ID-like strings (letter followed by 5+ digits)
+    - Terms ending with underscore (variable-like: p_, x_, sum_)
+    - Terms with no vowels (likely abbreviations/noise) unless very short
+    """
+    if not _VALID_TERM_RE.match(term):
+        return False
+    if _HEX_LIKE_RE.match(term):
+        return False
+    if _ID_LIKE_RE.match(term):
+        return False
+    if term.endswith('-'):
+        return False
+    # Reject terms with too many digits
+    digit_count = sum(1 for c in term if c.isdigit())
+    if digit_count > 0:
+        letter_count = sum(1 for c in term if c.isalpha())
+        # Need at least 3 letters per digit (e.g. "python3" ok, "v35i6" not)
+        if letter_count < digit_count * 3:
+            return False
+    # Must contain at least one vowel if 5+ chars (filters junk like "bcdfx", "ngrmp")
+    if len(term) >= 5 and not re.search(r'[aeiouy]', term):
+        return False
+    return True
+
+
+def filter_suggestion_terms(doc_freqs: dict) -> dict:
+    """Filter doc_freqs to only include suggestion-worthy terms."""
+    return {term: freq for term, freq in doc_freqs.items() 
+            if is_suggestion_worthy(term)}
+
 
 class BM25Index:
     """
@@ -551,8 +597,8 @@ class BM25Index:
         """
         symspell = SymSpell(max_distance=max_distance)
         
-        for term, doc_freq in self.doc_freqs.items():
-            # Use document frequency as word frequency
+        clean_terms = filter_suggestion_terms(self.doc_freqs)
+        for term, doc_freq in clean_terms.items():
             symspell.add_word(term, frequency=doc_freq)
         
         return symspell
@@ -571,7 +617,8 @@ class BM25Index:
         """
         ngram_index = NGramIndex(n=n)
         
-        for term, doc_freq in self.doc_freqs.items():
+        clean_terms = filter_suggestion_terms(self.doc_freqs)
+        for term, doc_freq in clean_terms.items():
             ngram_index.add_term(term, frequency=doc_freq)
         
         return ngram_index

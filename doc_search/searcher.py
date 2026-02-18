@@ -721,9 +721,10 @@ class EnhancedSearchEngine(SearchEngine):
             self._spellchecker = SpellChecker(vocabulary, max_distance=2)
         
         if self._autocomplete_enabled:
+            from .indexer import filter_suggestion_terms
             self._autocomplete = Autocomplete()
-            # Use doc_freqs for term frequencies
-            self._autocomplete.build_from_index(dict(self.index.doc_freqs))
+            # Use doc_freqs for term frequencies, filtered to clean terms
+            self._autocomplete.build_from_index(filter_suggestion_terms(self.index.doc_freqs))
         
         if self._facets_enabled:
             self._facets = FacetIndex()
@@ -1027,7 +1028,22 @@ class EnhancedSearchEngine(SearchEngine):
         if not self._autocomplete:
             return []
         
-        return self._autocomplete.suggest(prefix, max_suggestions)
+        suggestions = self._autocomplete.suggest(prefix, max_suggestions)
+        
+        # If no prefix matches found, try symspell fuzzy lookup as fallback
+        # This handles typos in the prefix (e.g. "pyhton" → "python")
+        if not suggestions and self._symspell:
+            # Get the last word being typed
+            parts = prefix.rsplit(' ', 1)
+            last_word = parts[-1] if parts else prefix
+            prev_words = parts[0] + ' ' if len(parts) > 1 else ''
+            
+            if len(last_word) >= 2:
+                fuzzy_matches = self._symspell.lookup(last_word)
+                if fuzzy_matches:
+                    suggestions = [prev_words + word for word, _, _ in fuzzy_matches[:max_suggestions]]
+        
+        return suggestions
     
     def get_facet_counts(self, 
                          results: Optional[List[Dict[str, Any]]] = None
