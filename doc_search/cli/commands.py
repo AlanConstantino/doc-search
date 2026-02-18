@@ -832,8 +832,35 @@ def cmd_list(args):
             with open(metadata_file) as f:
                 metadata = json.load(f)
             url = metadata.get('url', 'Unknown')
-            pages = metadata.get('stats', {}).get('pages_crawled', 0)
-            print(f"  {site_dir.name}: {url} ({pages} pages)")
+            
+            # Count doc types from page files on disk
+            pages_dir = site_dir / 'pages'
+            type_counts = {}
+            total_pages = 0
+            if pages_dir.exists():
+                for page_file in pages_dir.glob('*.json'):
+                    total_pages += 1
+                    try:
+                        with open(page_file) as pf:
+                            page_data = json.load(pf)
+                        doc_type = page_data.get('doc_type', 'html')
+                        type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
+                    except (json.JSONDecodeError, IOError):
+                        type_counts['html'] = type_counts.get('html', 0) + 1
+            else:
+                total_pages = metadata.get('stats', {}).get('pages_crawled', 0)
+            
+            # Build display string
+            if len(type_counts) > 1:
+                type_parts = []
+                for dtype in sorted(type_counts.keys()):
+                    count = type_counts[dtype]
+                    type_parts.append(f"{count} {dtype}")
+                type_str = f"{total_pages} pages ({', '.join(type_parts)})"
+            else:
+                type_str = f"{total_pages} pages"
+            
+            print(f"  {site_dir.name}: {url} ({type_str})")
         else:
             print(f"  {site_dir.name}: (no metadata)")
     
