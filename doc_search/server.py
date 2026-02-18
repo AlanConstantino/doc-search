@@ -3133,7 +3133,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         # Security: only serve file types we index
-        allowed_extensions = {'.pdf', '.docx', '.xlsx'}
+        allowed_extensions = {'.pdf', '.docx', '.xlsx', '.html', '.htm'}
         if resolved.suffix.lower() not in allowed_extensions:
             self.send_error(403, "File type not allowed")
             return

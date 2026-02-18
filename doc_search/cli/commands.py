@@ -1257,6 +1257,22 @@ def cmd_index_files(args):
             elif ext == '.pdf':
                 # Extract PDF as one document per page for better search granularity
                 documents = pdf_extractor.extract_pages_from_file(file_path)
+            elif ext in ('.html', '.htm'):
+                # Parse local HTML files
+                from ..parser import extract_text as extract_html
+                try:
+                    html_content = file_path.read_text(encoding='utf-8', errors='replace')
+                except Exception:
+                    html_content = file_path.read_bytes().decode('utf-8', errors='replace')
+                result = extract_html(html_content)
+                documents = [{
+                    'url': file_path.as_uri(),
+                    'title': result.get('title', '') or file_path.stem,
+                    'text': result.get('text', ''),
+                    'headings': result.get('headings', []),
+                    'description': result.get('description', ''),
+                    'metadata': {'doc_type': 'html'},
+                }]
             else:
                 # Skip unsupported extensions
                 continue
@@ -1329,7 +1345,7 @@ def cmd_index_files(args):
     processed = files_found - skipped
     print(f"Processed {processed} files, skipped {skipped} unchanged")
     if docs_by_type:
-        type_labels = {'pdf': 'PDFs', 'docx': 'Word docs', 'xlsx': 'Excel sheets'}
+        type_labels = {'pdf': 'PDFs', 'docx': 'Word docs', 'xlsx': 'Excel sheets', 'html': 'HTML pages', 'htm': 'HTML pages'}
         type_parts = []
         for dtype in sorted(docs_by_type.keys()):
             label = type_labels.get(dtype, dtype)

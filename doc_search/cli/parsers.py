@@ -135,8 +135,8 @@ def _add_index_files_parser(subparsers):
         help='Index local documents (.xlsx, .docx, .pdf)'
     )
     index_files_parser.add_argument('directory', help='Directory containing files to index')
-    index_files_parser.add_argument('--extensions', '-e', default='xlsx,docx,pdf',
-                                    help='Comma-separated file extensions to include (default: xlsx,docx,pdf)')
+    index_files_parser.add_argument('--extensions', '-e', default='xlsx,docx,pdf,html,htm',
+                                    help='Comma-separated file extensions to include (default: xlsx,docx,pdf,html,htm)')
     index_files_parser.add_argument('--no-recursive', action='store_true',
                                     help='Do not scan subdirectories (default: recursive)')
     index_files_parser.add_argument('--exclude', action='append', metavar='PATTERN',
