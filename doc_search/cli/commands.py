@@ -513,9 +513,9 @@ def cmd_interactive(args):
     print(style_title("║") + "              " + style_success("doc-search") + " — Interactive Mode              " + style_title("║"))
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
-    print(f"  {_e('books')} {style_info(str(stats['total_documents']))} documents indexed")
-    print(f"  {_e('terms')} {style_info(str(stats['unique_terms']))} unique terms")
-    print(f"  {_e('ruler')} {style_info(str(stats['avg_document_length']))} avg terms per document")
+    print(f"  {_e('books')} {style_info(str(stats.get('total_documents', 0)))} documents indexed")
+    print(f"  {_e('terms')} {style_info(str(stats.get('unique_terms', stats.get('total_unique_terms', 0))))} unique terms")
+    print(f"  {_e('ruler')} {style_info(str(stats.get('avg_document_length', 0)))} avg terms per document")
     
     # Show enabled features
     features = stats.get('features', {})
@@ -1377,8 +1377,8 @@ def cmd_serve(args):
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
     print(f"  {_e('globe')} Server running at: {style_url(url)}")
-    print(f"  {_e('books')} {style_info(str(stats['total_documents']))} documents indexed")
-    print(f"  {_e('terms')} {style_info(str(stats['unique_terms']))} unique terms")
+    print(f"  {_e('books')} {style_info(str(stats.get('total_documents', 0)))} documents indexed")
+    print(f"  {_e('terms')} {style_info(str(stats.get('unique_terms', stats.get('total_unique_terms', 0))))} unique terms")
     print()
     print(style_info("  Press Ctrl+C to stop the server"))
     print()

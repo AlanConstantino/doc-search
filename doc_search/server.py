@@ -2059,7 +2059,7 @@ def render_page(
     
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
-    unique_terms = stats.get('unique_terms', 0)
+    unique_terms = stats.get('unique_terms', stats.get('total_unique_terms', 0))
     
     # Build datalist for HTML5 autocomplete
     datalist_html = ""
@@ -2811,7 +2811,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             health_data = {
                 'status': 'ok',
                 'documents': stats.get('total_documents', 0),
-                'terms': stats.get('unique_terms', 0),
+                'terms': stats.get('unique_terms', stats.get('total_unique_terms', 0)),
                 'uptime_seconds': round(uptime_seconds, 1),
                 'version': self.version or __version__
             }
