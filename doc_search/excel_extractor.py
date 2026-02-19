@@ -54,7 +54,11 @@ class ExcelExtractor:
             if isinstance(value, float) and value.is_integer():
                 return str(int(value))
             return str(value)
-        return str(value).strip()
+        import re
+        text = str(value).strip()
+        # Remove control characters that break URL handling and display
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+        return text
     
     def _extract_sheet(
         self,

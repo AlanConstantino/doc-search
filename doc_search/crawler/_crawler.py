@@ -122,6 +122,8 @@ class Crawler:
             self._word_extractor = WordExtractor()
             from ..excel_extractor import ExcelExtractor
             self._excel_extractor = ExcelExtractor()
+            from ..pptx_extractor import PPTXExtractor
+            self._pptx_extractor = PPTXExtractor()
         
         # Setup directories
         self.pages_dir = self.data_dir / 'pages'
@@ -355,6 +357,9 @@ class Crawler:
                 elif 'spreadsheetml' in ct_lower or 'application/vnd.openxmlformats-officedocument.spreadsheetml' in ct_lower or url.lower().endswith('.xlsx'):
                     self._log(f"  📊 Detected Excel file by Content-Type, extracting...")
                     return self._process_xlsx_content(url, fetch_result.raw_bytes, depth)
+                elif 'presentationml' in ct_lower or 'application/vnd.openxmlformats-officedocument.presentationml' in ct_lower or url.lower().endswith('.pptx'):
+                    self._log(f"  📽️ Detected PowerPoint by Content-Type, extracting...")
+                    return self._process_pptx_content(url, fetch_result.raw_bytes, depth)
             
             self._log(f"  Skipping binary content: {content_type}")
             self.state.increment_stat('pages_skipped')
@@ -412,6 +417,9 @@ class Crawler:
         elif path.endswith('.xlsx'):
             doc_emoji = '📊'
             doc_label = 'Excel'
+        elif path.endswith('.pptx'):
+            doc_emoji = '📽️'
+            doc_label = 'PowerPoint'
         else:
             doc_emoji = '📎'
             doc_label = 'Document'
@@ -454,6 +462,8 @@ class Crawler:
             return self._process_docx_url(url, depth)
         elif path.endswith('.xlsx'):
             return self._process_xlsx_url(url, depth)
+        elif path.endswith('.pptx'):
+            return self._process_pptx_url(url, depth)
         
         self._log(f"  Skipping unsupported document type: {path}")
         self.state.increment_stat('pages_skipped')
@@ -502,7 +512,10 @@ class Crawler:
         return []
     
     def _download_to_temp(self, url: str, content_bytes: bytes = None, suffix: str = '') -> 'Path':
-        """Download a URL to a temp file, or write bytes to one. Returns Path."""
+        """Download a URL to a temp file, or write bytes to one. Returns Path.
+        
+        Uses the crawler's fetcher (with auth headers) for URL downloads.
+        """
         import tempfile
         if content_bytes:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -510,10 +523,16 @@ class Crawler:
             tmp.close()
             return Path(tmp.name)
         else:
-            import urllib.request
+            # Use the fetcher so auth headers are included
+            fetch_result = self._fetcher.fetch(url)
+            if not fetch_result.success:
+                raise RuntimeError(f"Failed to fetch {url}: {fetch_result.error_message or 'unknown error'}")
+            content = fetch_result.raw_bytes or (fetch_result.content.encode('utf-8') if fetch_result.content else b'')
+            if not content:
+                raise RuntimeError(f"No content received from {url}")
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(content)
             tmp.close()
-            urllib.request.urlretrieve(url, tmp.name)
             return Path(tmp.name)
     
     def _process_docx_url(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
@@ -622,6 +641,64 @@ class Crawler:
                 self.state.increment_stat('docs_xlsx')
             
             self._log(f"  Extracted {len(documents)} sheets")
+            return []
+        finally:
+            os.unlink(tmp_path)
+    
+    def _process_pptx_url(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Download and extract a PowerPoint file from a URL."""
+        try:
+            tmp_path = self._download_to_temp(url, suffix='.pptx')
+            return self._extract_pptx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  PowerPoint extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"PPTX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _process_pptx_content(self, url: str, content_bytes: bytes, depth: int) -> Optional[List[Tuple[str, int]]]:
+        """Extract a PowerPoint file from bytes (Content-Type detection)."""
+        try:
+            tmp_path = self._download_to_temp(url, content_bytes=content_bytes, suffix='.pptx')
+            return self._extract_pptx(url, tmp_path, depth)
+        except Exception as e:
+            self._log(f"  PowerPoint extraction failed: {e}")
+            self.state.record_error(url, 'parse', f"PPTX extraction failed: {e}")
+            self.state.mark_failed(url, depth)
+            return None
+    
+    def _extract_pptx(self, url: str, tmp_path: 'Path', depth: int) -> List[Tuple[str, int]]:
+        """Extract PowerPoint from a temp file path and save page data."""
+        import os
+        try:
+            documents = self._pptx_extractor.extract(tmp_path)
+            if not documents or (len(documents) == 1 and documents[0].get('error')):
+                error = documents[0]['error'] if documents else 'No content extracted'
+                self._log(f"  PowerPoint extraction failed: {error}")
+                self.state.record_error(url, 'parse', f"PPTX: {error}")
+                self.state.mark_failed(url, depth)
+                return []
+            
+            doc = documents[0]
+            headings = doc.get('headings', [])
+            metadata = doc.get('metadata', {})
+            page_data = build_document_data(
+                url=url,
+                title=doc.get('title', '') or Path(urlparse(url).path).stem,
+                text=doc.get('text', ''),
+                depth=depth,
+                doc_type='pptx',
+                doc_pages=metadata.get('total_slides', 0),
+                headings=headings,
+            )
+            self._processor.save_page(url, page_data)
+            
+            self.state.increment_stat('pages_crawled')
+            self.state.increment_stat('docs_extracted')
+            self.state.increment_stat('docs_pptx')
+            
+            slides = metadata.get('total_slides', '?')
+            self._log(f"  Extracted {slides} slides, {len(doc.get('text', ''))} chars")
             return []
         finally:
             os.unlink(tmp_path)
@@ -742,7 +819,7 @@ class Crawler:
         docs_extracted = stats.get('docs_extracted', 0)
         if docs_extracted > 0:
             doc_parts = []
-            for key, label in [('docs_pdf', 'PDFs'), ('docs_docx', 'Word docs'), ('docs_xlsx', 'Excel sheets')]:
+            for key, label in [('docs_pdf', 'PDFs'), ('docs_docx', 'Word docs'), ('docs_xlsx', 'Excel sheets'), ('docs_pptx', 'PowerPoints')]:
                 count = stats.get(key, 0)
                 if count > 0:
                     doc_parts.append(f"{count} {label}")

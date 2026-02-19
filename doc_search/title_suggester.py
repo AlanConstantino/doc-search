@@ -93,6 +93,7 @@ class TitleSuggester:
                 weight = max(10, 100 - level * 20)
                 self.entries.append({
                     'text': clean,
+                    'display_text': '#' * level + ' ' + clean,
                     'doc_type': doc_type,
                     'url': url,
                     'weight': weight,
