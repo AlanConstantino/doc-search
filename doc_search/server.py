@@ -1260,19 +1260,20 @@ JAVASCRIPT = """
         suggestions.forEach((s, i) => {
             // Support both string and object formats
             const text = typeof s === 'string' ? s : (s.text || '');
+            const displayText = typeof s === 'object' ? (s.display_text || s.text || '') : s;
             const docType = typeof s === 'object' ? s.doc_type : null;
             const icon = docType ? (DOC_TYPE_ICONS[docType] || '🔍') : '🔍';
 
-            // Highlight the matching prefix
-            const textLower = text.toLowerCase();
+            // Highlight the matching prefix in display text
+            const textLower = displayText.toLowerCase();
             let display;
             const idx = textLower.indexOf(queryLower);
             if (idx >= 0) {
-                display = escapeHtml(text.substring(0, idx))
-                    + '<mark>' + escapeHtml(text.substring(idx, idx + query.length)) + '</mark>'
-                    + escapeHtml(text.substring(idx + query.length));
+                display = escapeHtml(displayText.substring(0, idx))
+                    + '<mark>' + escapeHtml(displayText.substring(idx, idx + query.length)) + '</mark>'
+                    + escapeHtml(displayText.substring(idx + query.length));
             } else {
-                display = escapeHtml(text);
+                display = escapeHtml(displayText);
             }
             html += '<div class="suggest-item" data-index="' + i + '" data-value="' + escapeHtml(text) + '">'
                 + '<span class="suggest-icon">' + icon + '</span>'
@@ -2803,6 +2804,10 @@ class SearchHandler(BaseHTTPRequestHandler):
             
             total_results = len(filtered_results)
             
+            # Sort by date if requested
+            if sort_by == 'date' and hasattr(self.engine, 'pages_dir') and self.engine.pages_dir:
+                filtered_results = self._sort_by_date(filtered_results)
+            
             # Slice for current page
             start_idx = (page - 1) * per_page
             end_idx = start_idx + per_page
@@ -2869,6 +2874,28 @@ class SearchHandler(BaseHTTPRequestHandler):
             html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms, no_javascript=self.no_javascript)
         
         self.send_html(html_content)
+    
+    def _sort_by_date(self, results):
+        """Sort results by crawled_at date (newest first)."""
+        import json as _json
+        from .utils import url_to_filename
+        
+        pages_dir = self.engine.pages_dir
+        if not pages_dir:
+            return results
+        
+        def get_date(r):
+            url = r.get('url', '')
+            filename = url_to_filename(url) + '.json'
+            filepath = pages_dir / filename
+            try:
+                with open(filepath) as f:
+                    data = _json.load(f)
+                return data.get('crawled_at', 0)
+            except Exception:
+                return 0
+        
+        return sorted(results, key=get_date, reverse=True)
     
     def handle_suggest(self, query_string: str):
         """Handle /suggest endpoint for autocomplete suggestions.
@@ -3042,6 +3069,11 @@ class SearchHandler(BaseHTTPRequestHandler):
             
             total_results = len(filtered_results)
             
+            # Sort by date if requested
+            sort_by = query_params.get('sort', ['relevance'])[0]
+            if sort_by == 'date' and hasattr(self.engine, 'pages_dir') and self.engine.pages_dir:
+                filtered_results = self._sort_by_date(filtered_results)
+            
             # Slice for current page
             start_idx = (page - 1) * per_page
             end_idx = start_idx + per_page
@@ -3133,7 +3165,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         # Security: only serve file types we index
-        allowed_extensions = {'.pdf', '.docx', '.xlsx', '.html', '.htm'}
+        allowed_extensions = {'.pdf', '.docx', '.xlsx', '.pptx', '.html', '.htm'}
         if resolved.suffix.lower() not in allowed_extensions:
             self.send_error(403, "File type not allowed")
             return
