@@ -1107,6 +1107,7 @@ def cmd_index_files(args):
     from ..excel_extractor import ExcelExtractor
     from ..word_extractor import WordExtractor
     from ..pdf_extractor import PDFExtractor
+    from ..pptx_extractor import PPTXExtractor
     import hashlib
     
     directory = Path(args.directory)
@@ -1181,6 +1182,7 @@ def cmd_index_files(args):
     )
     word_extractor = WordExtractor()
     pdf_extractor = PDFExtractor()
+    pptx_extractor = PPTXExtractor()
     
     # Find and process files
     recursive = not getattr(args, 'no_recursive', False)
@@ -1270,6 +1272,8 @@ def cmd_index_files(args):
                 documents = excel_extractor.extract(file_path)
             elif ext == '.docx':
                 documents = word_extractor.extract(file_path)
+            elif ext == '.pptx':
+                documents = pptx_extractor.extract(file_path)
             elif ext == '.pdf':
                 # Extract PDF as one document per page for better search granularity
                 documents = pdf_extractor.extract_pages_from_file(file_path)
@@ -1361,7 +1365,7 @@ def cmd_index_files(args):
     processed = files_found - skipped
     print(f"Processed {processed} files, skipped {skipped} unchanged")
     if docs_by_type:
-        type_labels = {'pdf': 'PDFs', 'docx': 'Word docs', 'xlsx': 'Excel sheets', 'html': 'HTML pages', 'htm': 'HTML pages'}
+        type_labels = {'pdf': 'PDFs', 'docx': 'Word docs', 'xlsx': 'Excel sheets', 'pptx': 'PowerPoints', 'html': 'HTML pages', 'htm': 'HTML pages'}
         type_parts = []
         for dtype in sorted(docs_by_type.keys()):
             label = type_labels.get(dtype, dtype)
@@ -1499,6 +1503,7 @@ def cmd_serve(args):
     from ..server import run_server
     
     multi_site = getattr(args, 'all', False)
+    enable_synonyms = getattr(args, 'enable_synonyms', True)
     
     if multi_site:
         # Multi-site mode: use MultiSiteSearchEngine wrapped as a SearchEngine-like object
@@ -1556,7 +1561,6 @@ def cmd_serve(args):
                 print(style_error(f"Error loading synonyms file: {e}"))
                 return 1
         
-        enable_synonyms = getattr(args, 'synonyms', True) if not hasattr(args, 'enable_synonyms') else args.enable_synonyms
         cache_size = getattr(args, 'cache_size', 128)
         cache_ttl_arg = getattr(args, 'cache_ttl', 0)
         cache_file = getattr(args, 'cache_file', None)
@@ -1596,6 +1600,7 @@ def cmd_serve(args):
     no_javascript = getattr(args, 'no_javascript', False)
     server = run_server(engine, host=args.host, port=args.port, version=__version__, 
                        log_requests=log_requests, per_page=per_page, max_results=max_results,
+                       enable_synonyms=enable_synonyms,
                        no_javascript=no_javascript)
     
     url = f"http://{args.host}:{args.port}"

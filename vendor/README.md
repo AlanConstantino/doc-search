@@ -97,3 +97,36 @@ page.extract_text(visitor_text=visitor)
 - Optional dependencies (cryptography, Pillow) are NOT included
 - Encrypted PDFs will not be readable without installing cryptography separately
 - Image extraction requires Pillow (not vendored)
+
+---
+
+## python-pptx v1.0.2
+
+- **Source:** https://github.com/scanny/python-pptx
+- **License:** MIT
+- **Vendored:** 2026-02-18
+- **Purpose:** PowerPoint (.pptx) text extraction
+- **Python:** 3.8+ required
+
+### License Notice
+
+python-pptx is licensed under the MIT license.
+
+Copyright (c) 2013 Steve Canny, https://github.com/scanny
+
+### External Dependencies
+
+- **lxml** — Required, NOT vendored (C extension). Must be installed separately: `pip install lxml`
+- **Pillow** — Optional, for image extraction. NOT vendored.
+
+### Usage
+
+```python
+from vendor.pptx import Presentation
+
+prs = Presentation("slides.pptx")
+for slide in prs.slides:
+    for shape in slide.shapes:
+        if shape.has_text_frame:
+            print(shape.text_frame.text)
+```

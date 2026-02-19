@@ -271,14 +271,39 @@ def site_hash(url: str, include_path: bool = False) -> str:
 
 def resolve_url(base_url: str, href: str) -> str:
     """Resolve a relative URL against a base URL."""
+    # Sanitize href before resolving
+    href = sanitize_url(href)
     return urljoin(base_url, href)
+
+
+def sanitize_url(url: str) -> str:
+    """Remove control characters and clean up a URL.
+    
+    Strips control chars (except common whitespace), collapses whitespace,
+    and encodes any remaining invalid characters.
+    """
+    import re as _re
+    import urllib.parse as _up
+    # Remove control characters (0x00-0x1F, 0x7F) except tab/newline
+    url = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', url)
+    # Strip and collapse whitespace
+    url = url.strip()
+    # Encode spaces that snuck in
+    url = url.replace(' ', '%20')
+    return url
 
 
 def is_valid_url(url: str) -> bool:
     """Check if URL is valid for crawling."""
     try:
         parsed = urlparse(url)
-        return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+        if not (parsed.scheme in ('http', 'https') and bool(parsed.netloc)):
+            return False
+        # Reject URLs with remaining control characters
+        import re as _re
+        if _re.search(r'[\x00-\x1f\x7f]', url):
+            return False
+        return True
     except Exception:
         return False
 
