@@ -627,6 +627,11 @@ a:hover {
     color: white;
 }
 
+.doc-type-badge.pptx {
+    background: #ea580c;
+    color: white;
+}
+
 .doc-type-badge.html {
     background: var(--bg-tertiary);
     color: var(--text-muted);

@@ -75,6 +75,9 @@ class Colors:
     BRIGHT_CYAN = '\033[96m' if _supports_color else ''
     BRIGHT_WHITE = '\033[97m' if _supports_color else ''
     
+    # Extended colors (256-color)
+    ORANGE = '\033[38;5;208m' if _supports_color else ''
+    
     @classmethod
     def disable(cls):
         """Disable all colors."""

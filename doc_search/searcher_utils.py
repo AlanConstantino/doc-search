@@ -365,12 +365,14 @@ def format_results(
             'pdf': Colors.RED,
             'xlsx': Colors.GREEN,
             'docx': Colors.BLUE,
+            'pptx': Colors.ORANGE,
             'html': Colors.DIM,
         }
         type_labels = {
             'pdf': 'PDF',
             'xlsx': 'XLSX',
             'docx': 'DOCX',
+            'pptx': 'PPTX',
             'html': 'WEB',
         }
         color = type_colors.get(doc_type, Colors.YELLOW)
