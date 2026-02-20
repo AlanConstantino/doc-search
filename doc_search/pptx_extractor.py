@@ -4,6 +4,9 @@ PowerPoint (.pptx) text extraction using pure Python.
 A .pptx file is a ZIP archive containing XML. This module parses the
 slide XML directly using only stdlib (zipfile + xml.etree.ElementTree),
 so no third-party dependencies are needed.
+
+Returns one document per slide for granular search results (similar to
+how PDFs return one document per page).
 """
 
 import re
@@ -52,15 +55,75 @@ class PPTXExtractor:
 
     def extract(self, file_path: Path) -> List[Dict[str, Any]]:
         """
-        Extract text from a PowerPoint file.
-
-        Returns one document per presentation (all slides combined).
+        Extract text from a PowerPoint file, one document per slide.
 
         Args:
             file_path: Path to the .pptx file
 
         Returns:
-            List with one dict containing url, title, text, headings, metadata
+            List of dicts, one per slide, each with url, title, text, headings, metadata.
+            Empty slides are included with a placeholder note.
+        """
+        file_path = Path(file_path).resolve()
+
+        try:
+            zf = zipfile.ZipFile(file_path)
+        except Exception as e:
+            return [{'error': f'Failed to open PowerPoint file: {e}'}]
+
+        documents: List[Dict[str, Any]] = []
+        file_uri = file_path.as_uri()
+
+        with zf:
+            title, author = self._get_core_properties(zf)
+            slide_paths = self._get_slide_paths(zf)
+            total_slides = len(slide_paths)
+
+            # Use first slide title as doc title if core properties has none
+            doc_title = title
+
+            for slide_num, slide_path in enumerate(slide_paths, 1):
+                slide_parts, slide_title, headings = self._parse_slide(zf, slide_path)
+
+                # Set doc title from first slide if needed
+                if not doc_title and slide_num == 1 and slide_title:
+                    doc_title = slide_title
+
+                display_title = doc_title or file_path.stem
+                slide_text = '\n'.join(slide_parts)
+
+                # Clean control characters
+                slide_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', slide_text)
+
+                if not slide_text.strip():
+                    slide_text = f'[Slide {slide_num}: no text content]'
+
+                documents.append({
+                    'url': f'{file_uri}#slide={slide_num}',
+                    'title': f'{display_title} - Slide {slide_num}',
+                    'text': slide_text,
+                    'headings': headings,
+                    'metadata': {
+                        'doc_type': 'pptx',
+                        'slide': slide_num,
+                        'total_slides': total_slides,
+                        'slide_title': slide_title or '',
+                        'author': author,
+                        'source_file': str(file_path),
+                        'parent_title': display_title,
+                    },
+                })
+
+        return documents
+
+    def extract_combined(self, file_path: Path) -> List[Dict[str, Any]]:
+        """
+        Extract text from a PowerPoint file as a single combined document.
+
+        Used by the crawler where one URL = one document.
+
+        Returns:
+            List with one dict containing all slides combined.
         """
         file_path = Path(file_path).resolve()
 
@@ -70,79 +133,27 @@ class PPTXExtractor:
             return [{'error': f'Failed to open PowerPoint file: {e}'}]
 
         with zf:
-            # --- core properties (title, author) ---
-            title, author = '', ''
-            if 'docProps/core.xml' in zf.namelist():
-                try:
-                    core = ET.fromstring(zf.read('docProps/core.xml'))
-                    dc_title = core.find('dc:title', _NS)
-                    if dc_title is not None and dc_title.text:
-                        title = dc_title.text.strip()
-                    dc_creator = core.find('dc:creator', _NS)
-                    if dc_creator is not None and dc_creator.text:
-                        author = dc_creator.text.strip()
-                except Exception:
-                    pass
-
-            # --- discover slides via presentation.xml rels ---
+            title, author = self._get_core_properties(zf)
             slide_paths = self._get_slide_paths(zf)
             total_slides = len(slide_paths)
 
-            # --- per-slide relationships (for notes) ---
-            slides_text = []
-            headings: List[Tuple[int, str]] = []
+            all_slides_text = []
+            all_headings: List[Tuple[int, str]] = []
 
             for slide_num, slide_path in enumerate(slide_paths, 1):
-                try:
-                    slide_xml = ET.fromstring(zf.read(slide_path))
-                except Exception:
-                    continue
+                slide_parts, slide_title, headings = self._parse_slide(zf, slide_path)
+                all_headings.extend(headings)
 
-                slide_parts: List[str] = []
-                slide_title: Optional[str] = None
-
-                # Shape tree lives under p:cSld/p:spTree
-                sp_tree = slide_xml.find('.//p:cSld/p:spTree', _NS)
-                if sp_tree is not None:
-                    for sp in sp_tree.findall('p:sp', _NS):
-                        # Check if this is the title placeholder
-                        nv = sp.find('p:nvSpPr/p:nvPr/p:ph', _NS)
-                        is_title = False
-                        if nv is not None:
-                            ph_type = nv.get('type', '')
-                            ph_idx = nv.get('idx', '0')
-                            if ph_type in ('title', 'ctrTitle') or (ph_type == '' and ph_idx == '0'):
-                                is_title = True
-
-                        text = _get_text_from_element(sp).strip()
-                        if text:
-                            if is_title and not slide_title:
-                                slide_title = text
-                            slide_parts.append(text)
-
-                    # Tables
-                    for gf in sp_tree.iter(f'{{{_NS["p"]}}}graphicFrame'):
-                        slide_parts.extend(_extract_table_text(gf))
-
-                # --- notes ---
-                notes_text = self._get_notes(zf, slide_path)
-                if notes_text:
-                    slide_parts.append(f"Notes: {notes_text}")
-
-                if slide_title:
-                    headings.append((2, slide_title))
-                    if not title and slide_num == 1:
-                        title = slide_title
+                if not title and slide_num == 1 and slide_title:
+                    title = slide_title
 
                 if slide_parts:
-                    header = f"Slide {slide_num}"
+                    header = f'Slide {slide_num}'
                     if slide_title:
-                        header += f": {slide_title}"
-                    slides_text.append(header + "\n" + "\n".join(slide_parts))
+                        header += f': {slide_title}'
+                    all_slides_text.append(header + '\n' + '\n'.join(slide_parts))
 
-        full_text = "\n\n".join(slides_text)
-
-        # Clean control characters
+        full_text = '\n\n'.join(all_slides_text)
         full_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', full_text)
 
         if not title:
@@ -152,7 +163,7 @@ class PPTXExtractor:
             'url': file_path.as_uri(),
             'title': title,
             'text': full_text,
-            'headings': headings,
+            'headings': all_headings,
             'metadata': {
                 'doc_type': 'pptx',
                 'total_slides': total_slides,
@@ -164,12 +175,68 @@ class PPTXExtractor:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _parse_slide(
+        self, zf: zipfile.ZipFile, slide_path: str
+    ) -> Tuple[List[str], Optional[str], List[Tuple[int, str]]]:
+        """Parse a single slide XML and return (text_parts, slide_title, headings)."""
+        try:
+            slide_xml = ET.fromstring(zf.read(slide_path))
+        except Exception:
+            return [], None, []
+
+        slide_parts: List[str] = []
+        slide_title: Optional[str] = None
+        headings: List[Tuple[int, str]] = []
+
+        sp_tree = slide_xml.find('.//p:cSld/p:spTree', _NS)
+        if sp_tree is not None:
+            for sp in sp_tree.findall('p:sp', _NS):
+                nv = sp.find('p:nvSpPr/p:nvPr/p:ph', _NS)
+                is_title = False
+                if nv is not None:
+                    ph_type = nv.get('type', '')
+                    ph_idx = nv.get('idx', '0')
+                    if ph_type in ('title', 'ctrTitle') or (ph_type == '' and ph_idx == '0'):
+                        is_title = True
+
+                text = _get_text_from_element(sp).strip()
+                if text:
+                    if is_title and not slide_title:
+                        slide_title = text
+                        headings.append((2, text))
+                    slide_parts.append(text)
+
+            for gf in sp_tree.iter(f'{{{_NS["p"]}}}graphicFrame'):
+                slide_parts.extend(_extract_table_text(gf))
+
+        notes_text = self._get_notes(zf, slide_path)
+        if notes_text:
+            slide_parts.append(f'Notes: {notes_text}')
+
+        return slide_parts, slide_title, headings
+
+    @staticmethod
+    def _get_core_properties(zf: zipfile.ZipFile) -> Tuple[str, str]:
+        """Return (title, author) from core properties XML."""
+        title, author = '', ''
+        if 'docProps/core.xml' in zf.namelist():
+            try:
+                core = ET.fromstring(zf.read('docProps/core.xml'))
+                dc_title = core.find('dc:title', _NS)
+                if dc_title is not None and dc_title.text:
+                    title = dc_title.text.strip()
+                dc_creator = core.find('dc:creator', _NS)
+                if dc_creator is not None and dc_creator.text:
+                    author = dc_creator.text.strip()
+            except Exception:
+                pass
+        return title, author
+
     @staticmethod
     def _get_slide_paths(zf: zipfile.ZipFile) -> List[str]:
         """Return slide XML paths in order from presentation.xml.rels."""
         rels_path = 'ppt/_rels/presentation.xml.rels'
         if rels_path not in zf.namelist():
-            # Fallback: glob for slide files and sort
             slides = sorted(
                 n for n in zf.namelist()
                 if re.match(r'ppt/slides/slide\d+\.xml$', n)
@@ -185,7 +252,6 @@ class PPTXExtractor:
         for rel in rels.findall(f'{{{_NS["rel"]}}}Relationship'):
             target = rel.get('Target', '')
             if target.startswith('slides/slide'):
-                # Extract slide number for sorting
                 m = re.search(r'slide(\d+)\.xml', target)
                 num = int(m.group(1)) if m else 0
                 slide_rels.append((num, f'ppt/{target}'))
@@ -196,9 +262,7 @@ class PPTXExtractor:
     @staticmethod
     def _get_notes(zf: zipfile.ZipFile, slide_path: str) -> str:
         """Extract notes text for a given slide path."""
-        # Notes relationship lives in slide rels
-        # e.g. ppt/slides/_rels/slide1.xml.rels -> ../notesSlides/notesSlide1.xml
-        slide_name = Path(slide_path).name  # slide1.xml
+        slide_name = Path(slide_path).name
         rels_path = f'ppt/slides/_rels/{slide_name}.rels'
         if rels_path not in zf.namelist():
             return ''
@@ -211,7 +275,6 @@ class PPTXExtractor:
         for rel in rels.findall(f'{{{_NS["rel"]}}}Relationship'):
             target = rel.get('Target', '')
             if 'notesSlide' in target:
-                # Resolve relative path
                 notes_path = f'ppt/notesSlides/{Path(target).name}'
                 if notes_path in zf.namelist():
                     try:

@@ -671,7 +671,7 @@ class Crawler:
         """Extract PowerPoint from a temp file path and save page data."""
         import os
         try:
-            documents = self._pptx_extractor.extract(tmp_path)
+            documents = self._pptx_extractor.extract_combined(tmp_path)
             if not documents or (len(documents) == 1 and documents[0].get('error')):
                 error = documents[0]['error'] if documents else 'No content extracted'
                 self._log(f"  PowerPoint extraction failed: {error}")
