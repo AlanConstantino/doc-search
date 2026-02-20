@@ -62,7 +62,7 @@ class PPTXExtractor:
         Returns:
             List with one dict containing url, title, text, headings, metadata
         """
-        file_path = Path(file_path)
+        file_path = Path(file_path).resolve()
 
         try:
             zf = zipfile.ZipFile(file_path)
