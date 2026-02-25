@@ -332,12 +332,18 @@ def format_results(
             lines.append(perf_line)
         lines.append("")
     
+    # Compute max score for percentage display
+    max_score = max((r.get('score', 0) for r in results), default=1.0)
+    if max_score <= 0:
+        max_score = 1.0
+    
     for i, result in enumerate(results, start_index + 1):
         title = result.get('title', 'Untitled') or 'Untitled'
         url = result['url']
         # Prefer snippet (with highlighting) over description
         snippet = result.get('snippet', '') or result.get('description', '')
         score = result.get('score', 0)
+        score_pct = int((score / max_score) * 100)
         
         # Truncate title if too long
         if len(title) > MAX_TITLE_LENGTH:
@@ -383,7 +389,7 @@ def format_results(
         # Build the result lines with colors
         if colorize_output:
             if show_scores:
-                lines.append(f"{style_number(i)} {style_score(score)} {style_title(title)}{type_badge}")
+                lines.append(f"{style_number(i)} {style_score(score)} {Colors.DIM}({score_pct}%){Colors.RESET} {style_title(title)}{type_badge}")
             else:
                 lines.append(f"{style_number(i)} {style_title(title)}{type_badge}")
             
@@ -394,7 +400,7 @@ def format_results(
         else:
             # Plain text output
             if show_scores:
-                lines.append(f"{i}. [{score:.4f}] {title}{type_badge_plain}")
+                lines.append(f"{i}. [{score:.4f}] ({score_pct}%) {title}{type_badge_plain}")
             else:
                 lines.append(f"{i}. {title}{type_badge_plain}")
             

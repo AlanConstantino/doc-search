@@ -1867,7 +1867,7 @@ JAVASCRIPT = """
                     ${docTypeBadge}
                     <span class="result-score" title="Score: ${r.score.toFixed(2)}">
                         <span class="result-score-bar"><span class="result-score-fill ${scoreClass}" style="width: ${r.score_pct}%"></span></span>
-                        <span class="result-score-pct ${scoreClass}">${r.score_pct}%</span>
+                        <span class="result-score-pct ${scoreClass}">${r.score_pct}% <span style="opacity:0.5;font-size:0.85em">(${r.score.toFixed(2)})</span></span>
                     </span>
                 </div>
                 <div class="result-url">${escapeHtml(r.original_url || r.url)}</div>
@@ -2397,7 +2397,7 @@ def render_page(
                     score_color = 'score-low'
                 score_html = f'''<span class="result-score" title="Score: {score:.2f}">
                     <span class="result-score-bar"><span class="result-score-fill {score_color}" style="width: {score_pct}%"></span></span>
-                    <span class="result-score-pct {score_color}">{score_pct}%</span>
+                    <span class="result-score-pct {score_color}">{score_pct}% <span style="opacity:0.5;font-size:0.85em">({score:.2f})</span></span>
                 </span>''' if show_scores else ''
                 
                 doc_type_badge = f'<span class="doc-type-badge {doc_type}">{doc_type}</span>'
