@@ -637,6 +637,9 @@ class Reranker:
         self._last_metrics.rerank_count = len(rerank_candidates)
         
         # Normalize BM25 scores
+        max_raw_bm25 = max((c.get('score', 0) for c in rerank_candidates), default=1.0)
+        if max_raw_bm25 <= 0:
+            max_raw_bm25 = 1.0
         self._normalize_bm25_scores(rerank_candidates)
         
         # Compute rerank scores
@@ -656,6 +659,12 @@ class Reranker:
             
             doc['final_score'] = final_score
             doc['_rerank_components'] = components
+        
+        # Restore score magnitude: scale from 0-1 range back to original BM25 range
+        for doc in rerank_candidates:
+            doc['final_score'] = doc.get('final_score', 0) * max_raw_bm25
+            if '_rerank_components' in doc:
+                doc['_rerank_components']['scale_factor'] = max_raw_bm25
         
         # Sort by final score
         rerank_candidates.sort(key=lambda x: x.get('final_score', 0), reverse=True)

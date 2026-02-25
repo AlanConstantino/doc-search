@@ -115,10 +115,10 @@ RERANK_MAX_CANDIDATES = 500
 RERANK_CANDIDATE_LIMIT = 100
 
 # Score component weights (must sum to ~1.0)
-RERANK_WEIGHT_BM25 = 0.35          # Base BM25 relevance
-RERANK_WEIGHT_FIELD = 0.30         # Field-aware term matching (title > headings > body)
-RERANK_WEIGHT_COVERAGE = 0.20      # Query term coverage
-RERANK_WEIGHT_PHRASE = 0.15        # Phrase/proximity matches
+RERANK_WEIGHT_BM25 = 0.60          # Base BM25 relevance (dominant signal)
+RERANK_WEIGHT_FIELD = 0.20         # Field-aware term matching (title > headings > body)
+RERANK_WEIGHT_COVERAGE = 0.10      # Query term coverage
+RERANK_WEIGHT_PHRASE = 0.10        # Phrase/proximity matches
 
 # Coverage boost strength (beta parameter)
 # coverage=1.0 (all terms) → boost = 1 + beta
