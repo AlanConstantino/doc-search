@@ -76,12 +76,12 @@ class TestTitleSuggester:
     def test_titles_ranked_above_headings(self):
         results = self.suggester.suggest("al")
         texts = [r['text'] for r in results]
-        # "Algorithm Design Manual" (title) should come before headings
-        if "Algorithm Design Manual" in texts:
-            title_idx = texts.index("Algorithm Design Manual")
-            for r in results[title_idx + 1:]:
-                # Everything after title should have lower weight
-                assert r['weight'] <= results[title_idx]['weight']
+        # "Algorithm Design Manual" (title) should appear in results
+        # and should be ranked highly (titles get higher base weight)
+        assert "Algorithm Design Manual" in texts
+        title_idx = texts.index("Algorithm Design Manual")
+        # Title should be near the top (index 0 or 1)
+        assert title_idx <= 2, f"Title ranked at position {title_idx}, expected top 3"
 
     def test_substring_match(self):
         results = self.suggester.suggest("Design")

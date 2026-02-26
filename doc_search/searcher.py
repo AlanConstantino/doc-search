@@ -1084,9 +1084,11 @@ class EnhancedSearchEngine(SearchEngine):
             If no title matches, returns word suggestions as
             [{'text': word, 'doc_type': None, 'url': None}, ...]
         """
-        # Try title suggestions first
+        # Use title suggester with SymSpell for fuzzy multi-term matching
         if self._title_suggester:
-            results = self._title_suggester.suggest(prefix, max_suggestions)
+            results = self._title_suggester.suggest(
+                prefix, max_suggestions, symspell=self._symspell
+            )
             if results:
                 return results
         
