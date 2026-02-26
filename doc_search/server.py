@@ -2055,6 +2055,7 @@ JAVASCRIPT = """
             <span class="results-count">✓ Found ${data.total} result${data.total !== 1 ? 's' : ''}</span>
             <span class="results-time">in ${data.elapsed_ms.toFixed(1)}ms</span>
             <span class="results-query">showing ${startNum}-${endNum} for "${escapeHtml(data.query)}"</span>
+            <a href="/api/search?q=${encodeURIComponent(data.query)}&format=csv&limit=50" class="result-action-btn" style="margin-left:8px;font-size:0.85em" title="Export as CSV">Export CSV</a>
         `;
         
         // Render facets
@@ -3082,6 +3083,7 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         # Get exact match toggle
         exact_match = query_params.get('exact', [''])[0] == '1'
+        output_format = query_params.get('format', ['json'])[0]
         group_by_section = query_params.get('group', [''])[0] == '1'
 
         max_results = self.max_results
@@ -3227,11 +3229,36 @@ class SearchHandler(BaseHTTPRequestHandler):
                 'global_max_score': round(global_max_score, 4)
             }
             
+            if output_format == 'csv':
+                import csv
+                import io
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                writer.writerow(['url', 'title', 'score', 'snippet'])
+                for jr in json_results:
+                    writer.writerow([
+                        jr.get('original_url') or jr['url'],
+                        jr['title'],
+                        jr['score'],
+                        jr.get('snippet', '')
+                    ])
+                body = buf.getvalue().encode('utf-8')
+                try:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/csv; charset=utf-8')
+                    self.send_header('Content-Disposition', 'attachment; filename="results.csv"')
+                    self.send_header('Content-Length', len(body))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+
             self.send_json(response)
-            
+
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
-    
+
     def handle_serve_file(self, encoded_path: str, query_string: str = ''):
         """Serve a local file referenced by file:// URL.
         
