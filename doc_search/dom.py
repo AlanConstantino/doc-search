@@ -477,6 +477,115 @@ def _extract_headings(element: Element) -> List[Tuple[int, str]]:
     return headings
 
 
+def _format_table(table: Element) -> str:
+    """Format a table as Header:Value pairs (or plain rows)."""
+    headers: List[str] = []
+    # Look for header row in <thead> or first <tr> with <th> cells
+    thead = table.find('thead')
+    if thead:
+        for th in thead.find_all('th'):
+            headers.append(th.get_text().strip())
+    else:
+        # Check first row for <th> cells
+        first_tr = table.find('tr')
+        if first_tr:
+            ths = first_tr.find_all('th')
+            if ths:
+                headers = [th.get_text().strip() for th in ths]
+
+    rows: List[str] = []
+    for tr in table.find_all('tr'):
+        cells = tr.find_all('td')
+        if not cells:
+            # Skip header-only rows
+            if not headers:
+                ths = tr.find_all('th')
+                if ths:
+                    headers = [th.get_text().strip() for th in ths]
+            continue
+        values = [td.get_text().strip() for td in cells]
+        if headers and len(headers) == len(values):
+            pairs = [f"{h}: {v}" for h, v in zip(headers, values) if v]
+            rows.append('; '.join(pairs))
+        else:
+            rows.append(' | '.join(values))
+    return ' . '.join(rows)
+
+
+def _format_code_block(element: Element) -> str:
+    """Preserve code/pre block content."""
+    parts: List[str] = []
+    _collect_raw_text(element, parts)
+    return ' '.join(''.join(parts).split())
+
+
+def _collect_raw_text(element: Element, parts: List[str]) -> None:
+    """Collect text including whitespace-only nodes."""
+    for child in element.children:
+        if isinstance(child, Text):
+            parts.append(child.content)
+        elif isinstance(child, Element):
+            _collect_raw_text(child, parts)
+
+
+def _format_dl(dl: Element) -> str:
+    """Format a definition list as Term: Definition pairs."""
+    pairs: List[str] = []
+    current_term = None
+    for child in dl.children:
+        if isinstance(child, Element):
+            if child.tag == 'dt':
+                current_term = child.get_text().strip()
+            elif child.tag == 'dd':
+                definition = child.get_text().strip()
+                if current_term:
+                    pairs.append(f"{current_term}: {definition}")
+                else:
+                    pairs.append(definition)
+                current_term = None
+    return ' . '.join(pairs)
+
+
+def _format_structured_elements(element: Element) -> None:
+    """Replace tables, code blocks, and definition lists with formatted text."""
+    # Process children in reverse to allow safe replacement
+    children_copy = list(element.children)
+    for child in children_copy:
+        if not isinstance(child, Element):
+            continue
+
+        if child.tag == 'table':
+            formatted = _format_table(child)
+            if formatted:
+                text_node = Text(' ' + formatted + ' ')
+                text_node.parent = element
+                idx = element.children.index(child)
+                element.children[idx] = text_node
+            continue
+
+        if child.tag in ('pre', 'code'):
+            # Only format top-level code/pre (not code inside pre)
+            formatted = _format_code_block(child)
+            if formatted:
+                text_node = Text(' ' + formatted + ' ')
+                text_node.parent = element
+                idx = element.children.index(child)
+                element.children[idx] = text_node
+            continue
+
+        if child.tag == 'dl':
+            formatted = _format_dl(child)
+            if formatted:
+                text_node = Text(' ' + formatted + ' ')
+                text_node.parent = element
+                idx = element.children.index(child)
+                element.children[idx] = text_node
+            continue
+
+        # Recurse into other elements
+        _format_structured_elements(child)
+
+
 def extract_text_dom(html: str, include_nav: bool = False) -> Dict[str, Any]:
     """
     Extract text content from HTML using DOM tree parsing.
@@ -521,6 +630,9 @@ def extract_text_dom(html: str, include_nav: bool = False) -> Dict[str, Any]:
         # Include all content when include_nav=True
         main = body
     
+    # Format structured elements (tables, code, definition lists)
+    _format_structured_elements(main)
+
     # Extract text and headings from main content
     text = main.get_text()
     headings = _extract_headings(main)

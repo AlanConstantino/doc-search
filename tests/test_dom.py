@@ -353,5 +353,60 @@ class TestExtractTextDom(unittest.TestCase):
         self.assertIn('headings', result)
 
 
+class TestStructuredElements(unittest.TestCase):
+    """Tests for table, code block, and definition list extraction."""
+
+    def test_table_with_headers(self):
+        """Should extract table rows as Header:Value pairs."""
+        html = '''<html><body><main>
+        <table>
+            <thead><tr><th>Name</th><th>Age</th></tr></thead>
+            <tbody><tr><td>Alice</td><td>30</td></tr>
+            <tr><td>Bob</td><td>25</td></tr></tbody>
+        </table></main></body></html>'''
+        result = extract_text_dom(html)
+        self.assertIn('Name: Alice', result['text'])
+        self.assertIn('Age: 30', result['text'])
+        self.assertIn('Name: Bob', result['text'])
+
+    def test_table_without_headers(self):
+        """Should extract table rows with pipe separators when no headers."""
+        html = '''<html><body><main>
+        <table><tr><td>Cell1</td><td>Cell2</td></tr></table>
+        </main></body></html>'''
+        result = extract_text_dom(html)
+        self.assertIn('Cell1', result['text'])
+        self.assertIn('Cell2', result['text'])
+
+    def test_code_block_preserved(self):
+        """Should preserve code block content."""
+        html = '<html><body><main><pre><code>def hello():\n    print("hi")</code></pre></main></body></html>'
+        result = extract_text_dom(html)
+        self.assertIn('def hello()', result['text'])
+        self.assertIn('print', result['text'])
+
+    def test_definition_list(self):
+        """Should format dl as Term: Definition pairs."""
+        html = '''<html><body><main>
+        <dl>
+            <dt>Python</dt><dd>A programming language</dd>
+            <dt>HTML</dt><dd>A markup language</dd>
+        </dl></main></body></html>'''
+        result = extract_text_dom(html)
+        self.assertIn('Python: A programming language', result['text'])
+        self.assertIn('HTML: A markup language', result['text'])
+
+    def test_table_th_in_first_row(self):
+        """Should detect headers from th cells in first row."""
+        html = '''<html><body><main>
+        <table>
+            <tr><th>Key</th><th>Value</th></tr>
+            <tr><td>color</td><td>blue</td></tr>
+        </table></main></body></html>'''
+        result = extract_text_dom(html)
+        self.assertIn('Key: color', result['text'])
+        self.assertIn('Value: blue', result['text'])
+
+
 if __name__ == '__main__':
     unittest.main()
