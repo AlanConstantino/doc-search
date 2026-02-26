@@ -5,23 +5,35 @@ Scores suggestion entries (page titles, section headings, filenames)
 against user input using multi-term matching, prefix boosting,
 and optional fuzzy expansion via SymSpell.
 
+Uses edge n-gram indexing for O(1) candidate lookup instead of
+scanning all entries on every keystroke.
+
 Architecture:
-    User types "pythn clas"
-        ↓
-    [1] Tokenize → ["pythn", "clas"]
-        ↓
-    [2] Fuzzy expand → {"pythn": ["python"], "clas": ["class", "classes"]}
-        ↓
-    [3] Score all entries against original + expanded terms
-        ↓
-    [4] Return top N, sorted by score
+    Index time:
+        "Python Tutorial" → words: ["python", "tutorial"]
+        Edge n-grams: py→{0}, pyt→{0}, pyth→{0}, ..., tu→{0}, tut→{0}, ...
+        (entry indices stored in sets per n-gram)
+
+    Query time:
+        User types "pythn clas"
+            ↓
+        [1] Tokenize → ["pythn", "clas"]
+            ↓
+        [2] Fuzzy expand → {"pythn": ["python"], "clas": ["class", "classes"]}
+            ↓
+        [3] Look up candidates via n-gram index (set intersection for multi-term)
+            ↓
+        [4] Score only candidate entries
+            ↓
+        [5] Return top N, sorted by score
 """
 
 import json
 import gzip
 import re
+from collections import defaultdict
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple
+from typing import List, Dict, Optional, Set
 
 
 # Headings to skip (navigation, boilerplate)
@@ -38,12 +50,11 @@ _MIN_HEADING_LEN = 4
 # Max heading level to index (h1-h3 are useful, h4+ are too granular)
 _MAX_HEADING_LEVEL = 3
 
-# Scoring constants
-_WEIGHT_TITLE = 100       # Base weight for page titles
-_WEIGHT_H1 = 80           # Base weight for h1 headings
-_WEIGHT_H2 = 60           # h2
-_WEIGHT_H3 = 40           # h3
+# Edge n-gram settings
+_MIN_NGRAM = 2    # Minimum n-gram length (matches SUGGEST_MIN_CHARS in JS)
+_MAX_NGRAM = 10   # Maximum n-gram length (longer prefixes are rare)
 
+# Scoring constants
 _BONUS_PREFIX_START = 30   # Entry text starts with the user's term
 _BONUS_WORD_PREFIX = 20    # A word in the entry starts with the user's term
 _BONUS_SUBSTRING = 5       # Term found as substring anywhere
@@ -53,10 +64,19 @@ _BONUS_EARLY_POSITION = 8  # Term matches in first word of entry
 
 _PENALTY_FUZZY = 5         # Per-term penalty when match came from fuzzy expansion
 
+# Max candidates to score per query (safety cap for huge indices)
+_MAX_CANDIDATES = 500
+
 
 class TitleSuggester:
     """
     Indexes page titles and headings for autocomplete suggestions.
+    
+    Uses edge n-gram indexing for fast candidate lookup:
+    - At index time, each word in each entry generates edge n-grams
+      (e.g., "python" → "py", "pyt", "pyth", "pytho", "python")
+    - Each n-gram maps to a set of entry indices
+    - At query time, candidate entries are found via hash lookup, then scored
     
     Each entry has:
     - text: the suggestion text (title or heading)
@@ -70,6 +90,66 @@ class TitleSuggester:
     def __init__(self):
         self.entries: List[Dict] = []
         self._seen: set = set()
+        # Edge n-gram index: ngram_string → set of entry indices
+        self._ngram_index: Dict[str, Set[int]] = defaultdict(set)
+        # Whether the n-gram index needs rebuilding
+        self._index_dirty: bool = False
+    
+    def _build_ngram_index(self):
+        """Build/rebuild the edge n-gram index from all entries."""
+        self._ngram_index = defaultdict(set)
+        for idx, entry in enumerate(self.entries):
+            words = entry.get('words') or self._tokenize(entry['text'])
+            for word in words:
+                # Generate edge n-grams for this word
+                for n in range(_MIN_NGRAM, min(len(word) + 1, _MAX_NGRAM + 1)):
+                    self._ngram_index[word[:n]].add(idx)
+                # Also index the full word if longer than MAX_NGRAM
+                if len(word) > _MAX_NGRAM:
+                    self._ngram_index[word].add(idx)
+        self._index_dirty = False
+    
+    def _ensure_index(self):
+        """Ensure the n-gram index is built and up to date."""
+        if self._index_dirty or not self._ngram_index:
+            self._build_ngram_index()
+    
+    def _get_candidates(
+        self,
+        terms: List[str],
+        expanded_terms: Optional[Dict[str, List[str]]] = None,
+    ) -> Set[int]:
+        """
+        Get candidate entry indices that match at least one query term.
+        
+        For multi-term queries, we union candidates from each term
+        (not intersect) because partial matches are still valuable
+        and the scoring function handles ranking.
+        
+        Args:
+            terms: Original query terms (lowercase)
+            expanded_terms: Fuzzy expansions per term
+            
+        Returns:
+            Set of entry indices to score
+        """
+        self._ensure_index()
+        candidates: Set[int] = set()
+        
+        for term in terms:
+            # Look up original term
+            ngram_key = term[:_MAX_NGRAM] if len(term) > _MAX_NGRAM else term
+            if ngram_key in self._ngram_index:
+                candidates.update(self._ngram_index[ngram_key])
+            
+            # Look up fuzzy expansions
+            if expanded_terms and term in expanded_terms:
+                for expansion in expanded_terms[term]:
+                    exp_key = expansion[:_MAX_NGRAM] if len(expansion) > _MAX_NGRAM else expansion
+                    if exp_key in self._ngram_index:
+                        candidates.update(self._ngram_index[exp_key])
+        
+        return candidates
     
     def add_page(self, title: str, url: str, doc_type: str = 'html',
                  headings: Optional[List] = None):
@@ -90,9 +170,10 @@ class TitleSuggester:
                     'text': clean_title,
                     'doc_type': doc_type,
                     'url': url,
-                    'weight': _WEIGHT_TITLE,
+                    'weight': 100,
                     'words': self._tokenize(clean_title),
                 })
+                self._index_dirty = True
         
         if headings:
             for heading in headings:
@@ -120,6 +201,7 @@ class TitleSuggester:
                     'weight': weight,
                     'words': self._tokenize(clean),
                 })
+                self._index_dirty = True
     
     def _clean_text(self, text: str) -> str:
         """Clean suggestion text."""
@@ -242,6 +324,9 @@ class TitleSuggester:
         """
         Get suggestions matching a query with multi-term and fuzzy support.
         
+        Uses edge n-gram index for fast candidate lookup, then scores
+        only the matching entries instead of scanning all entries.
+        
         Args:
             query: User input (may be partial, multi-word, have typos)
             max_suggestions: Maximum results
@@ -271,14 +356,27 @@ class TitleSuggester:
                     if expansions:
                         expanded_terms[term] = expansions
         
-        # Step 3: Score all entries
+        # Step 3: Get candidates via n-gram index (O(1) lookup)
+        candidate_indices = self._get_candidates(query_terms, expanded_terms)
+        
+        if not candidate_indices:
+            return []
+        
+        # Safety cap: if too many candidates, take a random-ish subset
+        # (in practice this rarely triggers — n-grams are selective enough)
+        if len(candidate_indices) > _MAX_CANDIDATES:
+            # Sort indices so results are deterministic, take first N
+            candidate_indices = set(sorted(candidate_indices)[:_MAX_CANDIDATES])
+        
+        # Step 4: Score only candidate entries
         scored = []
-        for entry in self.entries:
+        for idx in candidate_indices:
+            entry = self.entries[idx]
             score = self._score_entry(entry, query_terms, expanded_terms)
             if score > 0:
                 scored.append((entry, score))
         
-        # Step 4: Sort by score desc, then alphabetically
+        # Step 5: Sort by score desc, then alphabetically
         scored.sort(key=lambda x: (-x[1], x[0]['text'].lower()))
         
         # Return top N (strip internal fields like 'words')
@@ -323,8 +421,12 @@ class TitleSuggester:
             except (json.JSONDecodeError, IOError):
                 continue
         
+        # Build n-gram index after all pages are added
+        self._build_ngram_index()
+        
         if verbose:
-            print(f"Title suggester: {len(self.entries)} entries from {count} pages")
+            print(f"Title suggester: {len(self.entries)} entries from {count} pages "
+                  f"({len(self._ngram_index)} n-grams)")
         
         return len(self.entries)
     
@@ -367,11 +469,14 @@ class TitleSuggester:
         for entry in suggester.entries:
             entry['words'] = suggester._tokenize(entry['text'])
         suggester._seen = {e['text'].lower() for e in suggester.entries}
+        # Build n-gram index
+        suggester._build_ngram_index()
         
         return suggester
     
     def get_stats(self) -> Dict:
         """Get stats about the suggestion index."""
+        self._ensure_index()
         type_counts = {}
         for entry in self.entries:
             dt = entry.get('doc_type', 'unknown')
@@ -380,4 +485,5 @@ class TitleSuggester:
         return {
             'total_entries': len(self.entries),
             'by_type': type_counts,
+            'ngram_count': len(self._ngram_index),
         }
