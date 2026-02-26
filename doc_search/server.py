@@ -41,6 +41,19 @@ def _e(name: str) -> str:
     emoji, fallback = _EMOJI_MAP.get(name, ('', ''))
     return fallback if _NO_EMOJI else emoji
 
+# Document type icons
+DOC_TYPE_ICONS = {
+    'pdf': '\U0001f4c4',   # 📄
+    'docx': '\U0001f4dd',  # 📝
+    'xlsx': '\U0001f4ca',  # 📊
+    'pptx': '\U0001f4ca',  # 📊
+    'html': '\U0001f310',  # 🌐
+}
+
+def _doc_icon(doc_type: str) -> str:
+    """Return emoji icon for a document type."""
+    return DOC_TYPE_ICONS.get(doc_type, DOC_TYPE_ICONS['html'])
+
 
 # ============================================================================
 # CSS Styles - Beautiful dark theme with light mode support
@@ -1863,7 +1876,9 @@ JAVASCRIPT = """
         const scoreClass = getScoreClass(r.score_pct);
         const snippet = r.snippet ? '<div class="result-snippet">' + highlightSnippet(r.snippet) + '</div>' : '';
         const docType = r.doc_type || 'html';
-        const docTypeBadge = `<span class="doc-type-badge ${docType}">${docType}</span>`;
+        const docIcons = {pdf:'📄',docx:'📝',xlsx:'📊',pptx:'📊',html:'🌐'};
+        const docIcon = docIcons[docType] || docIcons.html;
+        const docTypeBadge = `<span class="doc-type-badge ${docType}">${docIcon} ${docType}</span>`;
         
         // Action buttons: web pages get Visit + Copy, files get Download + Copy
         const isFile = r.url.startsWith('/files/');
@@ -2421,7 +2436,8 @@ def render_page(
                     <span class="result-score-pct {score_color}">{score_pct}% <span style="opacity:0.5;font-size:0.85em">({score:.2f})</span></span>
                 </span>''' if show_scores else ''
                 
-                doc_type_badge = f'<span class="doc-type-badge {doc_type}">{doc_type}</span>'
+                doc_icon = _doc_icon(doc_type)
+                doc_type_badge = f'<span class="doc-type-badge {doc_type}">{doc_icon} {doc_type}</span>'
                 snippet_html = f'<div class="result-snippet">{snippet}</div>' if snippet else ""
                 
                 results_html += f'''
