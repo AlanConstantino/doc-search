@@ -1648,6 +1648,23 @@ JAVASCRIPT = """
         });
     }
     
+    function setupClickTracking() {
+        document.querySelectorAll('.result-title').forEach(link => {
+            if (link.dataset.tracked) return;
+            link.dataset.tracked = '1';
+            link.addEventListener('click', () => {
+                const result = link.closest('.result');
+                const rank = result ? result.querySelector('.result-number')?.textContent : '0';
+                const q = document.querySelector('.search-input')?.value || '';
+                fetch('/api/click', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({query: q, url: link.href, rank: parseInt(rank) || 0})
+                }).catch(() => {});
+            });
+        });
+    }
+
     // ========================================================================
     // Infinite Scroll (#176)
     // ========================================================================
@@ -1937,6 +1954,7 @@ JAVASCRIPT = """
         });
         
         setupCopyLinkButtons();
+        setupClickTracking();
     }
     
     function updateResultsInfo(loaded, total) {
@@ -2050,6 +2068,7 @@ JAVASCRIPT = """
         }
         
         setupCopyLinkButtons();
+        setupClickTracking();
     }
     
     function showButtonLoading() {
@@ -2235,6 +2254,7 @@ JAVASCRIPT = """
         setupInfiniteScroll();
         setupFacetButtons();
         setupCopyLinkButtons();
+        setupClickTracking();
         bindEvents();
         
         // Remove datalist binding when JS suggest dropdown is active
@@ -2907,6 +2927,44 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         return sorted(results, key=get_date, reverse=True)
     
+    def do_POST(self):
+        """Handle POST requests."""
+        parsed = urllib.parse.urlparse(self.path)
+
+        if parsed.path == '/api/click':
+            self.handle_api_click()
+            return
+
+        self.send_error(404)
+
+    def handle_api_click(self):
+        """Log a click on a search result."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            data = json.loads(body)
+        except Exception:
+            self.send_json({'error': 'invalid request'}, 400)
+            return
+
+        if self.query_log:
+            import sqlite3
+            with self.query_log._lock:
+                self.query_log._conn.execute(
+                    'CREATE TABLE IF NOT EXISTS click_log ('
+                    '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                    '  query TEXT, url TEXT, rank INTEGER, timestamp REAL'
+                    ')'
+                )
+                self.query_log._conn.execute(
+                    'INSERT INTO click_log (query, url, rank, timestamp) VALUES (?, ?, ?, ?)',
+                    (data.get('query', ''), data.get('url', ''),
+                     data.get('rank', 0), time.time())
+                )
+                self.query_log._conn.commit()
+
+        self.send_json({'ok': True})
+
     def handle_suggest(self, query_string: str):
         """Handle /suggest endpoint for autocomplete suggestions.
         
