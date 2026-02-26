@@ -15,7 +15,6 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 from .indexer import BM25Index
 from .utils import tokenize
 from .spellcheck import SpellChecker
-from .autocomplete import Autocomplete
 from .facets import FacetIndex
 from .synonyms import SynonymExpander
 from .symspell import SymSpell
@@ -666,7 +665,7 @@ class EnhancedSearchEngine(SearchEngine):
     
     def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None,
                  enable_spellcheck: bool = True,
-                 enable_autocomplete: bool = True,
+                 enable_autocomplete: bool = True,  # Kept for API compat, ignored
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
                  enable_symspell: bool = True,
@@ -702,7 +701,6 @@ class EnhancedSearchEngine(SearchEngine):
                          cache_path=cache_path, index_path=index_path)
         
         self._spellcheck_enabled = enable_spellcheck
-        self._autocomplete_enabled = enable_autocomplete
         self._facets_enabled = enable_facets
         self._synonyms_enabled = enable_synonyms
         self._symspell_enabled = enable_symspell
@@ -712,7 +710,6 @@ class EnhancedSearchEngine(SearchEngine):
         
         # Initialize components
         self._spellchecker: Optional[SpellChecker] = None
-        self._autocomplete: Optional[Autocomplete] = None
         self._facets: Optional[FacetIndex] = None
         self._synonyms: Optional[SynonymExpander] = None
         self._symspell: Optional[SymSpell] = symspell_index
@@ -738,13 +735,7 @@ class EnhancedSearchEngine(SearchEngine):
         
         if self._spellcheck_enabled:
             self._spellchecker = SpellChecker(vocabulary, max_distance=2)
-        
-        if self._autocomplete_enabled:
-            from .indexer import filter_suggestion_terms
-            self._autocomplete = Autocomplete()
-            # Use doc_freqs for term frequencies, filtered to clean terms
-            self._autocomplete.build_from_index(filter_suggestion_terms(self.index.doc_freqs))
-        
+
         if self._facets_enabled:
             self._facets = FacetIndex()
             # Build facets from document metadata
@@ -1053,39 +1044,12 @@ class EnhancedSearchEngine(SearchEngine):
         
         return None
     
-    def get_autocomplete_suggestions(self, prefix: str, 
+    def get_autocomplete_suggestions(self, prefix: str,
                                       max_suggestions: int = 10) -> List[str]:
-        """
-        Get autocomplete suggestions for a prefix.
-        
-        Args:
-            prefix: The partial query
-            max_suggestions: Maximum number of suggestions
-            
-        Returns:
-            List of suggested completions
-        """
-        if not self._autocomplete:
-            return []
-        
-        suggestions = self._autocomplete.suggest(prefix, max_suggestions)
-        
-        # If no prefix matches found, try symspell fuzzy lookup as fallback
-        # This handles typos in the prefix (e.g. "pyhton" → "python")
-        if not suggestions and self._symspell:
-            # Get the last word being typed
-            parts = prefix.rsplit(' ', 1)
-            last_word = parts[-1] if parts else prefix
-            prev_words = parts[0] + ' ' if len(parts) > 1 else ''
-            
-            if len(last_word) >= 2:
-                fuzzy_matches = self._symspell.lookup(last_word)
-                if fuzzy_matches:
-                    suggestions = [prev_words + word for word, _, _ in fuzzy_matches[:max_suggestions]]
-        
-        return suggestions
-    
-    def get_title_suggestions(self, prefix: str, 
+        """Get autocomplete suggestions. Returns empty list (trie removed)."""
+        return []
+
+    def get_title_suggestions(self, prefix: str,
                                max_suggestions: int = 8) -> List[Dict[str, Any]]:
         """
         Get title/heading-based suggestions for autocomplete.
@@ -1110,9 +1074,7 @@ class EnhancedSearchEngine(SearchEngine):
             if results:
                 return results
         
-        # Fall back to word-level suggestions
-        word_suggestions = self.get_autocomplete_suggestions(prefix, max_suggestions)
-        return [{'text': w, 'doc_type': None, 'url': None} for w in word_suggestions]
+        return []
     
     def get_facet_counts(self, 
                          results: Optional[List[Dict[str, Any]]] = None
@@ -1510,17 +1472,13 @@ class EnhancedSearchEngine(SearchEngine):
         
         stats['features'] = {
             'spellcheck': self._spellcheck_enabled,
-            'autocomplete': self._autocomplete_enabled,
             'facets': self._facets_enabled,
             'synonyms': self._synonyms_enabled,
             'symspell': self.symspell_enabled,
             'ngram': self.ngram_enabled,
             'reranking': True  # Always available in EnhancedSearchEngine
         }
-        
-        if self._autocomplete:
-            stats['autocomplete_terms'] = self._autocomplete.get_word_count()
-        
+
         if self._facets:
             stats['facet_stats'] = self._facets.get_stats()
         

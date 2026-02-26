@@ -198,7 +198,6 @@ class TestEnhancedSearchEngine(unittest.TestCase):
         
         self.assertIn('features', stats)
         self.assertIn('spellcheck', stats['features'])
-        self.assertIn('autocomplete', stats['features'])
         self.assertIn('facets', stats['features'])
         self.assertIn('synonyms', stats['features'])
 

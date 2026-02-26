@@ -342,17 +342,15 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         self.assertIn('facets', response)
         self.assertGreater(len(response['results']), 0)
         
-        # Test autocomplete
+        # Test autocomplete (returns empty after trie removal)
         suggestions = engine.get_autocomplete_suggestions('pyt', max_suggestions=5)
-        # Should suggest terms starting with 'pyt' (like 'python')
         self.assertIsInstance(suggestions, list)
-        
+
         # Test stats
         stats = engine.get_stats()
         self.assertIn('total_documents', stats)
         self.assertIn('features', stats)
         self.assertTrue(stats['features']['spellcheck'])
-        self.assertTrue(stats['features']['autocomplete'])
 
 
 class TestCrawlerErrorHandling(unittest.TestCase):
