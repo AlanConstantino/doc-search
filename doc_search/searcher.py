@@ -1264,6 +1264,10 @@ class EnhancedSearchEngine(SearchEngine):
         if enable_reranking:
             # Fetch more candidates for reranking
             recall_k = self._reranker.compute_recall_k(top_k)
+            # Phrase queries need extra candidates since many will be
+            # filtered out by exact phrase matching post-rerank
+            if phrases:
+                recall_k *= 2
         else:
             # Legacy behavior: just fetch what we need plus some buffer
             recall_k = top_k * 3 if phrases or facet_filters else top_k
