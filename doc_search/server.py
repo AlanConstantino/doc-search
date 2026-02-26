@@ -2651,7 +2651,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     start_time: float = None  # Server start time for uptime calculation
     enable_autocomplete: bool = True  # Enable /suggest endpoint
     enable_facets: bool = True  # Enable faceted search filtering
-    enable_synonyms: bool = True  # Enable synonym expansion toggle
+    enable_synonyms: bool = False  # Enable synonym expansion toggle
     no_javascript: bool = False  # Serve pure HTML/CSS UI without JavaScript
     
     def log_message(self, format, *args):
@@ -3253,7 +3253,7 @@ def run_server(
     max_results: int = 100,
     enable_autocomplete: bool = True,
     enable_facets: bool = True,
-    enable_synonyms: bool = True,
+    enable_synonyms: bool = False,
     no_javascript: bool = False
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
@@ -3268,7 +3268,7 @@ def run_server(
         max_results: Maximum total results for pagination (default: 100)
         enable_autocomplete: If True, enable /suggest endpoint (default: True)
         enable_facets: If True, enable faceted search filtering (default: True)
-        enable_synonyms: If True, show synonym expansion toggle (default: True)
+        enable_synonyms: If True, show synonym expansion toggle (default: False)
         no_javascript: If True, serve pure HTML/CSS UI without JavaScript
         
     Returns:

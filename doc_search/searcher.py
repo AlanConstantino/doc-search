@@ -650,7 +650,7 @@ class EnhancedSearchEngine(SearchEngine):
                  enable_spellcheck: bool = True,
                  enable_autocomplete: bool = True,
                  enable_facets: bool = True,
-                 enable_synonyms: bool = True,
+                 enable_synonyms: bool = False,
                  enable_symspell: bool = True,
                  enable_ngram: bool = True,
                  synonym_groups: Optional[List[Set[str]]] = None,

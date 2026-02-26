@@ -377,7 +377,7 @@ def cmd_search(args):
             print(style_error(f"Error loading synonyms file: {e}"))
             return 1
     
-    enable_synonyms = getattr(args, 'synonyms', True)
+    enable_synonyms = getattr(args, 'synonyms', False)
     
     if use_enhanced:
         engine = EnhancedSearchEngine.load(
@@ -541,7 +541,7 @@ def cmd_interactive(args):
             print(style_error(f"Error loading synonyms file: {e}"))
             return 1
     
-    enable_synonyms = getattr(args, 'synonyms', True)
+    enable_synonyms = getattr(args, 'synonyms', False)
     
     # Load enhanced engine with caching
     print(style_info(f"Loading index from: {index_path}"))
@@ -1503,7 +1503,7 @@ def cmd_serve(args):
     from ..server import run_server
     
     multi_site = getattr(args, 'all', False)
-    enable_synonyms = getattr(args, 'enable_synonyms', True)
+    enable_synonyms = getattr(args, 'enable_synonyms', False)
     
     if multi_site:
         # Multi-site mode: use MultiSiteSearchEngine wrapped as a SearchEngine-like object
