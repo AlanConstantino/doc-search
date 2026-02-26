@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from .searcher import SearchEngine, parse_query
+from .query_log import QueryLog
 from . import __version__
 
 # Emoji fallbacks for systems without emoji support
@@ -2653,7 +2654,8 @@ class SearchHandler(BaseHTTPRequestHandler):
     enable_facets: bool = True  # Enable faceted search filtering
     enable_synonyms: bool = False  # Enable synonym expansion toggle
     no_javascript: bool = False  # Serve pure HTML/CSS UI without JavaScript
-    
+    query_log: QueryLog = None  # Optional query logging
+
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
         if self.log_requests:
@@ -2792,7 +2794,10 @@ class SearchHandler(BaseHTTPRequestHandler):
             else:
                 all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
-            
+
+            if self.query_log:
+                self.query_log.log(query, len(all_results), elapsed_ms)
+
             # Get facet counts before filtering (for accurate counts)
             facets = None
             total_unfiltered = len(all_results)
@@ -3026,7 +3031,10 @@ class SearchHandler(BaseHTTPRequestHandler):
             else:
                 all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
-            
+
+            if self.query_log:
+                self.query_log.log(query, len(all_results), elapsed_ms)
+
             # Get facet counts with cross-filtering
             # When type is filtered, category facets only count items of that type
             # When category is filtered, type facets only count items in that category
@@ -3254,7 +3262,8 @@ def run_server(
     enable_autocomplete: bool = True,
     enable_facets: bool = True,
     enable_synonyms: bool = False,
-    no_javascript: bool = False
+    no_javascript: bool = False,
+    query_log: QueryLog = None
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -3284,5 +3293,6 @@ def run_server(
     SearchHandler.enable_autocomplete = enable_autocomplete
     SearchHandler.enable_synonyms = enable_synonyms
     SearchHandler.no_javascript = no_javascript
+    SearchHandler.query_log = query_log
     server = HTTPServer((host, port), SearchHandler)
     return server
