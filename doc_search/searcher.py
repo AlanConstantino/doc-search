@@ -422,6 +422,7 @@ class SearchEngine:
         """
         self.index = index
         self.pages_dir = pages_dir
+        self._page_text_cache: Dict[str, Optional[str]] = {}
         
         # Compute index fingerprint for cache invalidation (needs index_path)
         fingerprint = None
@@ -466,22 +467,39 @@ class SearchEngine:
                    cache_path=cache_path, index_path=index_path)
     
     def _load_page_text(self, url: str) -> Optional[str]:
-        """Load full page text from disk."""
+        """Load full page text from disk with LRU caching.
+        
+        Caches up to 200 page texts to avoid redundant disk reads
+        during reranking + snippet generation in the same search.
+        """
         if not self.pages_dir:
             return None
+        
+        # Check cache first
+        if url in self._page_text_cache:
+            return self._page_text_cache[url]
         
         from .utils import url_to_filename
         filename = url_to_filename(url) + '.json'
         filepath = self.pages_dir / filename
         
         if not filepath.exists():
+            self._page_text_cache[url] = None
             return None
         
         try:
             with open(filepath, 'r') as f:
                 data = json.load(f)
-            return data.get('text', '')
+            text = data.get('text', '')
+            # Evict oldest if cache is full
+            if len(self._page_text_cache) >= 200:
+                # Remove first inserted entry
+                first_key = next(iter(self._page_text_cache))
+                del self._page_text_cache[first_key]
+            self._page_text_cache[url] = text
+            return text
         except (json.JSONDecodeError, IOError):
+            self._page_text_cache[url] = None
             return None
     
     def search(
