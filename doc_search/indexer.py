@@ -100,6 +100,9 @@ class BM25Index:
         
         # Content hashes for incremental indexing: url -> content hash
         self.content_hashes: Dict[str, str] = {}
+
+        # Deduplication: set of text content hashes to skip duplicates
+        self._content_hashes: set = set()
     
     def add_document(self, doc_id: int, url: str, title: str, text: str, 
                      description: str = '', headings: List[tuple] = None,
@@ -116,11 +119,17 @@ class BM25Index:
             headings: Optional list of (level, text) tuples
             doc_type: Document type ('html', 'pdf', etc.)
         """
+        # Deduplicate: skip if identical text already indexed
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        if text_hash in self._content_hashes:
+            return
+        self._content_hashes.add(text_hash)
+
         # Build headings text for field-aware ranking
         headings_text = ''
         if headings:
             headings_text = ' '.join(text for _, text in headings)
-        
+
         # Store document metadata (including headings for field-aware reranking)
         self.documents[doc_id] = {
             'url': url,
@@ -518,7 +527,8 @@ class BM25Index:
             'avg_doc_length': self.avg_doc_length,
             'total_docs': self.total_docs,
             'doc_freqs': dict(self.doc_freqs),
-            'content_hashes': self.content_hashes
+            'content_hashes': self.content_hashes,
+            '_content_hashes': list(self._content_hashes)
         }
         
         json_data = json.dumps(data)
@@ -569,7 +579,8 @@ class BM25Index:
         index.total_docs = data['total_docs']
         index.doc_freqs = defaultdict(int, data['doc_freqs'])
         index.content_hashes = data.get('content_hashes', {})
-        
+        index._content_hashes = set(data.get('_content_hashes', []))
+
         return index
     
     def get_stats(self) -> Dict[str, Any]:
