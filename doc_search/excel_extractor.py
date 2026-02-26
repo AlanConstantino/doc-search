@@ -114,11 +114,41 @@ class ExcelExtractor:
             result['metadata']['row_count'] = row_count
             result['metadata']['col_count'] = col_count
             
-            # Extract all rows
+            # Build merged cell map: (row, col) → value from top-left cell
+            # Merged cells return None for all but the primary cell in openpyxl
+            # Note: merged_cells is not available in read_only mode
+            merged_map = {}
+            try:
+                for merge_range in sheet.merged_cells.ranges:
+                    top_left = sheet.cell(merge_range.min_row, merge_range.min_col).value
+                    for row_idx in range(merge_range.min_row, merge_range.max_row + 1):
+                        for col_idx in range(merge_range.min_col, merge_range.max_col + 1):
+                            if row_idx == merge_range.min_row and col_idx == merge_range.min_col:
+                                continue
+                            merged_map[(row_idx, col_idx)] = top_left
+            except AttributeError:
+                # read_only worksheets don't support merged_cells
+                pass
+            
+            # Extract all rows, filling in merged cell values
             rows = []
-            for row in sheet.iter_rows(min_row=1, max_row=row_count, values_only=True):
-                row_values = [self._format_cell_value(cell) for cell in row]
-                rows.append(row_values)
+            if merged_map:
+                # Need cell objects for row/column info
+                for row in sheet.iter_rows(min_row=1, max_row=row_count, values_only=False):
+                    row_values = []
+                    for cell in row:
+                        if cell.value is not None:
+                            row_values.append(self._format_cell_value(cell.value))
+                        elif (cell.row, cell.column) in merged_map:
+                            row_values.append(self._format_cell_value(merged_map[(cell.row, cell.column)]))
+                        else:
+                            row_values.append('')
+                    rows.append(row_values)
+            else:
+                # No merged cells — use values_only for better performance
+                for row in sheet.iter_rows(min_row=1, max_row=row_count, values_only=True):
+                    row_values = [self._format_cell_value(cell) for cell in row]
+                    rows.append(row_values)
             
             if not rows:
                 return result
@@ -177,10 +207,10 @@ class ExcelExtractor:
         documents = []
         
         try:
-            # Load workbook (read-only mode for better performance, data_only to get values not formulas)
+            # Load workbook (normal mode to support merged cells, data_only to get values not formulas)
             wb = load_workbook(
                 filename=str(file_path),
-                read_only=True,
+                read_only=False,
                 data_only=True  # Get computed values instead of formulas
             )
             
