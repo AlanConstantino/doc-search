@@ -53,6 +53,7 @@ class CrawlState:
         self.pending: deque = deque()  # (url, depth) tuples
         self._pending_set: Set[str] = set()  # O(1) lookup for pending URLs
         self.failed: Dict[str, int] = {}  # url -> retry count
+        self.last_crawled: Dict[str, float] = {}  # url -> timestamp
         self.errors: List[CrawlError] = []  # Structured error tracking
         self.stats = {
             'pages_crawled': 0,
@@ -75,6 +76,7 @@ class CrawlState:
                 'visited': list(self.visited),
                 'pending': list(self.pending),
                 'failed': dict(self.failed),  # Copy dict
+                'last_crawled': dict(self.last_crawled),
                 'errors': [e.to_dict() for e in self.errors],
                 'stats': dict(self.stats)  # Copy dict to avoid modification during dump
             }
@@ -108,6 +110,7 @@ class CrawlState:
                         self.pending.append((item, 0))  # Assume depth 0 for old format
                         self._pending_set.add(item)
                 self.failed = state.get('failed', {})
+                self.last_crawled = state.get('last_crawled', {})
                 # Restore errors from state
                 self.errors = [
                     CrawlError.from_dict(e) for e in state.get('errors', [])
@@ -124,6 +127,7 @@ class CrawlState:
             self.pending.clear()
             self._pending_set.clear()
             self.failed.clear()
+            self.last_crawled.clear()
             self.errors.clear()
             self.stats = {
                 'pages_crawled': 0,
@@ -162,6 +166,7 @@ class CrawlState:
         """Mark a URL as visited (thread-safe)."""
         with self._lock:
             self.visited.add(url)
+            self.last_crawled[url] = time.time()
     
     def is_visited(self, url: str) -> bool:
         """Check if URL was visited (thread-safe)."""
@@ -198,6 +203,19 @@ class CrawlState:
             limit = max_pages or '∞'
             return f"[{crawled}/{limit}] (queue: {pending})"
     
+    def requeue_stale(self, max_age_seconds: float) -> int:
+        """Re-queue visited URLs older than max_age_seconds. Returns count."""
+        now = time.time()
+        count = 0
+        with self._lock:
+            for url, ts in list(self.last_crawled.items()):
+                if now - ts > max_age_seconds and url not in self._pending_set:
+                    self.pending.append((url, 0))
+                    self._pending_set.add(url)
+                    self.visited.discard(url)
+                    count += 1
+        return count
+
     def record_error(self, url: str, error_type: str, message: str):
         """Record a crawl error (thread-safe)."""
         error = CrawlError(

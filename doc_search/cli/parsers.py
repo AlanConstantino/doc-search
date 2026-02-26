@@ -96,6 +96,8 @@ def _add_crawl_parser(subparsers):
                              help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
     crawl_parser.add_argument('--separate-paths', action='store_true',
                              help='Store different URL paths separately (e.g., /3.11/ and /3.12/ get their own folders)')
+    crawl_parser.add_argument('--max-age', type=int, default=None, metavar='DAYS',
+                             help='Re-crawl pages older than DAYS days')
     crawl_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     crawl_parser.set_defaults(func=cmd_crawl)

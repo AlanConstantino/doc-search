@@ -191,6 +191,14 @@ def cmd_crawl(args):
         parser=getattr(args, 'parser', 'dom')
     )
     
+    # Re-queue stale pages if --max-age specified
+    max_age = getattr(args, 'max_age', None)
+    if max_age and not args.fresh:
+        crawler.state.load()
+        requeued = crawler.state.requeue_stale(max_age * 86400)
+        if requeued and not args.quiet:
+            print(f"Re-queued {requeued} stale pages (older than {max_age} days)")
+
     # Start crawling
     stats = crawler.crawl(resume=not args.fresh)
     
