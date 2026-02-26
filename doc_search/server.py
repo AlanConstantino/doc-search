@@ -1407,6 +1407,7 @@ JAVASCRIPT = """
             const result = results[index];
             result.classList.add('selected');
             result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            result.focus({ preventScroll: true });
         } else {
             selectedResultIndex = -1;
         }
@@ -1893,7 +1894,7 @@ JAVASCRIPT = """
         actionsHtml += '</div>';
         
         return `
-            <div class="result" data-url="${escapeHtml(r.url)}">
+            <div class="result" tabindex="-1" data-url="${escapeHtml(r.url)}">
                 <div class="result-header">
                     <span class="result-number">${r.rank}</span>
                     <a href="${escapeHtml(r.url)}" class="result-title" target="_blank" rel="noopener">${escapeHtml(r.title)}</a>
