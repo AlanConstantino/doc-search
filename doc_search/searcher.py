@@ -1270,7 +1270,11 @@ class EnhancedSearchEngine(SearchEngine):
         
         bm25_results = self.index.search(' '.join(all_terms_pass1), top_k=recall_k)
         
-        if min_score > 0:
+        # min_score filtering is deferred to after reranking so that
+        # documents boosted by title/coverage signals aren't prematurely
+        # discarded based on raw BM25 scores alone.
+        # When reranking is disabled, filter on BM25 scores directly.
+        if min_score > 0 and not enable_reranking:
             bm25_results = [r for r in bm25_results if r['score'] >= min_score]
         
         # Apply facet filters (reduces candidate set)
@@ -1323,6 +1327,13 @@ class EnhancedSearchEngine(SearchEngine):
             
             # Use reranked results
             candidates_to_process = reranked
+            
+            # Apply min_score filter on final reranked scores
+            if min_score > 0:
+                candidates_to_process = [
+                    r for r in candidates_to_process
+                    if r.get('final_score', r.get('score', 0)) >= min_score
+                ]
         else:
             candidates_to_process = bm25_results
         
