@@ -16,7 +16,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from .searcher import SearchEngine, parse_query
+from .searcher import SearchEngine, parse_query, group_results_by_section
 from .query_log import QueryLog
 from . import __version__
 
@@ -3066,9 +3066,10 @@ class SearchHandler(BaseHTTPRequestHandler):
         
         # Get exact match toggle
         exact_match = query_params.get('exact', [''])[0] == '1'
-        
+        group_by_section = query_params.get('group', [''])[0] == '1'
+
         max_results = self.max_results
-        
+
         try:
             # Perform search
             search_start = time.perf_counter()
@@ -3145,11 +3146,16 @@ class SearchHandler(BaseHTTPRequestHandler):
             if sort_by == 'date' and hasattr(self.engine, 'pages_dir') and self.engine.pages_dir:
                 filtered_results = self._sort_by_date(filtered_results)
             
+            # Apply section grouping if requested
+            if group_by_section:
+                filtered_results = group_results_by_section(filtered_results, max_per_group=3)
+                total_results = len(filtered_results)
+
             # Slice for current page
             start_idx = (page - 1) * per_page
             end_idx = start_idx + per_page
             page_results = filtered_results[start_idx:end_idx]
-            
+
             # Get spelling suggestion from search engine
             # With two-pass architecture, suggestion is generated during search
             suggestion = None
@@ -3184,7 +3190,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                     'score': round(score, 4),
                     'score_pct': score_pct,
                     'facets': r.get('facets', {}),
-                    'doc_type': r.get('doc_type', 'html')
+                    'doc_type': r.get('doc_type', 'html'),
+                    'section': r.get('section')
                 })
             
             # Build response

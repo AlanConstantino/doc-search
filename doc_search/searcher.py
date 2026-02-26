@@ -26,6 +26,41 @@ from .searcher_utils import (
 )
 
 
+def _url_section(url: str) -> str:
+    """Extract path-prefix section from a URL for grouping."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        parts = [p for p in parsed.path.split('/') if p]
+        if len(parts) >= 2:
+            return '/' + parts[0] + '/' + parts[1]
+        elif parts:
+            return '/' + parts[0]
+        return '/'
+    except Exception:
+        return '/'
+
+
+def group_results_by_section(results: List[Dict[str, Any]],
+                              max_per_group: int = 3) -> List[Dict[str, Any]]:
+    """Group results by URL path prefix section.
+
+    Each result gets a 'section' field. At most *max_per_group* results
+    per section are kept; the rest are dropped.
+    """
+    from collections import OrderedDict
+    groups: OrderedDict = OrderedDict()
+    grouped: List[Dict[str, Any]] = []
+    for r in results:
+        section = _url_section(r.get('url', ''))
+        r['section'] = section
+        count = groups.get(section, 0)
+        if count < max_per_group:
+            grouped.append(r)
+            groups[section] = count + 1
+    return grouped
+
+
 def compute_index_fingerprint(index_path: Path) -> str:
     """
     Compute a fingerprint for the index based on file modification time.
