@@ -386,6 +386,9 @@ def cmd_search(args):
             return 1
     
     enable_synonyms = getattr(args, 'synonyms', False)
+    # Auto-enable synonyms if a synonyms file was provided
+    if custom_synonyms:
+        enable_synonyms = True
     
     if use_enhanced:
         engine = EnhancedSearchEngine.load(
@@ -502,14 +505,15 @@ def cmd_autocomplete(args):
         return 1
     
     engine = EnhancedSearchEngine.load(index_path)
-    suggestions = engine.get_autocomplete_suggestions(args.prefix, max_suggestions=args.limit)
+    suggestions = engine.get_title_suggestions(args.prefix, max_suggestions=args.limit)
     
     if args.json:
-        print(json.dumps({'prefix': args.prefix, 'suggestions': suggestions}))
+        print(json.dumps({'prefix': args.prefix, 'suggestions': [s.get('text', s) if isinstance(s, dict) else s for s in suggestions]}))
     else:
         if suggestions:
             for s in suggestions:
-                print(s)
+                text = s.get('text', s) if isinstance(s, dict) else s
+                print(text)
         else:
             print(style_info("No suggestions found."))
     
@@ -550,6 +554,9 @@ def cmd_interactive(args):
             return 1
     
     enable_synonyms = getattr(args, 'synonyms', False)
+    # Auto-enable synonyms if a synonyms file was provided
+    if custom_synonyms:
+        enable_synonyms = True
     
     # Load enhanced engine with caching
     print(style_info(f"Loading index from: {index_path}"))

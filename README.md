@@ -1,8 +1,8 @@
 # doc-search
 
-Search through large technical documentation websites offline.
+Search through documentation websites and local files offline.
 
-Built for sites with 5,000–15,000+ pages. Crawl once, search instantly.
+Built for sites with 5,000–90,000+ pages. Crawl once, search instantly.
 
 **Zero dependencies** — Pure Python 3.9+ standard library (PDF support included via vendored pypdf).
 
@@ -12,20 +12,22 @@ Documentation sites are great, but:
 - Site search is often slow or limited
 - You need internet access
 - No way to search across your own crawled content
+- Local documents (PDF, Word, Excel, PowerPoint) aren't searchable in one place
 
-doc-search solves this by crawling documentation sites and building a local search index using BM25 (the same algorithm used by Elasticsearch).
+doc-search solves this by crawling documentation sites and indexing local files, building a local search index using BM25 (the same algorithm used by Elasticsearch).
 
 ## Features
 
-- 🕷️ **Smart Crawler** — Respects robots.txt, handles rate limits, resumes interrupted crawls
-- 🔍 **BM25 Search** — Industry-standard relevance ranking
-- 📄 **PDF Extraction** — Index PDF documents alongside HTML pages
+- 🕷️ **Smart Crawler** — Respects robots.txt, handles rate limits, resumes interrupted crawls, TTL re-crawl for stale content
+- 🔍 **BM25 Search** — Industry-standard relevance ranking with two-stage reranking
+- 📄 **PDF/DOCX/XLSX/PPTX** — Index documents with structured table extraction, hyperlink resolution, and merged cell support
 - 📝 **Phrase Search** — Use `"exact phrases"` in quotes
-- 💡 **Spell Check** — "Did you mean..." suggestions
-- ⌨️ **Autocomplete** — Type-ahead suggestions
+- 💡 **Spell Check** — "Did you mean..." suggestions with fuzzy matching
+- ⌨️ **Smart Suggestions** — Multi-term fuzzy autocomplete with edge n-gram indexing
 - 🏷️ **Faceted Search** — Filter by URL path categories
-- 🌐 **Web UI** — Beautiful search interface (no JavaScript required)
-- 🖥️ **CLI** — Colorful command-line interface with interactive mode
+- 🌐 **Web UI** — Beautiful search interface with dark/light theme, CSV export, click tracking
+- 🖥️ **CLI** — Configurable color theme, interactive mode, query logging
+- 📊 **Analytics** — Query logging and click tracking for search insights
 
 ## Quick Start
 
@@ -42,6 +44,16 @@ python -m doc_search crawl https://docs.example.com --max-pages 100
 
 ```bash
 python -m doc_search index https://docs.example.com
+```
+
+### Index Local Files
+
+```bash
+# Index a directory of documents (PDF, DOCX, XLSX, PPTX, HTML)
+python -m doc_search index-files ~/Documents/manuals/
+
+# Specific extensions only
+python -m doc_search index-files ~/Documents/ --extensions pdf,docx
 ```
 
 ### 3. Search
@@ -89,12 +101,15 @@ Press `Ctrl+C` to stop the server.
 |---------|-------------|
 | `crawl <url>` | Crawl a documentation site |
 | `index <url>` | Build search index |
+| `index-files <dir>` | Index local files (.pdf, .docx, .xlsx, .pptx, .html) |
 | `search <url> <query>` | Search from command line |
+| `search-all <query>` | Search across all crawled sites |
 | `interactive <url>` | Interactive search mode |
 | `serve <url>` | Start web UI |
 | `stats <url>` | Show crawl/index statistics |
 | `list` | List all crawled sites |
-| `autocomplete <url> <prefix>` | Get type-ahead suggestions |
+| `delete <url>` | Delete a crawled site |
+| `autocomplete <url> <prefix>` | Get search suggestions (fuzzy, multi-term) |
 
 ## Common Options
 
@@ -105,7 +120,8 @@ Press `Ctrl+C` to stop the server.
 --max-depth 5        # Limit link depth
 --delay 2.0          # Seconds between requests (default: 1.0)
 --workers 4          # Parallel crawlers (default: 1)
---extract-docs       # Extract text from PDFs
+--max-age 30         # Re-crawl pages older than N days
+--extract-docs       # Extract text from PDFs, DOCX, XLSX, PPTX
 --parser dom         # HTML parser: dom (default) or stream
 --no-save-html       # Don't save raw HTML (saves disk space)
 --user admin         # HTTP Basic Auth username
@@ -116,7 +132,17 @@ Press `Ctrl+C` to stop the server.
 ```bash
 --limit 20           # Number of results (default: 10)
 --json               # Output as JSON
---synonyms           # Enable synonym expansion
+--synonyms           # Enable synonym expansion (default: off)
+--scores             # Show relevance scores
+```
+
+### Serve Options
+
+```bash
+--port 3000          # Port number (default: 8080)
+--open               # Open browser automatically
+--enable-synonyms    # Enable synonym expansion (default: off)
+--per-page 20        # Results per page
 ```
 
 ## Environment Variables
@@ -169,15 +195,27 @@ If raw HTML was saved during crawling (default), you can re-index with a differe
 python -m doc_search index https://docs.example.com --parser=dom
 ```
 
-## PDF Extraction
+## Document Extraction
 
-Extract and index text from PDF documents alongside HTML pages:
+Extract and index text from documents alongside HTML pages:
 
 ```bash
+# During crawling (auto-detects linked documents)
 python -m doc_search crawl https://docs.example.com --extract-docs
+
+# Or index local files directly
+python -m doc_search index-files ~/Documents/
 ```
 
-PDFs are indexed with the same format as HTML pages, so they appear in search results seamlessly. Metadata (title, author, page count) is extracted when available.
+### Supported formats
+
+| Format | Features |
+|--------|----------|
+| **PDF** | Font-based heading detection, TOC extraction, per-page text |
+| **DOCX** | Structured table extraction, hyperlink URLs, heading styles |
+| **XLSX** | Per-sheet extraction, header detection, merged cell support |
+| **PPTX** | Per-slide text, speaker notes, table content |
+| **HTML** | Tables as structured data, code blocks, definition lists |
 
 **Note:** Encrypted PDFs require the optional `cryptography` package. Image-only PDFs (scanned documents) won't have extractable text.
 
@@ -257,7 +295,7 @@ See [docs/API.md](docs/API.md) for comprehensive library documentation.
 ## Development
 
 ```bash
-# Run tests (955 tests)
+# Run tests (1335 tests)
 python -m pytest
 
 # Run specific test file

@@ -16,7 +16,7 @@ def create_parser() -> argparse.ArgumentParser:
     """Create and return the main argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog='doc_search',
-        description='Search through large documentation websites.',
+        description='Search through documentation websites and local files (PDF, DOCX, XLSX, PPTX, HTML).',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -178,9 +178,9 @@ def _add_search_parser(subparsers):
     # Enhanced features
     search_parser.add_argument('--basic', action='store_true',
                               help='Use basic search (disable enhanced features)')
-    search_parser.add_argument('--synonyms', action='store_true', default=True,
+    search_parser.add_argument('--synonyms', action='store_true', default=False,
                               dest='synonyms',
-                              help='Enable synonym expansion (default: on)')
+                              help='Enable synonym expansion (default: off)')
     search_parser.add_argument('--no-synonyms', action='store_false',
                               dest='synonyms',
                               help='Disable synonym expansion')
@@ -227,7 +227,7 @@ def _add_search_all_parser(subparsers):
 
 def _add_autocomplete_parser(subparsers):
     """Add the autocomplete command parser."""
-    auto_parser = subparsers.add_parser('autocomplete', help='Get autocomplete suggestions')
+    auto_parser = subparsers.add_parser('autocomplete', help='Get search suggestions (multi-term, fuzzy matching)')
     auto_parser.add_argument('site_dir', help='Site data directory or original URL')
     auto_parser.add_argument('prefix', help='Prefix to get suggestions for')
     auto_parser.add_argument('--limit', '-l', type=int, default=10,
@@ -251,9 +251,9 @@ def _add_interactive_parser(subparsers):
                                    help='Disable SymSpell suggestions (use basic spellcheck)')
     interactive_parser.add_argument('--no-ngram', action='store_true',
                                    help='Disable n-gram prefix/substring search')
-    interactive_parser.add_argument('--synonyms', action='store_true', default=True,
+    interactive_parser.add_argument('--synonyms', action='store_true', default=False,
                                    dest='synonyms',
-                                   help='Enable synonym expansion (default: on)')
+                                   help='Enable synonym expansion (default: off)')
     interactive_parser.add_argument('--no-synonyms', action='store_false',
                                    dest='synonyms',
                                    help='Disable synonym expansion')
@@ -317,12 +317,12 @@ def _add_serve_parser(subparsers):
                              help='Maximum total results for pagination (default: 100)')
     serve_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
-    serve_parser.add_argument('--enable-synonyms', action='store_true', default=True,
+    serve_parser.add_argument('--enable-synonyms', action='store_true', default=False,
                              dest='enable_synonyms',
-                             help='Enable synonym expansion toggle (default: enabled)')
+                             help='Enable synonym expansion (default: off)')
     serve_parser.add_argument('--disable-synonyms', action='store_false',
                              dest='enable_synonyms',
-                             help='Disable synonym expansion toggle')
+                             help='Disable synonym expansion')
     serve_parser.add_argument('--synonyms-file', metavar='FILE',
                              help='Load custom synonyms from JSON file')
     serve_parser.add_argument('--cache-size', type=int, default=128,

@@ -512,7 +512,7 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.limit, 20)
         self.assertTrue(args.scores)
         self.assertTrue(args.json)
-        self.assertTrue(args.synonyms)
+        self.assertTrue(args.synonyms)  # explicitly passed --synonyms
     
     def test_parse_index_options(self):
         """Should parse index command with options."""
@@ -1946,7 +1946,7 @@ class TestCmdSearchArgParsing(unittest.TestCase):
         self.assertEqual(args.limit, 10)  # Default limit
         self.assertFalse(args.json)
         self.assertFalse(args.scores)
-        self.assertTrue(args.synonyms)
+        self.assertFalse(args.synonyms)  # synonyms off by default
         self.assertFalse(args.quiet)
     
     def test_parse_search_limit(self):
@@ -1971,7 +1971,7 @@ class TestCmdSearchArgParsing(unittest.TestCase):
         """Should parse --synonyms flag."""
         args = parse_args(['search', '/path/to/site', 'query', '--synonyms'])
         
-        self.assertTrue(args.synonyms)
+        self.assertTrue(args.synonyms)  # explicitly passed --synonyms
     
     def test_parse_search_basic_flag(self):
         """Should parse --basic flag."""
@@ -4663,7 +4663,7 @@ class TestParserDefaultValues(unittest.TestCase):
         self.assertFalse(args.quiet)
         self.assertFalse(args.no_color)
         self.assertFalse(args.basic)
-        self.assertTrue(args.synonyms)
+        self.assertFalse(args.synonyms)  # synonyms off by default
         self.assertFalse(args.no_facets)
         self.assertFalse(args.show_facets)
         self.assertFalse(args.separate_paths)
