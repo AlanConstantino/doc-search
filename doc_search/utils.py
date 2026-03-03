@@ -8,6 +8,7 @@ import sys
 import base64
 import hashlib
 import posixpath
+from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
 
@@ -121,53 +122,102 @@ def colorize(text: str, *styles) -> str:
     return ''.join(styles) + text + Colors.RESET
 
 
+def _load_color_theme() -> dict:
+    """
+    Load CLI color theme from colors.json.
+    
+    Searches in order:
+    1. ~/.doc_search/colors.json (user override)
+    2. Bundled data/colors.json (defaults)
+    
+    Returns:
+        Dict mapping role names to lists of ANSI style names
+    """
+    import json as _json
+    
+    # User override
+    user_path = Path.home() / '.doc_search' / 'colors.json'
+    if user_path.exists():
+        try:
+            with open(user_path) as f:
+                return _json.load(f)
+        except (_json.JSONDecodeError, IOError):
+            pass
+    
+    # Bundled defaults
+    default_path = Path(__file__).parent / 'data' / 'colors.json'
+    if default_path.exists():
+        try:
+            with open(default_path) as f:
+                return _json.load(f)
+        except (_json.JSONDecodeError, IOError):
+            pass
+    
+    return {}
+
+
+def _resolve_styles(role: str) -> tuple:
+    """Resolve a role name to ANSI style codes from the color theme."""
+    style_names = _COLOR_THEME.get(role, [])
+    styles = []
+    for name in style_names:
+        code = getattr(Colors, name, None)
+        if code:
+            styles.append(code)
+    return tuple(styles)
+
+
+# Load theme once at import time
+_COLOR_THEME = _load_color_theme()
+
+
 def highlight_match(text: str) -> str:
-    """Highlight a matched term with bold + cyan."""
-    return colorize(text, Colors.BOLD, Colors.CYAN)
+    """Highlight a matched term."""
+    return colorize(text, *_resolve_styles('highlight'))
 
 
 def style_title(text: str) -> str:
-    """Style a title with bold + bright white."""
-    return colorize(text, Colors.BOLD, Colors.BRIGHT_WHITE)
+    """Style a title."""
+    return colorize(text, *_resolve_styles('title'))
 
 
 def style_url(text: str) -> str:
-    """Style a URL with blue + underline."""
-    return colorize(text, Colors.BRIGHT_CYAN, Colors.UNDERLINE)
+    """Style a URL."""
+    return colorize(text, *_resolve_styles('url'))
 
 
 def style_score(score: float) -> str:
-    """Style a score with yellow."""
-    return colorize(f"[{score:.4f}]", Colors.YELLOW)
+    """Style a score."""
+    return colorize(f"[{score:.4f}]", *_resolve_styles('score'))
 
 
 def style_number(num: int) -> str:
     """Style a result number."""
-    return colorize(f"{num}.", Colors.BRIGHT_MAGENTA, Colors.BOLD)
+    return colorize(f"{num}.", *_resolve_styles('number'))
 
 
 def style_snippet(text: str) -> str:
-    """Style snippet text with dim."""
-    return colorize(text, Colors.DIM)
+    """Style snippet text."""
+    return colorize(text, *_resolve_styles('snippet'))
 
 
 def style_info(text: str) -> str:
-    """Style info text with bright black (gray)."""
-    return colorize(text, Colors.BRIGHT_BLACK)
+    """Style info text."""
+    return colorize(text, *_resolve_styles('info'))
 
 
 def style_success(text: str) -> str:
-    """Style success text with green."""
-    return colorize(text, Colors.GREEN)
+    """Style success text."""
+    return colorize(text, *_resolve_styles('success'))
 
 
 def style_error(text: str) -> str:
-    """Style error text with red."""
-    return colorize(text, Colors.RED)
+    """Style error text."""
+    return colorize(text, *_resolve_styles('error'))
 
 
 def style_warning(text: str) -> str:
-    """Style warning text with yellow."""
+    """Style warning text."""
     return colorize(text, Colors.YELLOW)
 
 

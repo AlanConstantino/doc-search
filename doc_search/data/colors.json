@@ -1,0 +1,14 @@
+{
+  "_comment": "CLI color theme. Each key is a UI role, value is a list of ANSI style names. Edit freely — changes take effect on next run. Available styles: BOLD, DIM, ITALIC, UNDERLINE, BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, BRIGHT_BLACK, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW, BRIGHT_BLUE, BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE, ORANGE",
+  "url": ["BRIGHT_CYAN", "UNDERLINE"],
+  "title": ["BOLD", "BRIGHT_WHITE"],
+  "score": ["YELLOW"],
+  "number": ["BRIGHT_MAGENTA", "BOLD"],
+  "highlight": ["BOLD", "CYAN"],
+  "snippet": ["DIM"],
+  "info": ["BRIGHT_BLACK"],
+  "success": ["GREEN"],
+  "error": ["RED"],
+  "warning": ["YELLOW"],
+  "prompt": ["BRIGHT_GREEN"]
+}

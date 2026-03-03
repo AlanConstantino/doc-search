@@ -626,8 +626,10 @@ def cmd_interactive(args):
             readline.set_completer_delims(' \t')
             readline.parse_and_bind('tab: complete')
     
-    prompt = f"{Colors.BRIGHT_GREEN}search>{Colors.RESET} "
-    page_prompt = f"{Colors.BRIGHT_GREEN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
+    from ..utils import _resolve_styles, colorize
+    _prompt_styles = _resolve_styles('prompt')
+    prompt = colorize("search>", *_prompt_styles) + " "
+    page_prompt = colorize("[n]ext/[p]rev/[q]uit or new query>", *_prompt_styles) + " "
     
     per_page = getattr(args, 'limit', 10)
     max_results = getattr(args, 'max_results', 100)
