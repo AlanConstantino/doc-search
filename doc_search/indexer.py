@@ -204,7 +204,7 @@ class BM25Index:
         reparsed_count = 0
         for i, page_file in enumerate(page_files):
             try:
-                with open(page_file, 'r') as f:
+                with open(page_file, 'r', encoding='utf-8') as f:
                     page = json.load(f)
                 
                 # Re-extract from raw HTML if available
@@ -343,7 +343,7 @@ class BM25Index:
         current_pages = {}  # url -> (page_data, file_path)
         for page_file in page_files:
             try:
-                with open(page_file, 'r') as f:
+                with open(page_file, 'r', encoding='utf-8') as f:
                     page = json.load(f)
                 
                 # Re-extract from raw HTML if available
@@ -538,7 +538,7 @@ class BM25Index:
             with gzip.open(filepath, 'wt', encoding='utf-8') as f:
                 f.write(json_data)
         else:
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(json_data)
         
         return filepath
@@ -564,7 +564,7 @@ class BM25Index:
             with gzip.open(filepath.with_suffix('.json.gz'), 'rt', encoding='utf-8') as f:
                 data = json.load(f)
         else:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         
         # Create instance

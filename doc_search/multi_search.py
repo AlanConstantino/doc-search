@@ -48,7 +48,7 @@ def discover_sites(data_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
         metadata_file = site_dir / 'metadata.json'
         if metadata_file.exists():
             try:
-                with open(metadata_file) as f:
+                with open(metadata_file, encoding='utf-8') as f:
                     metadata = json.load(f)
                 url = metadata.get('url') or metadata.get('source')
                 name = metadata.get('site_name') or url or site_dir.name

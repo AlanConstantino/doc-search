@@ -16,7 +16,7 @@ def load_default_synonyms() -> List[Set[str]]:
     json_path = Path(__file__).parent / 'data' / 'synonyms.json'
     if json_path.exists():
         try:
-            with open(json_path) as f:
+            with open(json_path, encoding='utf-8') as f:
                 data = json.load(f)
             return [set(group) for group in data.get('groups', [])]
         except (json.JSONDecodeError, IOError):
@@ -34,7 +34,7 @@ def load_synonyms_file(path: str) -> List[Set[str]]:
     Returns:
         List of synonym group sets
     """
-    with open(path) as f:
+    with open(path, encoding='utf-8') as f:
         data = json.load(f)
     return [set(group) for group in data.get('groups', [])]
 

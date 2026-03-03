@@ -83,7 +83,7 @@ class CrawlState:
         
         # Write atomically (outside lock to avoid blocking other threads)
         tmp_file = self.state_file.with_suffix('.tmp')
-        with open(tmp_file, 'w') as f:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(state, f)
         tmp_file.rename(self.state_file)
     
@@ -93,7 +93,7 @@ class CrawlState:
             return False
         
         try:
-            with open(self.state_file, 'r') as f:
+            with open(self.state_file, 'r', encoding='utf-8') as f:
                 state = json.load(f)
             
             with self._lock:

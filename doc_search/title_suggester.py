@@ -408,7 +408,7 @@ class TitleSuggester:
         count = 0
         for page_file in sorted(pages_dir.glob('*.json')):
             try:
-                with open(page_file) as f:
+                with open(page_file, encoding='utf-8') as f:
                     data = json.load(f)
                 
                 title = data.get('title', '')
@@ -446,7 +446,7 @@ class TitleSuggester:
                 json.dump(data, f)
         else:
             out_path = Path(f"{path}.json")
-            with open(out_path, 'w') as f:
+            with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
         
         return out_path
@@ -460,7 +460,7 @@ class TitleSuggester:
             with gzip.open(path, 'rt', encoding='utf-8') as f:
                 data = json.load(f)
         else:
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 data = json.load(f)
         
         suggester = cls()

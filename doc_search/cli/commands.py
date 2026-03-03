@@ -229,7 +229,7 @@ def cmd_crawl(args):
         'doc_type_counts': doc_type_counts,
         'site_size_bytes': site_size
     }
-    with open(site_dir / 'metadata.json', 'w') as f:
+    with open(site_dir / 'metadata.json', 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
     
     print(f"\nSite data saved to: {site_dir}")
@@ -828,7 +828,7 @@ def cmd_stats(args):
     # Load metadata
     metadata_file = site_dir / 'metadata.json'
     if metadata_file.exists():
-        with open(metadata_file) as f:
+        with open(metadata_file, encoding='utf-8') as f:
             metadata = json.load(f)
         print(f"Site: {metadata.get('url', 'Unknown')}")
         print()
@@ -942,7 +942,7 @@ def cmd_list(args):
         
         metadata_file = site_dir / 'metadata.json'
         if metadata_file.exists():
-            with open(metadata_file) as f:
+            with open(metadata_file, encoding='utf-8') as f:
                 metadata = json.load(f)
             url = metadata.get('url') or metadata.get('source') or metadata.get('site_name') or 'Unknown'
             
@@ -956,7 +956,7 @@ def cmd_list(args):
                 # Update metadata cache
                 metadata['doc_type_counts'] = type_counts
                 metadata['site_size_bytes'] = site_size
-                with open(metadata_file, 'w') as f:
+                with open(metadata_file, 'w', encoding='utf-8') as f:
                     json.dump(metadata, f, indent=2)
             else:
                 # Use cached doc_type_counts from metadata (fast path)
@@ -1044,7 +1044,7 @@ def cmd_delete(args):
                         continue
                     metadata_file = site_dir / 'metadata.json'
                     if metadata_file.exists():
-                        with open(metadata_file) as f:
+                        with open(metadata_file, encoding='utf-8') as f:
                             metadata = json.load(f)
                         url = metadata.get('url', '')
                         # Match if the site_id is contained in the URL or matches the hash
@@ -1083,7 +1083,7 @@ def cmd_delete(args):
         metadata = {}
         metadata_file = site_dir / 'metadata.json'
         if metadata_file.exists():
-            with open(metadata_file) as f:
+            with open(metadata_file, encoding='utf-8') as f:
                 metadata = json.load(f)
             url = metadata.get('url') or metadata.get('source') or 'Unknown'
             pages = metadata.get('stats', {}).get('pages_crawled', 0)
@@ -1176,7 +1176,7 @@ def cmd_index_files(args):
     
     if not force_reindex and cache_file.exists():
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file, 'r', encoding='utf-8') as f:
                 file_cache = json.load(f)
         except (json.JSONDecodeError, IOError):
             file_cache = {}
@@ -1375,7 +1375,7 @@ def cmd_index_files(args):
             print(style_info(f"Removed {stale_removed} stale documents from {len(stale_files)} deleted files"))
     
     # Save the file cache
-    with open(cache_file, 'w') as f:
+    with open(cache_file, 'w', encoding='utf-8') as f:
         json.dump(file_cache, f, indent=2)
     
     print()
@@ -1422,7 +1422,7 @@ def cmd_index_files(args):
         'doc_type_counts': doc_type_counts,
         'site_size_bytes': site_size
     }
-    with open(site_dir / 'metadata.json', 'w') as f:
+    with open(site_dir / 'metadata.json', 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
     
     print(f"\nDocuments saved to: {pages_dir}")

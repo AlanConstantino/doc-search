@@ -771,7 +771,7 @@ class Crawler:
         existing_urls = []
         for page_file in self.pages_dir.glob('*.json'):
             try:
-                with open(page_file, 'r') as f:
+                with open(page_file, 'r', encoding='utf-8') as f:
                     page_data = json.load(f)
                     if 'url' in page_data:
                         existing_urls.append((page_data['url'], page_data.get('depth', 0)))

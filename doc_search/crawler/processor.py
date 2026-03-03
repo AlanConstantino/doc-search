@@ -283,7 +283,7 @@ class PageProcessor:
         filename = url_to_filename(url) + '.json'
         filepath = self.pages_dir / filename
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(page_data, f)
         
         return filepath
@@ -305,7 +305,7 @@ class PageProcessor:
             return None
         
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return None
@@ -339,7 +339,7 @@ class PageProcessor:
         """
         for page_file in self.pages_dir.glob('*.json'):
             try:
-                with open(page_file, 'r') as f:
+                with open(page_file, 'r', encoding='utf-8') as f:
                     yield json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 if warn_on_error:

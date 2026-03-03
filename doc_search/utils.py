@@ -233,7 +233,7 @@ def _load_color_theme() -> dict:
     user_path = Path.home() / '.doc_search' / 'colors.json'
     if user_path.exists():
         try:
-            with open(user_path) as f:
+            with open(user_path, encoding='utf-8') as f:
                 return _json.load(f)
         except (_json.JSONDecodeError, IOError):
             pass
@@ -242,7 +242,7 @@ def _load_color_theme() -> dict:
     default_path = Path(__file__).parent / 'data' / 'colors.json'
     if default_path.exists():
         try:
-            with open(default_path) as f:
+            with open(default_path, encoding='utf-8') as f:
                 return _json.load(f)
         except (_json.JSONDecodeError, IOError):
             pass

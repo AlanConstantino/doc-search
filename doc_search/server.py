@@ -701,7 +701,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             filename = url_to_filename(url) + '.json'
             filepath = pages_dir / filename
             try:
-                with open(filepath) as f:
+                with open(filepath, encoding='utf-8') as f:
                     data = _json.load(f)
                 return data.get('crawled_at', 0)
             except Exception:
