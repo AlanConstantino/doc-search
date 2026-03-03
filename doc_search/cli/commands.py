@@ -626,8 +626,8 @@ def cmd_interactive(args):
             readline.set_completer_delims(' \t')
             readline.parse_and_bind('tab: complete')
     
-    prompt = f"{Colors.BRIGHT_CYAN}search>{Colors.RESET} "
-    page_prompt = f"{Colors.BRIGHT_CYAN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
+    prompt = f"{Colors.BRIGHT_GREEN}search>{Colors.RESET} "
+    page_prompt = f"{Colors.BRIGHT_GREEN}[n]ext/[p]rev/[q]uit or new query>{Colors.RESET} "
     
     per_page = getattr(args, 'limit', 10)
     max_results = getattr(args, 'max_results', 100)
