@@ -133,7 +133,7 @@ def style_title(text: str) -> str:
 
 def style_url(text: str) -> str:
     """Style a URL with blue + underline."""
-    return colorize(text, Colors.BLUE, Colors.UNDERLINE)
+    return colorize(text, Colors.BRIGHT_CYAN, Colors.UNDERLINE)
 
 
 def style_score(score: float) -> str:
