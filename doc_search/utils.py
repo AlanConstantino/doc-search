@@ -122,6 +122,55 @@ def colorize(text: str, *styles) -> str:
     return ''.join(styles) + text + Colors.RESET
 
 
+def _hex_to_ansi(hex_color: str) -> str:
+    """Convert a hex color like '#FF5733' to an ANSI true color escape code."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) != 6:
+        return ''
+    try:
+        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+        return f'\033[38;2;{r};{g};{b}m'
+    except ValueError:
+        return ''
+
+
+_STYLE_MAP = {
+    'bold': '\033[1m',
+    'dim': '\033[2m',
+    'italic': '\033[3m',
+    'underline': '\033[4m',
+}
+
+
+def _parse_color_value(value: str) -> tuple:
+    """
+    Parse a color value like '#FF5733+bold+underline' into ANSI codes.
+    
+    Returns:
+        Tuple of ANSI escape code strings
+    """
+    if not value or not Colors._supports_color:
+        return ()
+    
+    parts = value.split('+')
+    codes = []
+    
+    # First part is the hex color
+    hex_part = parts[0].strip()
+    if hex_part.startswith('#'):
+        ansi = _hex_to_ansi(hex_part)
+        if ansi:
+            codes.append(ansi)
+    
+    # Remaining parts are style modifiers
+    for part in parts[1:]:
+        style = _STYLE_MAP.get(part.strip().lower(), '')
+        if style:
+            codes.append(style)
+    
+    return tuple(codes)
+
+
 def _load_color_theme() -> dict:
     """
     Load CLI color theme from colors.json.
@@ -131,7 +180,7 @@ def _load_color_theme() -> dict:
     2. Bundled data/colors.json (defaults)
     
     Returns:
-        Dict mapping role names to lists of ANSI style names
+        Dict mapping role names to hex color strings
     """
     import json as _json
     
@@ -157,14 +206,12 @@ def _load_color_theme() -> dict:
 
 
 def _resolve_styles(role: str) -> tuple:
-    """Resolve a role name to ANSI style codes from the color theme."""
-    style_names = _COLOR_THEME.get(role, [])
-    styles = []
-    for name in style_names:
-        code = getattr(Colors, name, None)
-        if code:
-            styles.append(code)
-    return tuple(styles)
+    """Resolve a role name to ANSI escape codes from the color theme."""
+    value = _COLOR_THEME.get(role, '')
+    if not value or isinstance(value, list):
+        # Fallback for old list format or empty
+        return ()
+    return _parse_color_value(value)
 
 
 # Load theme once at import time
