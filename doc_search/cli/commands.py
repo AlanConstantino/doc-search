@@ -210,7 +210,7 @@ def cmd_crawl(args):
         for page_file in pages_dir.glob('*.json'):
             total_pages += 1
             try:
-                with open(page_file) as pf:
+                with open(page_file, encoding='utf-8') as pf:
                     page_data = json.load(pf)
                 doc_type = page_data.get('doc_type', 'html')
             except (json.JSONDecodeError, IOError):
@@ -911,7 +911,7 @@ def _scan_doc_type_counts(pages_dir: Path) -> dict:
         return type_counts
     for page_file in pages_dir.glob('*.json'):
         try:
-            with open(page_file) as pf:
+            with open(page_file, encoding='utf-8') as pf:
                 page_data = json.load(pf)
             doc_type = page_data.get('doc_type', 'html')
         except (json.JSONDecodeError, IOError):
@@ -1398,7 +1398,7 @@ def cmd_index_files(args):
     if pages_dir.exists():
         for page_file in pages_dir.glob('*.json'):
             try:
-                with open(page_file) as pf:
+                with open(page_file, encoding='utf-8') as pf:
                     page_data = json.load(pf)
                 doc_type = page_data.get('doc_type', 'unknown')
             except (json.JSONDecodeError, IOError):
