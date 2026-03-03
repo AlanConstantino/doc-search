@@ -134,7 +134,7 @@ def _add_index_files_parser(subparsers):
     """Add the index-files command parser for local documents."""
     index_files_parser = subparsers.add_parser(
         'index-files', 
-        help='Index local documents (.xlsx, .docx, .pdf)'
+        help='Index local documents (.pdf, .docx, .xlsx, .pptx, .html)'
     )
     index_files_parser.add_argument('directory', help='Directory containing files to index')
     index_files_parser.add_argument('--extensions', '-e', default='xlsx,docx,pdf,pptx,html,htm',
