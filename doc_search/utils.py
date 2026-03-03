@@ -41,11 +41,56 @@ def create_permissive_ssl_context() -> ssl.SSLContext:
 # ANSI Terminal Colors & Formatting
 # ============================================================================
 
+def _enable_windows_ansi() -> bool:
+    """
+    Enable ANSI escape code support on Windows 10+.
+    
+    Windows 10 version 1607+ supports ANSI via Virtual Terminal Processing,
+    but it must be explicitly enabled on the console output handle.
+    
+    Returns:
+        True if colors are supported (or not on Windows), False otherwise.
+    """
+    if sys.platform != 'win32':
+        return hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+    
+    if not (hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()):
+        return False
+    
+    try:
+        import ctypes
+        from ctypes import wintypes
+        
+        kernel32 = ctypes.windll.kernel32
+        
+        # STD_OUTPUT_HANDLE = -11
+        handle = kernel32.GetStdHandle(wintypes.DWORD(-11))
+        if handle == wintypes.HANDLE(-1).value:
+            return False
+        
+        # Get current console mode
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        
+        # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        ENABLE_VTP = 0x0004
+        if not (mode.value & ENABLE_VTP):
+            # Try to enable it
+            if not kernel32.SetConsoleMode(handle, wintypes.DWORD(mode.value | ENABLE_VTP)):
+                return False
+        
+        return True
+    except (AttributeError, ImportError, OSError, ValueError):
+        # ctypes or windll not available, or console API failed
+        return False
+
+
 class Colors:
     """ANSI escape codes for terminal colors and styles."""
     
-    # Check if terminal supports colors
-    _supports_color = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+    # Check if terminal supports colors (enables VTP on Windows 10+)
+    _supports_color = _enable_windows_ansi()
     
     # Reset
     RESET = '\033[0m' if _supports_color else ''
@@ -89,7 +134,7 @@ class Colors:
     @classmethod
     def enable(cls):
         """Re-enable colors if terminal supports them."""
-        if hasattr(sys.stdout, 'isatty') and sys.stdout.isatty():
+        if _enable_windows_ansi():
             cls._supports_color = True
             # Re-apply colors
             cls.RESET = '\033[0m'
