@@ -60,14 +60,19 @@ def _doc_icon(doc_type: str) -> str:
 # ============================================================================
 
 _STATIC_DIR = Path(__file__).parent / 'static'
-CSS = (_STATIC_DIR / 'styles.css').read_text(encoding='utf-8')
 
+def _load_static(filename: str, fallback: str = '') -> str:
+    """Load a static file with fallback for missing/corrupt files."""
+    filepath = _STATIC_DIR / filename
+    try:
+        return filepath.read_text(encoding='utf-8')
+    except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
+        import sys
+        print(f"Warning: Could not load {filepath}: {e}", file=sys.stderr)
+        return fallback
 
-# ============================================================================
-# JavaScript - loaded from static/search.js
-# ============================================================================
-
-JAVASCRIPT = (_STATIC_DIR / 'search.js').read_text(encoding='utf-8')
+CSS = _load_static('styles.css', '/* styles.css not found */')
+JAVASCRIPT = _load_static('search.js', '/* search.js not found */')
 
 
 
@@ -510,6 +515,15 @@ class SearchHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests."""
+        try:
+            self._handle_get()
+        except Exception as e:
+            import traceback
+            error_html = f"<html><body><h1>Internal Server Error</h1><pre>{traceback.format_exc()}</pre></body></html>"
+            self.send_html(error_html, status=500)
+
+    def _handle_get(self):
+        """Internal GET handler."""
         import inspect
         
         parsed = urllib.parse.urlparse(self.path)

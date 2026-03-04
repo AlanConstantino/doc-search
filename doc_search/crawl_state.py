@@ -85,7 +85,7 @@ class CrawlState:
         tmp_file = self.state_file.with_suffix('.tmp')
         with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(state, f)
-        tmp_file.rename(self.state_file)
+        tmp_file.replace(self.state_file)
     
     def load(self) -> bool:
         """Load state from disk. Returns True if loaded successfully."""
