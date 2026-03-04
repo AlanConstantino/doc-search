@@ -269,7 +269,7 @@ class TestMultiSiteSearchEngine:
         engine = MultiSiteSearchEngine(data_dir=sites_dir)
         assert engine.last_suggestion is None
         assert engine.get_spelling_suggestion("test") is None
-        assert engine.get_autocomplete_suggestions("te") == []
+        # autocomplete method removed — suggestions handled by TitleSuggester
         assert engine.get_facet_counts() == {}
     
     def test_search_with_site_filter(self, sites_dir):

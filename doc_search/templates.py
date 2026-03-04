@@ -43,7 +43,6 @@ def render_page(
     sort_by: str = "relevance",
     exact_match: bool = False,
     theme: str = "dark",
-    autocomplete_terms: Optional[List[str]] = None,
     global_max_score: Optional[float] = None,
     no_javascript: bool = False
 ) -> str:
@@ -55,6 +54,5 @@ def render_page(
         total_results=total_results, suggestion=suggestion, facets=facets,
         active_facet=active_facet, total_unfiltered=total_unfiltered,
         sort_by=sort_by, exact_match=exact_match, theme=theme,
-        autocomplete_terms=autocomplete_terms, global_max_score=global_max_score,
-        no_javascript=no_javascript
+        global_max_score=global_max_score, no_javascript=no_javascript
     )

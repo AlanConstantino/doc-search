@@ -700,7 +700,6 @@ class EnhancedSearchEngine(SearchEngine):
     
     def __init__(self, index: BM25Index, pages_dir: Optional[Path] = None,
                  enable_spellcheck: bool = True,
-                 enable_autocomplete: bool = True,  # Kept for API compat, ignored
                  enable_facets: bool = True,
                  enable_synonyms: bool = False,
                  enable_symspell: bool = True,
@@ -719,7 +718,6 @@ class EnhancedSearchEngine(SearchEngine):
             index: The BM25 index
             pages_dir: Directory containing page JSON files
             enable_spellcheck: Enable "Did you mean..." suggestions
-            enable_autocomplete: Enable type-ahead suggestions
             enable_facets: Enable faceted search
             enable_synonyms: Enable query expansion with synonyms (default: False)
             enable_symspell: Enable SymSpell for suggestions (default: True)
@@ -1079,11 +1077,6 @@ class EnhancedSearchEngine(SearchEngine):
         
         return None
     
-    def get_autocomplete_suggestions(self, prefix: str,
-                                      max_suggestions: int = 10) -> List[str]:
-        """Get autocomplete suggestions. Returns empty list (trie removed)."""
-        return []
-
     def get_title_suggestions(self, prefix: str,
                                max_suggestions: int = 8) -> List[Dict[str, Any]]:
         """

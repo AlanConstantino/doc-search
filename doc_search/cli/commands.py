@@ -8,7 +8,7 @@ API Usage:
     All CLI commands use the unified search API:
     - cmd_search: Uses EnhancedSearchEngine.search_enhanced() or SearchEngine.search()
     - cmd_serve: Uses SearchEngine.search() via the web server
-    - cmd_autocomplete: Uses EnhancedSearchEngine.get_autocomplete_suggestions()
+    - cmd_autocomplete: Uses EnhancedSearchEngine.get_title_suggestions()
     - cmd_interactive: Uses EnhancedSearchEngine.search_enhanced()
     - cmd_stats: Uses SearchEngine.get_stats()
     
@@ -608,8 +608,8 @@ def cmd_interactive(args):
         readline.set_history_length(100)  # Keep last 100 commands
         atexit.register(readline.write_history_file, history_file)
         
-        # Tab completion using autocomplete suggestions
-        if hasattr(engine, 'get_autocomplete_suggestions'):
+        # Tab completion using title suggestions
+        if hasattr(engine, 'get_title_suggestions'):
             def completer(text, state):
                 if state == 0:
                     # Get the full input line and cursor position
@@ -618,9 +618,10 @@ def cmd_interactive(args):
                     words = line.split()
                     prefix = words[-1] if words else ''
                     if prefix:
-                        suggestions = engine.get_autocomplete_suggestions(prefix, max_suggestions=15)
+                        results = engine.get_title_suggestions(prefix, max_suggestions=15)
+                        suggestions = [r['text'] if isinstance(r, dict) else r for r in results]
                         # Build completions: replace just the last word
-                        completer._matches = [s + ' ' for s in suggestions if s.startswith(prefix)]
+                        completer._matches = [s + ' ' for s in suggestions if s.lower().startswith(prefix.lower())]
                     else:
                         completer._matches = []
                 try:

@@ -86,10 +86,11 @@ class MockSearchEngine:
         """Return mock stats."""
         return self._stats
     
-    def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
-        """Return mock autocomplete suggestions."""
+    def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
+        """Return mock title suggestions."""
         self.autocomplete_calls.append({'prefix': prefix, 'max_suggestions': max_suggestions})
-        return [s for s in self._suggestions if s.startswith(prefix)][:max_suggestions]
+        matching = [s for s in self._suggestions if s.startswith(prefix)][:max_suggestions]
+        return [{'text': s, 'doc_type': None, 'url': None} for s in matching]
     
     @property
     def cache_enabled(self) -> bool:

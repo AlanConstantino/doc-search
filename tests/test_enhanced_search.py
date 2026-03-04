@@ -72,7 +72,6 @@ class TestEnhancedSearchEngine(unittest.TestCase):
         cls.engine = EnhancedSearchEngine(
             cls.index,
             enable_spellcheck=True,
-            enable_autocomplete=True,
             enable_facets=True,
             enable_synonyms=True
         )
@@ -125,14 +124,14 @@ class TestEnhancedSearchEngine(unittest.TestCase):
         if suggestion:
             self.assertIsInstance(suggestion, str)
     
-    def test_autocomplete(self):
-        """Should provide autocomplete suggestions."""
-        suggestions = self.engine.get_autocomplete_suggestions('str')
+    def test_title_suggestions(self):
+        """Should provide title-based suggestions."""
+        suggestions = self.engine.get_title_suggestions('str')
         
         self.assertIsInstance(suggestions, list)
-        # Should have suggestions starting with 'str'
+        # Results should be dicts with 'text' key
         if suggestions:
-            self.assertTrue(all(s.startswith('str') for s in suggestions))
+            self.assertTrue(all(isinstance(s, dict) and 'text' in s for s in suggestions))
     
     def test_facet_counts(self):
         """Should return facet counts."""
@@ -213,7 +212,6 @@ class TestEnhancedSearchEngineDisabledFeatures(unittest.TestCase):
         self.engine = EnhancedSearchEngine(
             index,
             enable_spellcheck=False,
-            enable_autocomplete=False,
             enable_facets=False,
             enable_synonyms=False
         )
@@ -228,9 +226,9 @@ class TestEnhancedSearchEngineDisabledFeatures(unittest.TestCase):
         # Empty facets when facets disabled
         self.assertEqual(self.engine.last_facets, {})
     
-    def test_autocomplete_when_disabled(self):
-        """Autocomplete should return empty when disabled."""
-        suggestions = self.engine.get_autocomplete_suggestions('te')
+    def test_title_suggestions_when_no_suggester(self):
+        """Title suggestions should return empty when no suggester loaded."""
+        suggestions = self.engine.get_title_suggestions('te')
         self.assertEqual(suggestions, [])
     
     def test_facets_when_disabled(self):
@@ -295,14 +293,14 @@ class TestEnhancedSearchEngineIntegration(unittest.TestCase):
             # Should have results
             self.assertIsInstance(filtered_results, list)
     
-    def test_autocomplete_workflow(self):
-        """Test autocomplete -> search workflow."""
+    def test_suggestion_workflow(self):
+        """Test suggestion -> search workflow."""
         # 1. User types 'fun'
-        suggestions = self.engine.get_autocomplete_suggestions('fun')
+        suggestions = self.engine.get_title_suggestions('fun')
         
         # 2. User selects a suggestion or continues typing
         if suggestions:
-            query = suggestions[0]
+            query = suggestions[0]['text'] if isinstance(suggestions[0], dict) else suggestions[0]
             results = self.engine.search(query)
             self.assertIsInstance(results, list)
 

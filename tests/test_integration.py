@@ -325,7 +325,6 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
             index, 
             pages_dir,
             enable_spellcheck=True,
-            enable_autocomplete=True,
             enable_facets=True,
             enable_synonyms=False
         )
@@ -342,8 +341,8 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         self.assertIn('facets', response)
         self.assertGreater(len(response['results']), 0)
         
-        # Test autocomplete (returns empty after trie removal)
-        suggestions = engine.get_autocomplete_suggestions('pyt', max_suggestions=5)
+        # Test title suggestions
+        suggestions = engine.get_title_suggestions('pyt', max_suggestions=5)
         self.assertIsInstance(suggestions, list)
 
         # Test stats

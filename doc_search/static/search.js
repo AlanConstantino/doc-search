@@ -1240,9 +1240,6 @@
         setupClickTracking();
         bindEvents();
         
-        // Remove datalist binding when JS suggest dropdown is active
-        input.removeAttribute('list');
-        
         // Get initial state from URL
         const urlParams = new URLSearchParams(window.location.search);
         currentQuery = urlParams.get('q') || '';

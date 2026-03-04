@@ -95,10 +95,10 @@ class MockEnhancedSearchEngine(MockSearchEngine):
             return self._synonym_results[:top_k]
         return self._results[:top_k]
     
-    def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
-        """Return mock autocomplete suggestions."""
+    def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
+        """Return mock title suggestions."""
         matching = [s for s in self._autocomplete_suggestions if s.startswith(prefix)]
-        return matching[:max_suggestions]
+        return [{'text': s, 'doc_type': None, 'url': None} for s in matching[:max_suggestions]]
     
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
         """Return mock spelling suggestion."""

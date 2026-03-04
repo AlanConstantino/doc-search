@@ -151,7 +151,6 @@ class MultiSiteSearchEngine:
             self._engines[key] = EnhancedSearchEngine.load(
                 site['index_path'],
                 enable_spellcheck=True,
-                enable_autocomplete=False,
                 enable_facets=False,
                 enable_synonyms=False,
                 enable_symspell=False,
@@ -237,10 +236,6 @@ class MultiSiteSearchEngine:
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
         """Not supported in multi-site mode."""
         return None
-    
-    def get_autocomplete_suggestions(self, prefix: str, max_suggestions: int = 10) -> List[str]:
-        """Not supported in multi-site mode."""
-        return []
     
     def get_facet_counts(self, results=None):
         """Not supported in multi-site mode."""

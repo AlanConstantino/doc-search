@@ -112,7 +112,6 @@ def render_page(
     sort_by: str = "relevance",
     exact_match: bool = False,
     theme: str = "dark",
-    autocomplete_terms: Optional[List[str]] = None,
     global_max_score: Optional[float] = None,
     no_javascript: bool = False
 ) -> str:
@@ -121,15 +120,6 @@ def render_page(
     stats = stats or {}
     total_docs = stats.get('total_documents', 0)
     unique_terms = stats.get('unique_terms', stats.get('total_unique_terms', 0))
-    
-    # Build datalist for HTML5 autocomplete
-    datalist_html = ""
-    if autocomplete_terms:
-        options = "\n".join(f'        <option value="{escape(term)}">' for term in autocomplete_terms[:100])
-        datalist_html = f'''
-    <datalist id="search-suggestions">
-{options}
-    </datalist>'''
     
     # Build facet filter HTML
     facets_html = ""
@@ -410,8 +400,6 @@ def render_page(
             </div>
             {search_options_html}
         </form>
-        {datalist_html}
-        
         {results_html}
     </main>
     
@@ -656,13 +644,6 @@ class SearchHandler(BaseHTTPRequestHandler):
                 if suggestion and suggestion.lower() == query.lower():
                     suggestion = None
             
-            # Get autocomplete terms for datalist
-            autocomplete_terms = None
-            if self.enable_autocomplete and hasattr(self.engine, 'get_autocomplete_suggestions'):
-                # Get suggestions based on query for refinement
-                if query:
-                    autocomplete_terms = self.engine.get_autocomplete_suggestions(query[:3], max_suggestions=50)
-            
             # Get global max score for consistent color normalization across pages
             global_max = filtered_results[0].get('score', 1) if filtered_results else 1
             
@@ -681,7 +662,6 @@ class SearchHandler(BaseHTTPRequestHandler):
                 sort_by=sort_by,
                 exact_match=exact_match,
                 theme=theme,
-                autocomplete_terms=autocomplete_terms,
                 global_max_score=global_max,
                 no_javascript=self.no_javascript
             )
@@ -691,13 +671,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             if theme not in ('dark', 'light'):
                 theme = 'dark'
             
-            # Get popular terms for datalist on welcome page
-            autocomplete_terms = None
-            if self.enable_autocomplete and hasattr(self.engine, 'get_autocomplete_suggestions'):
-                # Get general suggestions for empty search
-                autocomplete_terms = self.engine.get_autocomplete_suggestions('', max_suggestions=100)
-            
-            html_content = render_page(stats=stats, theme=theme, autocomplete_terms=autocomplete_terms, no_javascript=self.no_javascript)
+            html_content = render_page(stats=stats, theme=theme, no_javascript=self.no_javascript)
         
         self.send_html(html_content)
     
@@ -774,9 +748,9 @@ class SearchHandler(BaseHTTPRequestHandler):
             self.send_json({'error': 'Autocomplete is disabled'}, 403)
             return
         
-        # Check if engine supports autocomplete
-        if not hasattr(self.engine, 'get_autocomplete_suggestions'):
-            self.send_json({'error': 'Autocomplete not available'}, 501)
+        # Check if engine supports suggestions
+        if not hasattr(self.engine, 'get_title_suggestions'):
+            self.send_json({'error': 'Suggestions not available'}, 501)
             return
         
         # Parse query parameters
@@ -794,15 +768,8 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         try:
-            # Use title suggestions if available (richer results)
-            if hasattr(self.engine, 'get_title_suggestions'):
-                title_results = self.engine.get_title_suggestions(prefix, limit)
-                self.send_json({'suggestions': title_results})
-            else:
-                suggestions = self.engine.get_autocomplete_suggestions(prefix, limit)
-                self.send_json({'suggestions': [
-                    {'text': s, 'doc_type': None, 'url': None} for s in suggestions
-                ]})
+            title_results = self.engine.get_title_suggestions(prefix, limit)
+            self.send_json({'suggestions': title_results})
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
     
