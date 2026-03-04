@@ -43,11 +43,11 @@ class MockSearchEngine:
     ):
         """
         Create mock search engine.
-        
+
         Args:
             results: List of result dicts to return from search()
             stats: Stats dict to return from get_stats()
-            suggestions: List of autocomplete suggestions
+            suggestions: List of title suggestions
         """
         self._results = results or []
         self._stats = stats or {
@@ -58,14 +58,16 @@ class MockSearchEngine:
             'b': 0.75,
             'features': {
                 'spellcheck': True,
-                'autocomplete': True,
                 'facets': True,
-                'synonyms': False
+                'synonyms': False,
+                'symspell': True,
+                'ngram': True,
+                'reranking': True
             }
         }
         self._suggestions = suggestions or []
         self.search_calls: List[Dict[str, Any]] = []
-        self.autocomplete_calls: List[Dict[str, Any]] = []
+        self.suggestion_calls: List[Dict[str, Any]] = []
     
     def search(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
         """Return mock search results as list (like SearchEngine.search)."""
@@ -88,7 +90,7 @@ class MockSearchEngine:
     
     def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
         """Return mock title suggestions."""
-        self.autocomplete_calls.append({'prefix': prefix, 'max_suggestions': max_suggestions})
+        self.suggestion_calls.append({'prefix': prefix, 'max_suggestions': max_suggestions})
         matching = [s for s in self._suggestions if s.startswith(prefix)][:max_suggestions]
         return [{'text': s, 'doc_type': None, 'url': None} for s in matching]
     
