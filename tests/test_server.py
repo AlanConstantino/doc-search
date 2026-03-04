@@ -61,27 +61,27 @@ class MockSearchEngine:
 
 
 class MockEnhancedSearchEngine(MockSearchEngine):
-    """Mock EnhancedSearchEngine with autocomplete, spell check, facet, and synonym support."""
+    """Mock EnhancedSearchEngine with suggestions, spell check, facet, and synonym support."""
     
     def __init__(self, results: Optional[List[Dict[str, Any]]] = None,
                  stats: Optional[Dict[str, Any]] = None,
-                 autocomplete_suggestions: Optional[List[str]] = None,
+                 suggestions: Optional[List[str]] = None,
                  spelling_suggestion: Optional[str] = None,
                  facet_counts: Optional[Dict[str, Dict[str, int]]] = None,
                  synonym_results: Optional[List[Dict[str, Any]]] = None):
         """
         Create mock enhanced search engine.
-        
+
         Args:
             results: List of result dicts to return from search()
             stats: Stats dict to return from get_stats()
-            autocomplete_suggestions: List of suggestions to return
+            suggestions: List of title suggestions to return
             spelling_suggestion: Spelling suggestion to return (or None)
             facet_counts: Facet counts to return from get_facet_counts()
             synonym_results: Results to return when synonyms expanded (or None for same as results)
         """
         super().__init__(results, stats)
-        self._autocomplete_suggestions = autocomplete_suggestions or []
+        self._suggestions = suggestions or []
         self._spelling_suggestion = spelling_suggestion
         self._facet_counts = facet_counts or {}
         self._synonym_results = synonym_results
@@ -97,7 +97,7 @@ class MockEnhancedSearchEngine(MockSearchEngine):
     
     def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
         """Return mock title suggestions."""
-        matching = [s for s in self._autocomplete_suggestions if s.startswith(prefix)]
+        matching = [s for s in self._suggestions if s.startswith(prefix)]
         return [{'text': s, 'doc_type': None, 'url': None} for s in matching[:max_suggestions]]
     
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
@@ -1024,9 +1024,9 @@ class TestSuggestEndpoint(ServerTestCase):
     
     @classmethod
     def setUpClass(cls):
-        """Start test server with mock autocomplete engine."""
+        """Start test server with mock suggestion engine."""
         cls.engine = MockEnhancedSearchEngine(
-            autocomplete_suggestions=[
+            suggestions=[
                 'python', 'python async', 'python await', 'python class',
                 'python function', 'pytest', 'pypi'
             ]
@@ -1127,9 +1127,9 @@ class TestSuggestEndpointDisabled(ServerTestCase):
     
     @classmethod
     def setUpClass(cls):
-        """Start test server with autocomplete disabled."""
+        """Start test server with suggestions disabled."""
         cls.engine = MockEnhancedSearchEngine(
-            autocomplete_suggestions=['python', 'pytest']
+            suggestions=['python', 'pytest']
         )
         cls.start_server(engine=cls.engine, enable_autocomplete=False)
     
@@ -1154,12 +1154,12 @@ class TestSuggestEndpointDisabled(ServerTestCase):
 
 
 class TestSuggestEndpointNoSupport(ServerTestCase):
-    """Tests for /suggest endpoint with basic engine (no autocomplete)."""
+    """Tests for /suggest endpoint with basic engine (no suggestion support)."""
     
     @classmethod
     def setUpClass(cls):
         """Start test server with basic engine."""
-        cls.engine = MockSearchEngine()  # Basic engine, no autocomplete method
+        cls.engine = MockSearchEngine()  # Basic engine, no suggestion method
         cls.start_server(engine=cls.engine)
     
     @classmethod
@@ -1168,7 +1168,7 @@ class TestSuggestEndpointNoSupport(ServerTestCase):
         cls.stop_server()
     
     def test_suggest_returns_501_when_not_supported(self):
-        """GET /suggest should return 501 when engine lacks autocomplete."""
+        """GET /suggest should return 501 when engine lacks suggestion support."""
         status, headers, body = self.make_request('/suggest?q=py')
         self.assertEqual(status, 501)
     
