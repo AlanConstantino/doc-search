@@ -329,17 +329,22 @@ def cmd_index(args):
         print(f"N-gram index: {stats['term_count']} terms, {stats['ngram_count']} trigrams")
     
     # Build and save title suggestion index
-    if not args.quiet:
-        print(f"\nBuilding title suggestion index...")
-    
-    from ..title_suggester import TitleSuggester
-    title_suggester = TitleSuggester()
-    title_suggester.build_from_pages(pages_dir, verbose=not args.quiet)
-    title_path = title_suggester.save(str(site_dir / 'titles'), compress=not args.no_compress)
-    
-    stats = title_suggester.get_stats()
-    print(f"Title suggestions saved to: {title_path}")
-    print(f"Title suggestions: {stats['total_entries']} entries")
+    # Build content-based suggestion index
+    no_suggestions = getattr(args, 'no_suggestions', False)
+    if not no_suggestions:
+        if not args.quiet:
+            print(f"\nBuilding content suggestion index...")
+
+        from ..content_suggester import ContentSuggester
+        suggest_max_words = getattr(args, 'suggest_max_words', 3)
+        content_suggester = ContentSuggester(max_words=suggest_max_words)
+        content_suggester.build_from_pages(pages_dir, verbose=not args.quiet)
+        suggest_path = content_suggester.save(str(site_dir / 'suggestions'), compress=not args.no_compress)
+
+        stats = content_suggester.get_stats()
+        print(f"Content suggestions saved to: {suggest_path}")
+        print(f"Content suggestions: {stats['total_entries']} entries "
+              f"({stats['single_terms']} terms, {stats['phrases']} phrases)")
     
     return 0
 
@@ -1440,6 +1445,8 @@ def cmd_index_files(args):
         no_stemming=False,
         no_symspell=False,
         no_ngram=False,
+        no_suggestions=False,
+        suggest_max_words=3,
         separate_paths=False,
         parser='dom',
         full=True,  # Always full rebuild for file indexing
@@ -1522,6 +1529,7 @@ def cmd_serve(args):
     
     multi_site = getattr(args, 'all', False)
     enable_synonyms = getattr(args, 'enable_synonyms', False)
+    enable_suggestions = getattr(args, 'suggestions', False)
     
     if multi_site:
         # Multi-site mode: use MultiSiteSearchEngine wrapped as a SearchEngine-like object
@@ -1594,7 +1602,7 @@ def cmd_serve(args):
         engine = EnhancedSearchEngine.load(
             index_path,
             enable_spellcheck=True,
-            enable_autocomplete=True,
+            enable_autocomplete=enable_suggestions,
             enable_facets=True,
             enable_synonyms=enable_synonyms,
             enable_symspell=not getattr(args, 'no_symspell', False),
@@ -1618,6 +1626,7 @@ def cmd_serve(args):
     no_javascript = getattr(args, 'no_javascript', False)
     server = run_server(engine, host=args.host, port=args.port, version=__version__, 
                        log_requests=log_requests, per_page=per_page, max_results=max_results,
+                       enable_autocomplete=enable_suggestions,
                        enable_synonyms=enable_synonyms,
                        no_javascript=no_javascript)
     

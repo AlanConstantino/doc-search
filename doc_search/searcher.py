@@ -747,7 +747,8 @@ class EnhancedSearchEngine(SearchEngine):
         self._synonyms: Optional[SynonymExpander] = None
         self._symspell: Optional[SymSpell] = symspell_index
         self._ngram: Optional[NGramIndex] = ngram_index
-        self._title_suggester = None  # Loaded lazily from disk
+        self._title_suggester = None  # Legacy, kept for compat
+        self._content_suggester = None  # Loaded lazily from disk
         # Initialize reranker for two-stage retrieval
         self._reranker: Reranker = Reranker()
         
@@ -801,8 +802,11 @@ class EnhancedSearchEngine(SearchEngine):
             # Try to load n-gram index from disk
             self._ngram = self._load_ngram_index()
         
-        # Try to load title suggestion index from disk
-        if self._title_suggester is None:
+        # Try to load content suggestion index from disk (prefer over title suggester)
+        if self._content_suggester is None:
+            self._content_suggester = self._load_content_suggester()
+        # Fallback: load legacy title suggester if no content suggestions
+        if self._content_suggester is None and self._title_suggester is None:
             self._title_suggester = self._load_title_suggester()
     
     def _load_title_suggester(self):
@@ -820,6 +824,23 @@ class EnhancedSearchEngine(SearchEngine):
                 except Exception:
                     return None
         
+        return None
+
+    def _load_content_suggester(self):
+        """Try to load content suggestion index from disk."""
+        if not self._index_path:
+            return None
+
+        parent = Path(self._index_path).parent
+
+        for candidate in [parent / 'suggestions.json.gz', parent / 'suggestions.json']:
+            if candidate.exists():
+                try:
+                    from .content_suggester import ContentSuggester
+                    return ContentSuggester.load(str(candidate))
+                except Exception:
+                    return None
+
         return None
     
     def _load_ngram_index(self) -> Optional[NGramIndex]:
@@ -1080,10 +1101,10 @@ class EnhancedSearchEngine(SearchEngine):
     def get_title_suggestions(self, prefix: str,
                                max_suggestions: int = 8) -> List[Dict[str, Any]]:
         """
-        Get title/heading-based suggestions for autocomplete.
+        Get suggestions for autocomplete.
         
-        Returns richer suggestions with title text, doc type, and URL.
-        Falls back to word-level suggestions if no title matches.
+        Prefers content-based suggestions (terms/phrases from document body).
+        Falls back to legacy title suggestions if content index not available.
         
         Args:
             prefix: Search prefix
@@ -1091,10 +1112,16 @@ class EnhancedSearchEngine(SearchEngine):
             
         Returns:
             List of dicts with 'text', 'doc_type', 'url' keys.
-            If no title matches, returns word suggestions as
-            [{'text': word, 'doc_type': None, 'url': None}, ...]
         """
-        # Use title suggester with SymSpell for fuzzy multi-term matching
+        # Prefer content-based suggestions
+        if self._content_suggester:
+            results = self._content_suggester.suggest(
+                prefix, max_suggestions, symspell=self._symspell
+            )
+            if results:
+                return results
+
+        # Fallback to legacy title suggester
         if self._title_suggester:
             results = self._title_suggester.suggest(
                 prefix, max_suggestions, symspell=self._symspell

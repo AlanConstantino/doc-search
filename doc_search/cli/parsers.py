@@ -125,6 +125,10 @@ def _add_index_parser(subparsers):
                              help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
     index_parser.add_argument('--full', action='store_true',
                              help='Force a complete rebuild (skip incremental)')
+    index_parser.add_argument('--no-suggestions', action='store_true',
+                             help='Skip building content suggestion index')
+    index_parser.add_argument('--suggest-max-words', type=int, default=3,
+                             help='Maximum words per suggestion phrase (default: 3, min: 1)')
     index_parser.add_argument('--quiet', '-q', action='store_true',
                              help='Suppress progress output')
     index_parser.set_defaults(func=cmd_index)
@@ -333,6 +337,8 @@ def _add_serve_parser(subparsers):
                              help='Path to cache file (default: <site_dir>/.cache.db)')
     serve_parser.add_argument('--no-javascript', action='store_true',
                              help='Serve pure HTML/CSS UI without JavaScript')
+    serve_parser.add_argument('--suggestions', action='store_true', default=False,
+                             help='Enable autocomplete suggestions (default: off)')
     serve_parser.add_argument('--no-symspell', action='store_true',
                              help='Disable SymSpell suggestions (use basic spellcheck)')
     serve_parser.add_argument('--no-ngram', action='store_true',
