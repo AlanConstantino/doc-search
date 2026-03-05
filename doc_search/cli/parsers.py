@@ -303,8 +303,8 @@ def _add_serve_parser(subparsers):
                              help='Multi-site mode: search across all indexed sites')
     serve_parser.add_argument('--sites', nargs='+', metavar='SITE',
                              help='Filter to specific sites in multi-site mode (by URL or hash prefix)')
-    serve_parser.add_argument('--port', '-p', type=int, default=8080,
-                             help='Port to listen on (default: 8080)')
+    serve_parser.add_argument('--port', '-p', type=int, default=8282,
+                             help='Port to listen on (default: 8282)')
     serve_parser.add_argument('--host', default='127.0.0.1',
                              help='Host to bind to (default: 127.0.0.1)')
     serve_parser.add_argument('--open', '-o', action='store_true',

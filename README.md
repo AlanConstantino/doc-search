@@ -87,7 +87,7 @@ python -m doc_search serve https://docs.example.com --port 3000
 ./scripts/serve.sh https://docs.example.com
 ```
 
-This starts a local web server at `http://localhost:8080` with:
+This starts a local web server at `http://localhost:8282` with:
 - Search box with instant results
 - Highlighted matching terms
 - Click-through links to original pages
@@ -139,7 +139,7 @@ Press `Ctrl+C` to stop the server.
 ### Serve Options
 
 ```bash
---port 3000          # Port number (default: 8080)
+--port 3000          # Port number (default: 8282)
 --open               # Open browser automatically
 --enable-synonyms    # Enable synonym expansion (default: off)
 --per-page 20        # Results per page

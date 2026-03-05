@@ -2078,7 +2078,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_basic(self):
         """Should start server with default options."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2100,7 +2100,7 @@ class TestCmdServe(CLITestCase):
                 mock_run_server.assert_called_once()
                 call_kwargs = mock_run_server.call_args[1]
                 self.assertEqual(call_kwargs['host'], '127.0.0.1')
-                self.assertEqual(call_kwargs['port'], 8080)
+                self.assertEqual(call_kwargs['port'], 8282)
                 self.assertFalse(call_kwargs['log_requests'])
                 self.assertEqual(call_kwargs['per_page'], 10)
                 self.assertEqual(call_kwargs['max_results'], 100)
@@ -2113,7 +2113,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_custom_host(self):
         """Should pass custom host to run_server."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('0.0.0.0', 8080), None)
+        mock_server = MockHTTPServer(('0.0.0.0', 8282), None)
         
         self.create_mock_index()
         
@@ -2181,7 +2181,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_with_log_requests(self):
         """Should enable request logging when --log-requests flag is set."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2203,7 +2203,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_custom_per_page(self):
         """Should pass custom per_page to run_server."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2225,7 +2225,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_custom_max_results(self):
         """Should pass custom max_results to run_server."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2247,7 +2247,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_with_open_flag(self):
         """Should open browser when --open flag is set."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2263,7 +2263,7 @@ class TestCmdServe(CLITestCase):
                     ])
                     
                     # Verify webbrowser.open was called with correct URL
-                    mock_webbrowser.assert_called_once_with('http://127.0.0.1:8080')
+                    mock_webbrowser.assert_called_once_with('http://127.0.0.1:8282')
                     
                     self.assertEqual(code, 0)
     
@@ -2295,7 +2295,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_without_open_flag(self):
         """Should not open browser when --open flag is not set."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2317,7 +2317,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_passes_version(self):
         """Should pass version to run_server."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2339,7 +2339,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_passes_engine(self):
         """Should pass loaded SearchEngine to run_server."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2401,7 +2401,7 @@ class TestCmdServe(CLITestCase):
             'k1': 1.5,
             'b': 0.75
         })
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         self.create_mock_index()
         
@@ -2415,7 +2415,7 @@ class TestCmdServe(CLITestCase):
                 ])
                 
                 # Should print URL
-                self.assertIn('http://127.0.0.1:8080', stdout)
+                self.assertIn('http://127.0.0.1:8282', stdout)
                 # Should print doc count
                 self.assertIn('500', stdout)
                 # Should print term count
@@ -2426,7 +2426,7 @@ class TestCmdServe(CLITestCase):
     def test_serve_loads_compressed_index(self):
         """Should load compressed index (index.json.gz) when available."""
         mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8080), None)
+        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
         
         # Create compressed index file
         compressed_index = self.site_dir / 'index.json.gz'
@@ -2501,7 +2501,7 @@ class TestCmdServeArgParsing(unittest.TestCase):
         self.assertEqual(args.command, 'serve')
         self.assertEqual(args.site_dir, '/path/to/site')
         self.assertEqual(args.host, '127.0.0.1')
-        self.assertEqual(args.port, 8080)
+        self.assertEqual(args.port, 8282)
         self.assertFalse(args.open)
         self.assertFalse(args.log_requests)
         self.assertEqual(args.per_page, 10)
@@ -4710,9 +4710,9 @@ class TestParserDefaultValues(unittest.TestCase):
         self.assertFalse(args.separate_paths)
     
     def test_serve_default_port(self):
-        """Serve should have default port of 8080."""
+        """Serve should have default port of 8282."""
         args = parse_args(['serve', '/path'])
-        self.assertEqual(args.port, 8080)
+        self.assertEqual(args.port, 8282)
     
     def test_serve_default_host(self):
         """Serve should have default host of 127.0.0.1."""
