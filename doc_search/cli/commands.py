@@ -576,7 +576,7 @@ def cmd_interactive(args):
     # Beautiful header
     print()
     print(style_title("╔═══════════════════════════════════════════════════════════════╗"))
-    print(style_title("║") + "              " + style_success("doc-search") + " — Interactive Mode              " + style_title("║"))
+    print(style_title("║") + "                 " + style_success("doc-search") + " — Interactive Mode                 " + style_title("║"))
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
     print(f"  {_e('books')} {style_info(str(stats.get('total_documents', 0)))} documents indexed")
@@ -1626,7 +1626,7 @@ def cmd_serve(args):
     # Beautiful startup message
     print()
     print(style_title("╔═══════════════════════════════════════════════════════════════╗"))
-    print(style_title("║") + "              " + style_success("doc-search") + " — Web UI Server                 " + style_title("║"))
+    print(style_title("║") + "                 " + style_success("doc-search") + " — Web UI Server                    " + style_title("║"))
     print(style_title("╚═══════════════════════════════════════════════════════════════╝"))
     print()
     print(f"  {_e('globe')} Server running at: {style_url(url)}")
