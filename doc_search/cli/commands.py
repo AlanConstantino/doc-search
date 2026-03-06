@@ -1602,7 +1602,6 @@ def cmd_serve(args):
         engine = EnhancedSearchEngine.load(
             index_path,
             enable_spellcheck=True,
-            enable_autocomplete=enable_suggestions,
             enable_facets=True,
             enable_synonyms=enable_synonyms,
             enable_symspell=not getattr(args, 'no_symspell', False),
