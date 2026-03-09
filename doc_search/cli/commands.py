@@ -399,7 +399,6 @@ def cmd_search(args):
         engine = EnhancedSearchEngine.load(
             index_path,
             enable_spellcheck=True,
-            enable_autocomplete=True,
             enable_facets=not getattr(args, 'no_facets', False),
             enable_synonyms=enable_synonyms,
             enable_symspell=not getattr(args, 'no_symspell', False),
