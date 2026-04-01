@@ -493,6 +493,7 @@ STOP_WORDS = frozenset([
 
 
 # Pre-compiled regex pattern for tokenization (avoids repeated compilation)
+# DEPRECATED: Use uax29_tokenizer.tokenize_words() instead
 _WORD_PATTERN = re.compile(r'\b[a-z][a-z0-9_]*\b')
 
 
@@ -500,30 +501,28 @@ def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
     
+    Uses the UAX #29 Unicode Text Segmentation algorithm to properly handle
+    word boundaries, then filters and processes tokens for search indexing.
+    
     This function performs the following transformations:
     
-    1. **Case normalization**: All text is converted to lowercase.
+    1. **UAX #29 word segmentation**: Uses Unicode standard word boundary
+       algorithm to split text into word-like segments. This correctly handles:
+       - Numbers: "404", "3.14", "192.168.1.1"
+       - Compound words: "python3", "x86_64"
+       - Identifiers: "os.path.join", "__init__", "my_function"
+       - Apostrophes: "don't", "it's"
+       - Unicode text: Hebrew, Katakana, emoji sequences
     
-    2. **Word extraction**: Uses regex pattern ``[a-z][a-z0-9_]*`` to extract
-       words that start with a letter and contain only letters, digits, or
-       underscores. This means:
-       - Words must start with a-z (not numbers or symbols)
-       - Words can contain digits after the first letter (e.g., "python3")
-       - Underscores are allowed (e.g., "my_function")
-       - Punctuation and special characters are stripped
+    2. **Case normalization**: All tokens are converted to lowercase.
     
     3. **Stop word removal**: Common English words (articles, prepositions,
        pronouns, etc.) are filtered out. See ``STOP_WORDS`` for the full list.
-       These words appear in nearly every document and don't help distinguish
-       between documents.
     
-    4. **Short word filtering**: Single-character tokens are removed since
-       they're typically not meaningful for search (e.g., "a", "I" are already
-       stop words, and other single letters are usually noise).
+    4. **Short token filtering**: Single-character tokens are removed.
     
     5. **Optional stemming**: When ``apply_stemming=True``, words are reduced
-       to their root form using the Porter Stemming algorithm (e.g.,
-       "running" → "run", "files" → "file").
+       to their root form using the Porter Stemming algorithm.
     
     Args:
         text: The input text to tokenize.
@@ -537,25 +536,25 @@ def tokenize(text: str, apply_stemming: bool = False) -> list:
         >>> tokenize("The quick brown fox")
         ['quick', 'brown', 'fox']
         
-        >>> tokenize("Python3 programming is fun!")
-        ['python3', 'programming', 'fun']
+        >>> tokenize("Python3.11 is great!")
+        ['python3', '11', 'great']
         
-        >>> tokenize("running files", apply_stemming=True)
-        ['run', 'file']
+        >>> tokenize("HTTP 404 error")
+        ['http', '404', 'error']
         
-        >>> tokenize("A B C test")  # Single letters filtered
-        ['test']
+        >>> tokenize("Check __init__.py file")
+        ['check', '__init__', 'py', 'file']
     
     Note:
-        - Numbers alone are not tokenized (must start with a letter)
-        - Email addresses and URLs are split at punctuation
-        - Non-ASCII characters are ignored (English-only tokenization)
+        This replaces the previous regex-based tokenization with proper
+        Unicode text segmentation that handles edge cases correctly.
     """
-    # Convert to lowercase and extract words using pre-compiled pattern
-    words = _WORD_PATTERN.findall(text.lower())
+    from .uax29_tokenizer import tokenize_words
+    
+    # Get UAX #29 word segments and convert to lowercase
+    words = [w.lower() for w in tokenize_words(text)]
     
     # Filter out stop words and single-character words
-    # Using set membership check (STOP_WORDS is already a frozenset)
     tokens = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
     
     # Apply stemming if requested
