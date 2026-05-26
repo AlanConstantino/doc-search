@@ -493,7 +493,8 @@ STOP_WORDS = frozenset([
 
 
 # Pre-compiled regex pattern for tokenization (avoids repeated compilation)
-_WORD_PATTERN = re.compile(r'\b[a-z][a-z0-9_]*\b')
+# Matches words that start with a letter, plus pure numeric tokens.
+_WORD_PATTERN = re.compile(r'\b(?:[a-z][a-z0-9_]*|\d+)\b')
 
 
 def tokenize(text: str, apply_stemming: bool = False) -> list:
@@ -554,9 +555,10 @@ def tokenize(text: str, apply_stemming: bool = False) -> list:
     # Convert to lowercase and extract words using pre-compiled pattern
     words = _WORD_PATTERN.findall(text.lower())
     
-    # Filter out stop words and single-character words
+    # Filter out stop words and single-character alphabetic words.
+    # Keep pure numeric tokens even when they are one character long.
     # Using set membership check (STOP_WORDS is already a frozenset)
-    tokens = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
+    tokens = [w for w in words if (len(w) > 1 or w.isdigit()) and w not in STOP_WORDS]
     
     # Apply stemming if requested
     if apply_stemming:

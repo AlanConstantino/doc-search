@@ -145,5 +145,25 @@ class TestBM25IndexEmpty(unittest.TestCase):
         self.assertFalse(self.index.has_url('https://any.url'))
 
 
+class TestBM25IndexNumericSearch(unittest.TestCase):
+    """Tests for numeric token indexing and search."""
+
+    def test_numeric_terms_are_searchable(self):
+        """Numbers in content should be indexed and searchable."""
+        index = BM25Index()
+        index.add_document(
+            doc_id=0,
+            url='https://example.com/release-notes',
+            title='Release 2024 Notes',
+            text='This release was published in 2024 and supersedes 2023.',
+            description='Annual release notes'
+        )
+
+        results = index.search('2024', top_k=10)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['url'], 'https://example.com/release-notes')
+
+
 if __name__ == '__main__':
     unittest.main()

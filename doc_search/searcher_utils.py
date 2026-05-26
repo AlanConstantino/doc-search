@@ -136,7 +136,7 @@ def check_phrase_match(text: str, phrase_words: List[str]) -> bool:
 
 
 # Pre-compiled pattern for snippet word matching
-_SNIPPET_WORD_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]*\b')
+_SNIPPET_WORD_PATTERN = re.compile(r'\b(?:[a-zA-Z][a-zA-Z0-9_]*|\d+)\b')
 
 
 def normalize_document_text(text: str) -> str:

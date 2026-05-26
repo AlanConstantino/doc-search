@@ -142,6 +142,12 @@ class TestTokenize(unittest.TestCase):
         tokens = tokenize("snake_case variable")
         self.assertIn("snake_case", tokens)
 
+    def test_keeps_numeric_tokens(self):
+        """Should keep pure numeric tokens for number search."""
+        tokens = tokenize("Version 2024 and 7")
+        self.assertIn("2024", tokens)
+        self.assertIn("7", tokens)
+
 
 class TestGetDomain(unittest.TestCase):
     """Tests for domain extraction."""

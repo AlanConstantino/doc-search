@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2026-05-25
+
+### Fixed
+- **Numeric search** — pure numeric tokens like `2024` and `7` are now indexed, searchable, and highlighted in snippets
+- Added regression tests for numeric tokenization and BM25 search behavior
+
 ## [1.26.0] - 2026-02-18
 
 ### Added
