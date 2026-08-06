@@ -208,7 +208,7 @@ def search_index(data_dir: Path, queries: list) -> None:
     
     prefixes = ["http", "get", "api"]
     for prefix in prefixes:
-        suggestions = engine.get_autocomplete_suggestions(prefix, max_suggestions=3)
+        suggestions = engine.get_suggestions(prefix, max_suggestions=3)
         if suggestions:
             print(f"   '{prefix}' → {suggestions}")
         else:

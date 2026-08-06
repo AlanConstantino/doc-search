@@ -84,7 +84,7 @@ python -m doc_search serve https://docs.example.com --open
 python -m doc_search serve https://docs.example.com --port 3000
 
 # Using the script
-./scripts/serve.sh https://docs.example.com
+python -m doc_search serve https://docs.example.com --open
 ```
 
 This starts a local web server at `http://localhost:8282` with:

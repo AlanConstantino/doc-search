@@ -342,7 +342,7 @@ class TestCrawlIndexSearchWorkflow(unittest.TestCase):
         self.assertGreater(len(response['results']), 0)
         
         # Test title suggestions
-        suggestions = engine.get_title_suggestions('pyt', max_suggestions=5)
+        suggestions = engine.get_suggestions('pyt', max_suggestions=5)
         self.assertIsInstance(suggestions, list)
 
         # Test stats

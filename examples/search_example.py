@@ -188,7 +188,7 @@ def demo_enhanced_features(enhanced_engine: EnhancedSearchEngine):
     print("\n⌨️  Autocomplete Suggestions:")
     
     prefix = "class"
-    suggestions = enhanced_engine.get_autocomplete_suggestions(prefix, max_suggestions=5)
+    suggestions = enhanced_engine.get_suggestions(prefix, max_suggestions=5)
     
     print(f"   Prefix: '{prefix}'")
     print(f"   Suggestions: {suggestions}")

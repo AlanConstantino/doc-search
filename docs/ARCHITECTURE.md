@@ -50,7 +50,7 @@ doc_search/
 ├── searcher.py           # Search engine
 ├── searcher_utils.py     # Result formatting/highlighting
 ├── spellcheck.py         # "Did you mean..." suggestions
-├── autocomplete.py       # Type-ahead suggestions
+├── content_suggester.py  # Content-based autocomplete
 ├── facets.py             # Category filtering
 ├── synonyms.py           # Query expansion
 │
@@ -165,7 +165,7 @@ doc_search/
 **Key Components:**
 - **SearchEngine** (`searcher.py`): Query processing and result ranking
 - **SpellChecker** (`spellcheck.py`): "Did you mean..." suggestions
-- **Autocomplete** (`autocomplete.py`): Type-ahead completions
+- **Autocomplete** (`content_suggester.py`): Content-based type-ahead
 - **Facets** (`facets.py`): URL path categorization
 - **Synonyms** (`synonyms.py`): Query expansion
 - **searcher_utils** (`searcher_utils.py`): Result formatting
@@ -265,11 +265,10 @@ All magic numbers are centralized in `constants.py`:
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `DEFAULT_BM25_K1` | 1.5 | Term frequency saturation |
-| `DEFAULT_BM25_B` | 0.75 | Length normalization |
 | `DEFAULT_CRAWL_DELAY` | 1.0s | Delay between requests |
 | `CHECKPOINT_INTERVAL` | 100 | Pages between state saves |
-| `STEM_CACHE_SIZE` | 10,000 | Stemmer LRU cache size |
+| `DEFAULT_SNIPPET_LENGTH` | 150 | Search result snippet length |
+| BM25 `k1`/`b` | 1.5 / 0.75 | Set on `BM25Index` (not constants.py) |
 
 ## Detailed Data Flow
 
@@ -1038,7 +1037,7 @@ The following table summarizes which modules are involved at each pipeline stage
 | **Query Parse** | `searcher.py` | `utils.py` |
 | **BM25 Search** | `indexer.py` | - |
 | **Spellcheck** | `spellcheck.py` | - |
-| **Autocomplete** | `autocomplete.py` | - |
+| **Autocomplete** | `content_suggester.py` | - |
 | **Synonyms** | `synonyms.py` | - |
 | **Facets** | `facets.py` | - |
 | **Snippets** | `searcher_utils.py` | - |

@@ -6,7 +6,6 @@ import json
 import re
 import sqlite3
 import time
-import warnings
 from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
@@ -644,17 +643,6 @@ class SearchEngine:
         
         return results
     
-    def search_with_context(
-        self,
-        query: str,
-        top_k: int = 10,
-        context_length: int = 200
-    ) -> List[Dict[str, Any]]:
-        """
-        Search and include text context for each result.
-        """
-        return self.search(query, top_k=top_k, snippet_length=context_length)
-    
     def get_document(self, url: str) -> Optional[Dict[str, Any]]:
         """Get document metadata by URL."""
         doc_id = self.index.get_doc_id(url)
@@ -1077,13 +1065,12 @@ class EnhancedSearchEngine(SearchEngine):
         
         return None
     
-    def get_title_suggestions(self, prefix: str,
+    def get_suggestions(self, prefix: str,
                                max_suggestions: int = 8) -> List[Dict[str, Any]]:
         """
         Get suggestions for autocomplete.
         
         Prefers content-based suggestions (terms/phrases from document body).
-        Falls back to legacy title suggestions if content index not available.
         
         Args:
             prefix: Search prefix
@@ -1472,24 +1459,6 @@ class EnhancedSearchEngine(SearchEngine):
             'rerank_metrics': self.last_rerank_metrics
         }
     
-    def search_simple(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
-        """
-        Simple search that returns just results (like base SearchEngine).
-        
-        .. deprecated:: 1.9.0
-            Use :meth:`search` directly, which now returns ``List[Dict[str, Any]]``.
-            This method will be removed in version 2.0.0.
-        
-        Migration:
-            Replace ``engine.search_simple(query)`` with ``engine.search(query)``.
-        """
-        warnings.warn(
-            "search_simple() is deprecated and will be removed in version 2.0.0. "
-            "Use search() directly, which now returns List[Dict[str, Any]].",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self.search(query, top_k=top_k, **kwargs)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get enhanced search engine statistics."""

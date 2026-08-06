@@ -9,45 +9,6 @@ from typing import List, Dict, Set, Tuple, Optional
 from .constants import DEFAULT_MAX_EDIT_DISTANCE, DEFAULT_MAX_SUGGESTIONS
 
 
-def levenshtein_distance(s1: str, s2: str) -> int:
-    """
-    Calculate the Levenshtein (edit) distance between two strings.
-    
-    Uses dynamic programming with O(min(m,n)) space complexity.
-    
-    Args:
-        s1: First string
-        s2: Second string
-        
-    Returns:
-        Minimum number of single-character edits (insertions, deletions,
-        substitutions) required to transform s1 into s2.
-    """
-    # Ensure s1 is the shorter string for space efficiency
-    if len(s1) > len(s2):
-        s1, s2 = s2, s1
-    
-    m, n = len(s1), len(s2)
-    
-    # Previous and current row of distances
-    prev_row = list(range(m + 1))
-    curr_row = [0] * (m + 1)
-    
-    for j in range(1, n + 1):
-        curr_row[0] = j
-        for i in range(1, m + 1):
-            if s1[i - 1] == s2[j - 1]:
-                curr_row[i] = prev_row[i - 1]
-            else:
-                curr_row[i] = 1 + min(
-                    prev_row[i],      # deletion
-                    curr_row[i - 1],  # insertion
-                    prev_row[i - 1]   # substitution
-                )
-        prev_row, curr_row = curr_row, prev_row
-    
-    return prev_row[m]
-
 
 def damerau_levenshtein_distance(s1: str, s2: str, max_distance: int = -1) -> int:
     """

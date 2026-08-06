@@ -168,7 +168,7 @@ if response.get('suggestion'):
     print(f"Did you mean: {response['suggestion']}")
 
 # Autocomplete
-suggestions = engine.get_autocomplete_suggestions("pyth", max_suggestions=5)
+suggestions = engine.get_suggestions("pyth", max_suggestions=5)
 print(f"Autocomplete: {suggestions}")
 ```
 

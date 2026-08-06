@@ -338,19 +338,3 @@ def stem(word: str) -> str:
     
     return word
 
-
-def stem_tokens(tokens: List[str]) -> List[str]:
-    """
-    Stem a list of tokens.
-    
-    Args:
-        tokens: List of words to stem.
-        
-    Returns:
-        List of stemmed words in the same order.
-        
-    Examples:
-        >>> stem_tokens(['running', 'files', 'caresses'])
-        ['run', 'file', 'caress']
-    """
-    return [stem(token) for token in tokens]

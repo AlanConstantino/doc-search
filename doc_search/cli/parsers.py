@@ -179,9 +179,6 @@ def _add_search_parser(subparsers):
                               help='Suppress loading messages')
     search_parser.add_argument('--no-color', action='store_true',
                               help='Disable colored output')
-    # Enhanced features
-    search_parser.add_argument('--basic', action='store_true',
-                              help='Use basic search (disable enhanced features)')
     search_parser.add_argument('--synonyms', action='store_true', default=False,
                               dest='synonyms',
                               help='Enable synonym expansion (default: off)')

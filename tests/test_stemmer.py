@@ -3,7 +3,7 @@ Tests for the Porter Stemmer implementation.
 """
 
 import unittest
-from doc_search.stemmer import stem, stem_tokens
+from doc_search.stemmer import stem
 
 
 class TestPorterStemmer(unittest.TestCase):
@@ -93,12 +93,7 @@ class TestPorterStemmer(unittest.TestCase):
             twice = stem(once)
             self.assertEqual(once, twice, f"Stemming not idempotent for {word}")
     
-    def test_stem_tokens(self):
-        """Test batch stemming of tokens."""
-        tokens = ['running', 'files', 'happy']
-        expected = ['run', 'file', 'happi']
-        self.assertEqual(stem_tokens(tokens), expected)
-    
+
     def test_preserves_case(self):
         """Stemmer should lowercase output."""
         self.assertEqual(stem('Running'), 'run')

@@ -95,7 +95,7 @@ class MockEnhancedSearchEngine(MockSearchEngine):
             return self._synonym_results[:top_k]
         return self._results[:top_k]
     
-    def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
+    def get_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
         """Return mock title suggestions."""
         matching = [s for s in self._suggestions if s.startswith(prefix)]
         return [{'text': s, 'doc_type': None, 'url': None} for s in matching[:max_suggestions]]

@@ -4,51 +4,10 @@ Tests for spell checking and suggestions.
 
 import unittest
 from doc_search.spellcheck import (
-    levenshtein_distance,
     damerau_levenshtein_distance,
     SpellChecker
 )
 
-
-class TestLevenshteinDistance(unittest.TestCase):
-    """Test Levenshtein distance calculation."""
-    
-    def test_identical_strings(self):
-        """Identical strings have distance 0."""
-        self.assertEqual(levenshtein_distance('hello', 'hello'), 0)
-        self.assertEqual(levenshtein_distance('', ''), 0)
-    
-    def test_empty_string(self):
-        """Distance to/from empty string is length of other string."""
-        self.assertEqual(levenshtein_distance('', 'abc'), 3)
-        self.assertEqual(levenshtein_distance('abc', ''), 3)
-    
-    def test_single_insertion(self):
-        """Single character insertion."""
-        self.assertEqual(levenshtein_distance('cat', 'cats'), 1)
-        self.assertEqual(levenshtein_distance('at', 'cat'), 1)
-    
-    def test_single_deletion(self):
-        """Single character deletion."""
-        self.assertEqual(levenshtein_distance('cats', 'cat'), 1)
-        self.assertEqual(levenshtein_distance('hello', 'helo'), 1)
-    
-    def test_single_substitution(self):
-        """Single character substitution."""
-        self.assertEqual(levenshtein_distance('cat', 'bat'), 1)
-        self.assertEqual(levenshtein_distance('hello', 'hallo'), 1)
-    
-    def test_multiple_edits(self):
-        """Multiple edits required."""
-        self.assertEqual(levenshtein_distance('kitten', 'sitting'), 3)
-        self.assertEqual(levenshtein_distance('saturday', 'sunday'), 3)
-    
-    def test_symmetric(self):
-        """Distance should be symmetric."""
-        self.assertEqual(
-            levenshtein_distance('abc', 'def'),
-            levenshtein_distance('def', 'abc')
-        )
 
 
 class TestDamerauLevenshteinDistance(unittest.TestCase):

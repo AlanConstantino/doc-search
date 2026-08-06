@@ -711,19 +711,3 @@ def check_phrase_proximity(
     
     return min_span is not None and min_span <= max_slop
 
-
-def create_reranker(config: Optional[Dict[str, Any]] = None) -> Reranker:
-    """
-    Factory function to create a Reranker with custom config.
-    
-    Args:
-        config: Optional dict with config overrides
-        
-    Returns:
-        Configured Reranker instance
-    """
-    if config:
-        rerank_config = RerankConfig(**config)
-    else:
-        rerank_config = RerankConfig()
-    return Reranker(rerank_config)

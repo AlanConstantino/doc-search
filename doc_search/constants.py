@@ -6,19 +6,6 @@ and makes tuning behavior easier.
 """
 
 # =============================================================================
-# BM25 Search Parameters
-# =============================================================================
-
-# Default BM25 term frequency saturation parameter
-# Higher values give more weight to term frequency
-DEFAULT_BM25_K1 = 1.5
-
-# Default BM25 length normalization parameter (0-1)
-# 0 = no length normalization, 1 = full normalization
-DEFAULT_BM25_B = 0.75
-
-
-# =============================================================================
 # Search Result Display
 # =============================================================================
 
@@ -73,33 +60,8 @@ DEFAULT_RATE_LIMIT_BACKOFF = 60
 
 
 # =============================================================================
-# Stemmer Cache
-# =============================================================================
-
-# Maximum number of stem results to cache
-STEM_CACHE_SIZE = 10000
-
-
-# =============================================================================
-# Autocomplete
-# =============================================================================
-
-# Default maximum number of autocomplete suggestions
-DEFAULT_AUTOCOMPLETE_SUGGESTIONS = 10
-
-
-# =============================================================================
 # Content Weighting (for indexing)
 # =============================================================================
-
-# Weight multiplier for title terms during indexing
-TITLE_WEIGHT = 3
-
-# Weight multipliers for heading levels (h1=3x, h2=2x, h3+=1x)
-def heading_weight(level: int) -> int:
-    """Calculate weight multiplier for heading level."""
-    return max(1, 4 - level)
-
 
 # =============================================================================
 # Reranking Configuration (Two-Stage Retrieval)
@@ -161,15 +123,6 @@ PHRASE_EXACT_MATCH_TITLE = 10.0      # Exact phrase in title
 PHRASE_EXACT_MATCH_BODY = 3.0        # Exact phrase in body
 PHRASE_PROXIMITY_MATCH_TITLE = 5.0   # Proximity match in title (within slop)
 PHRASE_PROXIMITY_MATCH_BODY = 1.5    # Proximity match in body
-
-# Whether to hard-filter on phrase (only for quoted phrases)
-PHRASE_HARD_FILTER_QUOTED = True
-
-
-# =============================================================================
-# Minimum document frequency for SymSpell suggestions
-SYMSPELL_MIN_DF = 3
-
 
 # =============================================================================
 # Term Expansion Weights

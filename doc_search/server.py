@@ -17,29 +17,9 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from .searcher import SearchEngine, parse_query, group_results_by_section
-from .query_log import QueryLog
 from . import __version__
 
-# Emoji fallbacks for systems without emoji support
-# Set DOC_SEARCH_NO_EMOJI=1 to use ASCII alternatives
-_NO_EMOJI = os.environ.get('DOC_SEARCH_NO_EMOJI', '').lower() in ('1', 'true', 'yes')
-
-_EMOJI_MAP = {
-    'search': ('🔍', '[*]'),
-    'docs': ('📄', '[-]'),
-    'terms': ('🔤', '[#]'),
-    'check': ('✓', '>'),
-    'bulb': ('💡', '*'),
-    'moon': ('🌙', '[D]'),
-    'sun': ('☀️', '[L]'),
-    'palette': ('🎨', ''),
-    'books': ('📚', '[=]'),
-}
-
-def _e(name: str) -> str:
-    """Get emoji or ASCII fallback based on DOC_SEARCH_NO_EMOJI env var."""
-    emoji, fallback = _EMOJI_MAP.get(name, ('', ''))
-    return fallback if _NO_EMOJI else emoji
+from .utils import emoji as _e
 
 # Document type icons
 DOC_TYPE_ICONS = {
@@ -449,7 +429,6 @@ class SearchHandler(BaseHTTPRequestHandler):
     enable_facets: bool = True  # Enable faceted search filtering
     enable_synonyms: bool = False  # Enable synonym expansion toggle
     no_javascript: bool = False  # Serve pure HTML/CSS UI without JavaScript
-    query_log: QueryLog = None  # Optional query logging
 
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -599,9 +578,6 @@ class SearchHandler(BaseHTTPRequestHandler):
                 all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
 
-            if self.query_log:
-                self.query_log.log(query, len(all_results), elapsed_ms)
-
             # Get facet counts before filtering (for accurate counts)
             facets = None
             total_unfiltered = len(all_results)
@@ -708,31 +684,14 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def handle_api_click(self):
-        """Log a click on a search result."""
+        """Accept click beacons from the UI (no-op without analytics backend)."""
         try:
             length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length)
-            data = json.loads(body)
+            if length:
+                self.rfile.read(length)
         except Exception:
             self.send_json({'error': 'invalid request'}, 400)
             return
-
-        if self.query_log:
-            import sqlite3
-            with self.query_log._lock:
-                self.query_log._conn.execute(
-                    'CREATE TABLE IF NOT EXISTS click_log ('
-                    '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
-                    '  query TEXT, url TEXT, rank INTEGER, timestamp REAL'
-                    ')'
-                )
-                self.query_log._conn.execute(
-                    'INSERT INTO click_log (query, url, rank, timestamp) VALUES (?, ?, ?, ?)',
-                    (data.get('query', ''), data.get('url', ''),
-                     data.get('rank', 0), time.time())
-                )
-                self.query_log._conn.commit()
-
         self.send_json({'ok': True})
 
     def handle_suggest(self, query_string: str):
@@ -749,7 +708,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         # Check if engine supports suggestions
-        if not hasattr(self.engine, 'get_title_suggestions'):
+        if not hasattr(self.engine, 'get_suggestions'):
             self.send_json({'error': 'Suggestions not available'}, 501)
             return
         
@@ -768,7 +727,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             return
         
         try:
-            title_results = self.engine.get_title_suggestions(prefix, limit)
+            title_results = self.engine.get_suggestions(prefix, limit)
             self.send_json({'suggestions': title_results})
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
@@ -854,9 +813,6 @@ class SearchHandler(BaseHTTPRequestHandler):
             else:
                 all_results = self.engine.search(search_query, top_k=max_results)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
-
-            if self.query_log:
-                self.query_log.log(query, len(all_results), elapsed_ms)
 
             # Get facet counts with cross-filtering
             # When type is filtered, category facets only count items of that type
@@ -1117,7 +1073,6 @@ def run_server(
     enable_facets: bool = True,
     enable_synonyms: bool = False,
     no_javascript: bool = False,
-    query_log: QueryLog = None
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -1147,6 +1102,5 @@ def run_server(
     SearchHandler.enable_autocomplete = enable_autocomplete
     SearchHandler.enable_synonyms = enable_synonyms
     SearchHandler.no_javascript = no_javascript
-    SearchHandler.query_log = query_log
     server = HTTPServer((host, port), SearchHandler)
     return server

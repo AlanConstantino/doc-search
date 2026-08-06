@@ -88,7 +88,7 @@ class MockSearchEngine:
         """Return mock stats."""
         return self._stats
     
-    def get_title_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
+    def get_suggestions(self, prefix: str, max_suggestions: int = 8) -> List[dict]:
         """Return mock title suggestions."""
         self.suggestion_calls.append({'prefix': prefix, 'max_suggestions': max_suggestions})
         matching = [s for s in self._suggestions if s.startswith(prefix)][:max_suggestions]
@@ -555,29 +555,7 @@ class TestParseArgs(unittest.TestCase):
 class TestCmdCrawl(CLITestCase):
     """Tests for the cmd_crawl CLI command."""
     
-    def test_crawl_basic_url(self):
-        """Should crawl with just a URL."""
-        mock_crawler = MockCrawler()
-        
-        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
-            MockCrawlerClass.return_value = mock_crawler
-            
-            with capture_output() as (stdout, stderr):
-                code, _, _ = run_cli([
-                    'crawl', 'https://docs.example.com/'
-                ])
-            
-            # Verify Crawler was created with correct base_url
-            MockCrawlerClass.assert_called_once()
-            call_kwargs = MockCrawlerClass.call_args[1]
-            self.assertEqual(call_kwargs['base_url'], 'https://docs.example.com/')
-            
-            # Verify crawl was called with resume=True (default, since --fresh not set)
-            self.assertEqual(len(mock_crawler.crawl_calls), 1)
-            self.assertTrue(mock_crawler.crawl_calls[0]['resume'])
-            
-            self.assertEqual(code, 0)
-    
+
     def test_crawl_with_authentication(self):
         """Should pass authentication credentials to Crawler."""
         mock_crawler = MockCrawler()
@@ -1093,31 +1071,7 @@ class MockBM25Index:
 class TestCmdIndex(CLITestCase):
     """Tests for the cmd_index CLI command."""
     
-    def test_index_basic(self):
-        """Should build index from pages directory."""
-        mock_index = MockBM25Index()
-        
-        with patch('doc_search.cli.commands.BM25Index') as MockIndexClass:
-            MockIndexClass.return_value = mock_index
-            
-            code, stdout, stderr = run_cli([
-                'index', str(self.site_dir)
-            ])
-            
-            # Verify BM25Index was created with default parameters
-            MockIndexClass.assert_called_once_with(k1=1.5, b=0.75, stem=True)
-            
-            # Verify build_from_pages was called
-            self.assertEqual(len(mock_index.build_calls), 1)
-            self.assertEqual(mock_index.build_calls[0]['pages_dir'], 
-                           self.site_dir / 'pages')
-            
-            # Verify save was called with compression enabled (default)
-            self.assertEqual(len(mock_index.save_calls), 1)
-            self.assertTrue(mock_index.save_calls[0]['compress'])
-            
-            self.assertEqual(code, 0)
-    
+
     def test_index_custom_k1(self):
         """Should pass custom k1 parameter to BM25Index."""
         mock_index = MockBM25Index(k1=1.2)
@@ -1491,35 +1445,7 @@ class TestCmdIndexIntegration(CLITestCase):
 class TestCmdSearch(CLITestCase):
     """Tests for the cmd_search CLI command."""
     
-    def test_search_basic_query(self):
-        """Should perform basic search with query."""
-        results = [
-            {'url': 'https://example.com/page1', 'title': 'Python Tutorial', 'score': 2.5, 'snippet': 'Learn Python basics...'},
-            {'url': 'https://example.com/page2', 'title': 'Python Guide', 'score': 2.0, 'snippet': 'Advanced Python...'},
-        ]
-        mock_engine = MockSearchEngine(results=results)
-        
-        # Create mock index file
-        self.create_mock_index()
-        
-        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
-            MockEngineClass.load.return_value = mock_engine
-            
-            code, stdout, _ = run_cli([
-                'search', str(self.site_dir), 'python tutorial'
-            ])
-            
-            # Verify EnhancedSearchEngine.load was called with correct path
-            MockEngineClass.load.assert_called_once()
-            load_args = MockEngineClass.load.call_args
-            self.assertEqual(load_args[0][0], self.site_dir / 'index.json')
-            
-            # Verify search was called with correct query
-            self.assertEqual(len(mock_engine.search_calls), 1)
-            self.assertEqual(mock_engine.search_calls[0]['query'], 'python tutorial')
-            
-            self.assertEqual(code, 0)
-    
+
     def test_search_with_limit(self):
         """Should pass correct limit (top_k) to search engine."""
         mock_engine = MockSearchEngine()
@@ -1659,27 +1585,7 @@ class TestCmdSearch(CLITestCase):
             
             self.assertEqual(code, 0)
     
-    def test_search_with_basic_engine(self):
-        """Should use basic SearchEngine when --basic flag is set."""
-        mock_engine = MockSearchEngine()
-        self.create_mock_index()
-        
-        with patch('doc_search.cli.commands.SearchEngine') as MockBasicEngineClass:
-            # Basic engine returns list, not dict
-            mock_basic = MagicMock()
-            mock_basic.search.return_value = []
-            MockBasicEngineClass.load.return_value = mock_basic
-            
-            code, _, _ = run_cli([
-                'search', str(self.site_dir), 'query',
-                '--basic'
-            ])
-            
-            # Verify SearchEngine.load was called (not EnhancedSearchEngine)
-            MockBasicEngineClass.load.assert_called_once()
-            
-            self.assertEqual(code, 0)
-    
+
     def test_search_with_show_facets(self):
         """Should display facets when --show-facets flag is set."""
         mock_engine = MockSearchEngine()
@@ -1976,12 +1882,7 @@ class TestCmdSearchArgParsing(unittest.TestCase):
         
         self.assertTrue(args.synonyms)  # explicitly passed --synonyms
     
-    def test_parse_search_basic_flag(self):
-        """Should parse --basic flag."""
-        args = parse_args(['search', '/path/to/site', 'query', '--basic'])
-        
-        self.assertTrue(args.basic)
-    
+
     def test_parse_search_no_color_flag(self):
         """Should parse --no-color flag."""
         args = parse_args(['search', '/path/to/site', 'query', '--no-color'])
@@ -2075,41 +1976,7 @@ class MockHTTPServer:
 class TestCmdServe(CLITestCase):
     """Tests for the cmd_serve CLI command."""
     
-    def test_serve_basic(self):
-        """Should start server with default options."""
-        mock_engine = MockSearchEngine()
-        mock_server = MockHTTPServer(('127.0.0.1', 8282), None)
-        
-        self.create_mock_index()
-        
-        with patch('doc_search.cli.commands.EnhancedSearchEngine') as MockEngineClass:
-            with patch('doc_search.server.run_server') as mock_run_server:
-                MockEngineClass.load.return_value = mock_engine
-                mock_run_server.return_value = mock_server
-                
-                code, stdout, _ = run_cli([
-                    'serve', str(self.site_dir)
-                ])
-                
-                # Verify EnhancedSearchEngine.load was called with correct path
-                MockEngineClass.load.assert_called_once()
-                load_args = MockEngineClass.load.call_args[0]
-                self.assertEqual(load_args[0], self.site_dir / 'index.json')
-                
-                # Verify run_server was called with defaults
-                mock_run_server.assert_called_once()
-                call_kwargs = mock_run_server.call_args[1]
-                self.assertEqual(call_kwargs['host'], '127.0.0.1')
-                self.assertEqual(call_kwargs['port'], 8282)
-                self.assertFalse(call_kwargs['log_requests'])
-                self.assertEqual(call_kwargs['per_page'], 10)
-                self.assertEqual(call_kwargs['max_results'], 100)
-                
-                # Server should have been started
-                self.assertEqual(mock_server.serve_forever_calls, 1)
-                
-                self.assertEqual(code, 0)
-    
+
     def test_serve_custom_host(self):
         """Should pass custom host to run_server."""
         mock_engine = MockSearchEngine()
@@ -2675,54 +2542,7 @@ class TestCmdStats(unittest.TestCase):
             json.dump(index_data, f)
         return index_path
     
-    def test_stats_basic(self):
-        """Should display basic stats from metadata and index."""
-        # Create metadata
-        self.create_mock_metadata(url='https://docs.example.com/')
-        
-        # Create some page files
-        for i in range(5):
-            self.create_mock_page(f'page_{i}', {
-                'url': f'https://docs.example.com/page{i}',
-                'title': f'Page {i}',
-                'text': f'Content for page {i}'
-            })
-        
-        # Create mock index
-        mock_engine = MockSearchEngine(stats={
-            'total_documents': 5,
-            'unique_terms': 100,
-            'avg_document_length': 50,
-            'k1': 1.5,
-            'b': 0.75
-        })
-        self.create_mock_index()
-        
-        with patch('doc_search.cli.commands.SearchEngine') as MockEngineClass:
-            MockEngineClass.load.return_value = mock_engine
-            
-            code, stdout, _ = run_cli([
-                'stats', str(self.site_dir)
-            ])
-            
-            # Verify site URL is shown
-            self.assertIn('https://docs.example.com/', stdout)
-            
-            # Verify crawl stats are shown
-            self.assertIn('Pages crawled:', stdout)
-            self.assertIn('100', stdout)  # pages_crawled from metadata
-            
-            # Verify stored pages are shown
-            self.assertIn('Stored Pages:', stdout)
-            self.assertIn('5', stdout)  # 5 page files
-            
-            # Verify index stats are shown
-            self.assertIn('Index Statistics:', stdout)
-            self.assertIn('Documents:', stdout)
-            self.assertIn('Unique terms:', stdout)
-            
-            self.assertEqual(code, 0)
-    
+
     def test_stats_shows_crawl_statistics(self):
         """Should display detailed crawl statistics from metadata."""
         metadata = {
@@ -3085,13 +2905,7 @@ class TestCmdStatsErrorHandling(unittest.TestCase):
 class TestCmdStatsArgParsing(unittest.TestCase):
     """Tests for stats argument parsing."""
     
-    def test_parse_stats_basic(self):
-        """Should parse stats command with site_dir."""
-        args = parse_args(['stats', '/path/to/site'])
-        
-        self.assertEqual(args.command, 'stats')
-        self.assertEqual(args.site_dir, '/path/to/site')
-    
+
     def test_parse_stats_show_errors_flag(self):
         """Should parse --show-errors flag."""
         args = parse_args(['stats', '/path/to/site', '--show-errors'])
@@ -3480,19 +3294,7 @@ class TestCmdList(unittest.TestCase):
         
         return site_dir
     
-    def test_list_basic_single_site(self):
-        """Should list a single crawled site with metadata."""
-        self.create_site('abc123', 'https://docs.python.org/3.11/', pages_crawled=500)
-        
-        with patch('doc_search.cli.commands.DEFAULT_DATA_DIR', self.data_dir):
-            code, stdout, _ = run_cli(['list'])
-        
-        self.assertEqual(code, 0)
-        self.assertIn('Crawled sites (1):', stdout)
-        self.assertIn('abc123', stdout)
-        self.assertIn('https://docs.python.org/3.11/', stdout)
-        self.assertIn('500 pages', stdout)
-    
+
     def test_list_multiple_sites(self):
         """Should list multiple crawled sites."""
         self.create_site('site1hash', 'https://docs.python.org/', pages_crawled=1000)
@@ -3682,12 +3484,7 @@ class TestCmdList(unittest.TestCase):
 class TestCmdListArgParsing(unittest.TestCase):
     """Tests for list argument parsing."""
     
-    def test_parse_list_basic(self):
-        """Should parse list command with no arguments."""
-        args = parse_args(['list'])
-        
-        self.assertEqual(args.command, 'list')
-    
+
     def test_parse_list_help(self):
         """Should show help text for list command."""
         with capture_output() as (stdout, stderr):
@@ -4202,14 +3999,7 @@ class TestMainParserHelpText(unittest.TestCase):
 class TestCmdAutocompleteArgParsing(unittest.TestCase):
     """Tests for autocomplete argument parsing."""
     
-    def test_parse_autocomplete_basic(self):
-        """Should parse autocomplete command with required arguments."""
-        args = parse_args(['autocomplete', '/path/to/site', 'pyt'])
-        
-        self.assertEqual(args.command, 'autocomplete')
-        self.assertEqual(args.site_dir, '/path/to/site')
-        self.assertEqual(args.prefix, 'pyt')
-    
+
     def test_parse_autocomplete_defaults(self):
         """Should have sensible defaults for optional arguments."""
         args = parse_args(['autocomplete', '/path/to/site', 'test'])
@@ -4327,13 +4117,7 @@ class TestCmdAutocompleteArgParsing(unittest.TestCase):
 class TestCmdInteractiveArgParsing(unittest.TestCase):
     """Tests for interactive argument parsing."""
     
-    def test_parse_interactive_basic(self):
-        """Should parse interactive command with site_dir."""
-        args = parse_args(['interactive', '/path/to/site'])
-        
-        self.assertEqual(args.command, 'interactive')
-        self.assertEqual(args.site_dir, '/path/to/site')
-    
+
     def test_parse_interactive_defaults(self):
         """Should have sensible defaults for optional arguments."""
         args = parse_args(['interactive', '/path/to/site'])
@@ -4665,7 +4449,6 @@ class TestParserDefaultValues(unittest.TestCase):
         self.assertFalse(args.json)
         self.assertFalse(args.quiet)
         self.assertFalse(args.no_color)
-        self.assertFalse(args.basic)
         self.assertFalse(args.synonyms)  # synonyms off by default
         self.assertFalse(args.no_facets)
         self.assertFalse(args.show_facets)

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-08-06
+
+### Removed
+- **Dead code cleanup** — `TitleSuggester`, unwired `QueryLog`, `templates.py` re-export shim
+- Deprecated `search_simple()` and alias `search_with_context()`
+- `create_reranker()` factory, plain `levenshtein_distance`, unused `stem_tokens` / style helpers
+- Unused constants (`DEFAULT_BM25_*`, `STEM_CACHE_SIZE`, `TITLE_WEIGHT`, etc.)
+- Thin `scripts/*.sh` wrappers (use `python -m doc_search` directly)
+- Stale `docs/api-audit-phase-2.9.md`
+- CLI `--basic` flag (search always uses EnhancedSearchEngine)
+
+### Changed
+- Renamed `get_title_suggestions()` → `get_suggestions()` (content-based autocomplete)
+- Shared `STOP_WORDS` and `emoji()` helper via `utils`
+- Examples/docs updated for the new suggestion API
+
 ## [2.3.4] - 2026-05-25
 
 ### Fixed

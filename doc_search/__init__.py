@@ -5,5 +5,5 @@ Search through large technical documentation websites (5k-15k pages)
 using BM25 ranking. Pure Python 3.6+ standard library, no dependencies.
 """
 
-__version__ = "2.3.4"
+__version__ = "2.4.0"
 __author__ = "Alan Constantino"

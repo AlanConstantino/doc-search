@@ -486,12 +486,12 @@ Get spelling suggestion for a query.
 def get_spelling_suggestion(self, query: str) -> Optional[str]
 ```
 
-##### `get_autocomplete_suggestions`
+##### `get_suggestions`
 
 Get type-ahead suggestions for a prefix.
 
 ```python
-def get_autocomplete_suggestions(
+def get_suggestions(
     self,
     prefix: str,
     max_suggestions: int = 10
@@ -500,7 +500,7 @@ def get_autocomplete_suggestions(
 
 **Example:**
 ```python
-suggestions = engine.get_autocomplete_suggestions('dec', max_suggestions=5)
+suggestions = engine.get_suggestions('dec', max_suggestions=5)
 # ['decorator', 'decimal', 'decode', 'decoding', 'declare']
 ```
 
@@ -813,7 +813,7 @@ def search():
 @app.route('/autocomplete')
 def autocomplete():
     prefix = request.args.get('q', '')
-    suggestions = engine.get_autocomplete_suggestions(prefix)
+    suggestions = engine.get_suggestions(prefix)
     return jsonify(suggestions)
 ```
 

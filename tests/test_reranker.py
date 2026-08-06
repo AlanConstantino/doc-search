@@ -9,7 +9,6 @@ from doc_search.reranker import (
     Reranker, 
     RerankConfig, 
     RerankMetrics,
-    create_reranker,
     check_phrase_proximity
 )
 
@@ -697,21 +696,15 @@ class TestCheckPhraseProximity(unittest.TestCase):
 
 
 class TestCreateReranker(unittest.TestCase):
-    """Tests for the factory function."""
-    
+    """Tests for Reranker construction."""
+
     def test_create_default(self):
-        """Should create reranker with defaults."""
-        reranker = create_reranker()
+        reranker = Reranker()
         self.assertIsInstance(reranker, Reranker)
         self.assertEqual(reranker.config.recall_multiplier, 10)
-    
+
     def test_create_with_config(self):
-        """Should create reranker with custom config."""
-        reranker = create_reranker({
-            'recall_multiplier': 5,
-            'weight_bm25': 0.6
-        })
-        
+        reranker = Reranker(RerankConfig(recall_multiplier=5, weight_bm25=0.6))
         self.assertEqual(reranker.config.recall_multiplier, 5)
         self.assertAlmostEqual(reranker.config.weight_bm25, 0.6)
 

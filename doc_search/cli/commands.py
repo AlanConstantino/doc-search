@@ -5,14 +5,10 @@ This module contains all the cmd_* functions that implement
 the various CLI commands (crawl, index, search, etc.).
 
 API Usage:
-    All CLI commands use the unified search API:
-    - cmd_search: Uses EnhancedSearchEngine.search_enhanced() or SearchEngine.search()
-    - cmd_serve: Uses SearchEngine.search() via the web server
-    - cmd_autocomplete: Uses EnhancedSearchEngine.get_title_suggestions()
-    - cmd_interactive: Uses EnhancedSearchEngine.search_enhanced()
-    - cmd_stats: Uses SearchEngine.get_stats()
-    
-    Note: The deprecated search_simple() method is NOT used by the CLI.
+    - cmd_search / cmd_interactive: EnhancedSearchEngine.search_enhanced()
+    - cmd_serve: SearchEngine.search() via the web server
+    - cmd_autocomplete: EnhancedSearchEngine.get_suggestions()
+    - cmd_stats: SearchEngine.get_stats()
 """
 
 import atexit
@@ -36,34 +32,11 @@ from ..indexer import BM25Index
 from ..searcher import SearchEngine, EnhancedSearchEngine, format_results, parse_query
 from ..utils import (
     site_hash, format_size, format_duration,
-    Colors, style_success, style_error, style_info, style_title, style_url
+    Colors, style_success, style_error, style_info, style_title, style_url,
+    emoji as _e,
 )
 from .. import __version__
 
-
-# Emoji fallbacks for systems without emoji support
-# Set DOC_SEARCH_NO_EMOJI=1 to use ASCII alternatives
-_NO_EMOJI = os.environ.get('DOC_SEARCH_NO_EMOJI', '').lower() in ('1', 'true', 'yes')
-
-_EMOJI_MAP = {
-    'bulb': ('💡', '*'),
-    'chart': ('📊', '#'),
-    'terms': ('🔤', 'T:'),
-    'globe': ('🌐', '@'),
-    'folder': ('📁', '>'),
-    'check': ('✓', '+'),
-    'cross': ('✗', 'x'),
-    'docs': ('📄', '-'),
-    'books': ('📚', 'D:'),
-    'ruler': ('📏', 'A:'),
-    'sparkles': ('✨', '*'),
-    'skip': ('⏭', '-'),
-}
-
-def _e(name: str) -> str:
-    """Get emoji or ASCII fallback based on DOC_SEARCH_NO_EMOJI env var."""
-    emoji, fallback = _EMOJI_MAP.get(name, ('', ''))
-    return fallback if _NO_EMOJI else emoji
 
 
 # Default data directory
@@ -370,14 +343,9 @@ def cmd_search(args):
         print("Run 'doc_search index <site_dir>' first.")
         return 1
     
-    # Load index (use enhanced engine for new features)
     if not args.quiet:
         print(style_info(f"Loading index from: {index_path}"))
-    
-    # Check for enhanced features flags
-    use_enhanced = not getattr(args, 'basic', False)
-    
-    # Load custom synonyms if file provided
+
     custom_synonyms = None
     synonyms_file = getattr(args, 'synonyms_file', None)
     if synonyms_file:
@@ -389,52 +357,39 @@ def cmd_search(args):
         except (IOError, json.JSONDecodeError) as e:
             print(style_error(f"Error loading synonyms file: {e}"))
             return 1
-    
+
     enable_synonyms = getattr(args, 'synonyms', False)
-    # Auto-enable synonyms if a synonyms file was provided
     if custom_synonyms:
         enable_synonyms = True
-    
-    if use_enhanced:
-        engine = EnhancedSearchEngine.load(
-            index_path,
-            enable_spellcheck=True,
-            enable_facets=not getattr(args, 'no_facets', False),
-            enable_synonyms=enable_synonyms,
-            enable_symspell=not getattr(args, 'no_symspell', False),
-            enable_ngram=not getattr(args, 'no_ngram', False),
-            synonym_groups=custom_synonyms
-        )
-    else:
-        engine = SearchEngine.load(index_path)
-    
-    # Time the search
+
+    engine = EnhancedSearchEngine.load(
+        index_path,
+        enable_spellcheck=True,
+        enable_facets=not getattr(args, 'no_facets', False),
+        enable_synonyms=enable_synonyms,
+        enable_symspell=not getattr(args, 'no_symspell', False),
+        enable_ngram=not getattr(args, 'no_ngram', False),
+        synonym_groups=custom_synonyms
+    )
+
     start_time = time.perf_counter()
-    
-    if use_enhanced:
-        # Get facet filter if specified
-        facet_filters = {}
-        if hasattr(args, 'filter_category') and args.filter_category:
-            facet_filters['category'] = args.filter_category
-        if hasattr(args, 'filter_section') and args.filter_section:
-            facet_filters['section'] = args.filter_section
-        
-        # Use search_enhanced() to get the dict response with metadata
-        response = engine.search_enhanced(
-            args.query, 
-            top_k=args.limit,
-            facet_filters=facet_filters if facet_filters else None,
-            expand_synonyms=enable_synonyms
-        )
-        results = response['results']
-        suggestion = response.get('suggestion')
-        expanded_query = response.get('expanded_query')
-        facets = response.get('facets', {})
-    else:
-        results = engine.search(args.query, top_k=args.limit)
-        suggestion = None
-        expanded_query = None
-        facets = {}
+
+    facet_filters = {}
+    if hasattr(args, 'filter_category') and args.filter_category:
+        facet_filters['category'] = args.filter_category
+    if hasattr(args, 'filter_section') and args.filter_section:
+        facet_filters['section'] = args.filter_section
+
+    response = engine.search_enhanced(
+        args.query,
+        top_k=args.limit,
+        facet_filters=facet_filters if facet_filters else None,
+        expand_synonyms=enable_synonyms
+    )
+    results = response['results']
+    suggestion = response.get('suggestion')
+    expanded_query = response.get('expanded_query')
+    facets = response.get('facets', {})
     
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     
@@ -509,7 +464,7 @@ def cmd_autocomplete(args):
         return 1
     
     engine = EnhancedSearchEngine.load(index_path)
-    suggestions = engine.get_title_suggestions(args.prefix, max_suggestions=args.limit)
+    suggestions = engine.get_suggestions(args.prefix, max_suggestions=args.limit)
     
     if args.json:
         print(json.dumps({'prefix': args.prefix, 'suggestions': [s.get('text', s) if isinstance(s, dict) else s for s in suggestions]}))
@@ -613,7 +568,7 @@ def cmd_interactive(args):
         atexit.register(readline.write_history_file, history_file)
         
         # Tab completion using title suggestions
-        if hasattr(engine, 'get_title_suggestions'):
+        if hasattr(engine, 'get_suggestions'):
             def completer(text, state):
                 if state == 0:
                     # Get the full input line and cursor position
@@ -622,7 +577,7 @@ def cmd_interactive(args):
                     words = line.split()
                     prefix = words[-1] if words else ''
                     if prefix:
-                        results = engine.get_title_suggestions(prefix, max_suggestions=15)
+                        results = engine.get_suggestions(prefix, max_suggestions=15)
                         suggestions = [r['text'] if isinstance(r, dict) else r for r in results]
                         # Build completions: replace just the last word
                         completer._matches = [s + ' ' for s in suggestions if s.lower().startswith(prefix.lower())]

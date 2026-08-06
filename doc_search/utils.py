@@ -2,6 +2,7 @@
 Utility functions for URL normalization and helpers.
 """
 
+import os
 import re
 import ssl
 import sys
@@ -85,6 +86,34 @@ def _enable_windows_ansi() -> bool:
         # ctypes or windll not available, or console API failed
         return False
 
+
+
+# Emoji fallbacks (DOC_SEARCH_NO_EMOJI=1 → ASCII)
+_NO_EMOJI = os.environ.get('DOC_SEARCH_NO_EMOJI', '').lower() in ('1', 'true', 'yes')
+_EMOJI_MAP = {
+    'search': ('🔍', '[*]'),
+    'docs': ('📄', '[-]'),
+    'terms': ('🔤', '[#]'),
+    'check': ('✓', '+'),
+    'cross': ('✗', 'x'),
+    'bulb': ('💡', '*'),
+    'moon': ('🌙', '[D]'),
+    'sun': ('☀️', '[L]'),
+    'palette': ('🎨', ''),
+    'books': ('📚', '[=]'),
+    'chart': ('📊', '#'),
+    'globe': ('🌐', '@'),
+    'folder': ('📁', '>'),
+    'ruler': ('📏', 'A:'),
+    'sparkles': ('✨', '*'),
+    'skip': ('⏭', '-'),
+}
+
+
+def emoji(name: str) -> str:
+    """Get emoji or ASCII fallback based on DOC_SEARCH_NO_EMOJI env var."""
+    pair = _EMOJI_MAP.get(name, ('', ''))
+    return pair[1] if _NO_EMOJI else pair[0]
 
 class Colors:
     """ANSI escape codes for terminal colors and styles."""
@@ -288,11 +317,6 @@ def style_number(num: int) -> str:
     return colorize(f"{num}.", *_resolve_styles('number'))
 
 
-def style_snippet(text: str) -> str:
-    """Style snippet text."""
-    return colorize(text, *_resolve_styles('snippet'))
-
-
 def style_info(text: str) -> str:
     """Style info text."""
     return colorize(text, *_resolve_styles('info'))
@@ -306,11 +330,6 @@ def style_success(text: str) -> str:
 def style_error(text: str) -> str:
     """Style error text."""
     return colorize(text, *_resolve_styles('error'))
-
-
-def style_warning(text: str) -> str:
-    """Style warning text."""
-    return colorize(text, Colors.YELLOW)
 
 
 def normalize_url(url: str) -> str:
@@ -490,6 +509,8 @@ STOP_WORDS = frozenset([
     'against', 'below', 'between', 'down', 'during', 'into', 'over',
     'through', 'under', 'until', 'up', 'out', 'off', 'once', 'any'
 ])
+
+
 
 
 # Pre-compiled regex pattern for tokenization (avoids repeated compilation)

@@ -31,31 +31,18 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple
 
 
-# Stop words to filter out (common English words that aren't useful as suggestions)
-STOP_WORDS = frozenset({
-    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by',
-    'can', 'could', 'did', 'do', 'does', 'done', 'each', 'for', 'from',
-    'get', 'got', 'had', 'has', 'have', 'he', 'her', 'here', 'him',
-    'his', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
-    'let', 'like', 'may', 'me', 'might', 'more', 'most', 'much', 'must',
-    'my', 'no', 'nor', 'not', 'now', 'of', 'on', 'one', 'only', 'or',
-    'other', 'our', 'out', 'own', 'per', 'say', 'she', 'should', 'so',
-    'some', 'such', 'than', 'that', 'the', 'their', 'them', 'then',
-    'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
-    'up', 'us', 'use', 'used', 'using', 'very', 'was', 'we', 'were',
-    'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why',
-    'will', 'with', 'would', 'you', 'your', 'about', 'above', 'after',
-    'again', 'all', 'also', 'am', 'any', 'because', 'before', 'being',
-    'below', 'between', 'both', 'during', 'few', 'further', 'having',
-    'he', 'herself', 'himself', 'how', 'itself', 'myself', 'need',
-    'new', 'off', 'once', 'only', 'ourselves', 'over', 'same', 'shall',
-    'since', 'still', 'such', 'take', 'tell', 'tend', 'themselves',
-    'under', 'until', 'upon', 'way', 'well', 'what', 'which', 'whom',
-    'work', 'yet', 'yourself', 'yourselves',
-    # Common web/doc junk
-    'click', 'page', 'next', 'previous', 'see', 'also', 'note', 'example',
+from .utils import STOP_WORDS as _INDEX_STOP_WORDS
+
+# Extra junk filtered from suggestions only (not from BM25 tokenization)
+STOP_WORDS = _INDEX_STOP_WORDS | frozenset({
+    'let', 'like', 'may', 'much', 'one', 'per', 'say', 'use', 'used', 'using',
+    'while', 'whom', 'also', 'because', 'before', 'further', 'having',
+    'herself', 'himself', 'itself', 'myself', 'need', 'new', 'ourselves',
+    'since', 'still', 'take', 'tell', 'tend', 'themselves', 'upon', 'way',
+    'well', 'work', 'yet', 'yourself', 'yourselves', 'get', 'got', 'done',
+    'click', 'page', 'next', 'previous', 'see', 'note', 'example',
     'return', 'returns', 'none', 'true', 'false', 'type', 'name',
-    'value', 'default', 'set', 'list', 'new', 'following', 'given',
+    'value', 'default', 'set', 'list', 'following', 'given',
     'called', 'make', 'made',
 })
 
