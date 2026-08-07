@@ -28,7 +28,7 @@ except ImportError:
     READLINE_AVAILABLE = False
 
 from ..crawler import Crawler
-from ..indexer import BM25Index
+from ..indexer import BM25Index, find_index_path
 from ..searcher import SearchEngine, EnhancedSearchEngine, format_results, parse_query
 from ..utils import (
     site_hash, format_size, format_duration,
@@ -233,7 +233,7 @@ def cmd_index(args):
     # Try incremental indexing if not forced full and existing index available
     existing_index = None
     if not full_rebuild:
-        for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+        for candidate in [site_dir / 'index.pkl.gz', site_dir / 'index.json.gz', site_dir / 'index.json']:
             if candidate.exists():
                 try:
                     existing_index = BM25Index.load(candidate)
@@ -332,11 +332,7 @@ def cmd_search(args):
         return 1
     
     # Find index file
-    index_path = None
-    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-        if candidate.exists():
-            index_path = candidate
-            break
+    index_path = find_index_path(site_dir)
     
     if not index_path:
         print(style_error(f"Error: No index found in {site_dir}"))
@@ -452,11 +448,7 @@ def cmd_autocomplete(args):
         return 1
     
     # Find index file
-    index_path = None
-    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-        if candidate.exists():
-            index_path = candidate
-            break
+    index_path = find_index_path(site_dir)
     
     if not index_path:
         print(style_error(f"Error: No index found in {site_dir}"))
@@ -489,11 +481,7 @@ def cmd_interactive(args):
         return 1
     
     # Find index file
-    index_path = None
-    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-        if candidate.exists():
-            index_path = candidate
-            break
+    index_path = find_index_path(site_dir)
     
     if not index_path:
         print(style_error(f"Error: No index found in {site_dir}"))
@@ -811,11 +799,7 @@ def cmd_stats(args):
         print(f"Stored Pages: {page_count} ({format_size(total_size)})")
     
     # Index stats
-    index_path = None
-    for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-        if candidate.exists():
-            index_path = candidate
-            break
+    index_path = find_index_path(site_dir)
     
     if index_path:
         engine = SearchEngine.load(index_path)
@@ -1515,11 +1499,7 @@ def cmd_serve(args):
             return 1
         
         # Find index file
-        index_path = None
-        for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
-            if candidate.exists():
-                index_path = candidate
-                break
+        index_path = find_index_path(site_dir)
         
         if not index_path:
             print(style_error(f"Error: No index found in {site_dir}"))
@@ -1577,11 +1557,21 @@ def cmd_serve(args):
     per_page = getattr(args, 'per_page', 10)
     max_results = getattr(args, 'max_results', 100)
     no_javascript = getattr(args, 'no_javascript', False)
-    server = run_server(engine, host=args.host, port=args.port, version=__version__, 
+    # Click log for CTR boosts (single-site mode only)
+    click_log = None
+    if not getattr(args, 'all', False):
+        try:
+            from ..click_log import ClickLog
+            click_log = ClickLog.for_site(site_dir)
+        except Exception:
+            click_log = None
+
+    server = run_server(engine, host=args.host, port=args.port, version=__version__,
                        log_requests=log_requests, per_page=per_page, max_results=max_results,
                        enable_autocomplete=enable_suggestions,
                        enable_synonyms=enable_synonyms,
-                       no_javascript=no_javascript)
+                       no_javascript=no_javascript,
+                       click_log=click_log)
     
     url = f"http://{args.host}:{args.port}"
     

@@ -361,8 +361,8 @@ class TestIndexFingerprint(unittest.TestCase):
         index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
         index.save(Path(index_base))
         
-        index_file = index_base + '.json.gz'  # Actual file path after save
-        
+        index_file = index_base + '.pkl.gz'  # Actual file path after binary save
+
         fp1 = compute_index_fingerprint(Path(index_file))
         fp2 = compute_index_fingerprint(Path(index_file))
         
@@ -381,15 +381,15 @@ class TestIndexFingerprint(unittest.TestCase):
         index.add_document(0, 'https://example.com/1', 'Title 1', 'Content 1')
         index.save(Path(index_base))
         
-        index_file = index_base + '.json.gz'
-        
+        index_file = index_base + '.pkl.gz'
+
         fp1 = compute_index_fingerprint(Path(index_file))
-        
+
         # Wait a tiny bit and re-save (changes mtime)
         time.sleep(0.01)
         index.add_document(1, 'https://example.com/2', 'Title 2', 'Content 2')
         index.save(Path(index_base))
-        
+
         fp2 = compute_index_fingerprint(Path(index_file))
         
         self.assertNotEqual(fp1, fp2)
@@ -405,8 +405,8 @@ class TestIndexFingerprint(unittest.TestCase):
         index1.add_document(0, 'https://example.com/1', 'Python', 'Python content')
         index1.save(Path(index_base))
         
-        index_file = index_base + '.json.gz'
-        
+        index_file = index_base + '.pkl.gz'
+
         # Create engine with persistent cache
         engine1 = SearchEngine.load(
             Path(index_file),
@@ -414,15 +414,15 @@ class TestIndexFingerprint(unittest.TestCase):
             cache_path=Path(self.cache_path)
         )
         engine1.search('python', top_k=10)
-        
+
         # Verify cache has entry
         self.assertEqual(engine1.get_cache_stats()['size'], 1)
-        
+
         # Wait and re-save index (simulates re-index)
         time.sleep(0.01)
         index1.add_document(1, 'https://example.com/2', 'Java', 'Java content')
         index1.save(Path(index_base))
-        
+
         # Create new engine with same cache path
         engine2 = SearchEngine.load(
             Path(index_file),
@@ -444,8 +444,8 @@ class TestIndexFingerprint(unittest.TestCase):
         index.add_document(0, 'https://example.com/1', 'Python', 'Python content')
         index.save(Path(index_base))
         
-        index_file = index_base + '.json.gz'
-        
+        index_file = index_base + '.pkl.gz'
+
         # Create engine and cache some data
         engine1 = SearchEngine.load(
             Path(index_file),
@@ -454,7 +454,7 @@ class TestIndexFingerprint(unittest.TestCase):
         )
         engine1.search('python', top_k=10)
         self.assertEqual(engine1.get_cache_stats()['size'], 1)
-        
+
         # Load again WITHOUT re-saving index (simulates restart)
         engine2 = SearchEngine.load(
             Path(index_file),

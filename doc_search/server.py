@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from .searcher import SearchEngine, parse_query, group_results_by_section
+from .click_log import ClickLog
 from . import __version__
 
 from .utils import emoji as _e
@@ -429,6 +430,7 @@ class SearchHandler(BaseHTTPRequestHandler):
     enable_facets: bool = True  # Enable faceted search filtering
     enable_synonyms: bool = False  # Enable synonym expansion toggle
     no_javascript: bool = False  # Serve pure HTML/CSS UI without JavaScript
+    click_log: ClickLog = None
 
     def log_message(self, format, *args):
         """Log HTTP requests if enabled."""
@@ -684,14 +686,27 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def handle_api_click(self):
-        """Accept click beacons from the UI (no-op without analytics backend)."""
+        """Log a result click for CTR ranking boosts."""
         try:
             length = int(self.headers.get('Content-Length', 0))
-            if length:
-                self.rfile.read(length)
+            body = self.rfile.read(length) if length else b'{}'
+            data = json.loads(body.decode('utf-8') or '{}')
         except Exception:
             self.send_json({'error': 'invalid request'}, 400)
             return
+
+        if self.click_log and data.get('url'):
+            try:
+                self.click_log.log(
+                    data.get('query', ''),
+                    data.get('url', ''),
+                    int(data.get('rank', 0) or 0),
+                )
+                # Live-update in-memory CTR if engine supports it
+                if hasattr(self.engine, 'index') and hasattr(self.engine.index, 'set_click_counts'):
+                    self.engine.index.set_click_counts(self.click_log.counts())
+            except Exception:
+                pass
         self.send_json({'ok': True})
 
     def handle_suggest(self, query_string: str):
@@ -1073,6 +1088,7 @@ def run_server(
     enable_facets: bool = True,
     enable_synonyms: bool = False,
     no_javascript: bool = False,
+    click_log: ClickLog = None,
 ) -> HTTPServer:
     """Create and return the HTTP server (doesn't start it).
     
@@ -1102,5 +1118,6 @@ def run_server(
     SearchHandler.enable_autocomplete = enable_autocomplete
     SearchHandler.enable_synonyms = enable_synonyms
     SearchHandler.no_javascript = no_javascript
+    SearchHandler.click_log = click_log
     server = HTTPServer((host, port), SearchHandler)
     return server

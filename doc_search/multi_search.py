@@ -5,6 +5,7 @@ Merges results from multiple site indexes, ranked by BM25 score.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
@@ -34,7 +35,7 @@ def discover_sites(data_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
         
         # Find index file
         index_path = None
-        for candidate in [site_dir / 'index.json.gz', site_dir / 'index.json']:
+        for candidate in [site_dir / 'index.pkl.gz', site_dir / 'index.json.gz', site_dir / 'index.json']:
             if candidate.exists():
                 index_path = candidate
                 break
@@ -178,31 +179,32 @@ class MultiSiteSearchEngine:
             List of result dicts, each with an added 'site' key
         """
         all_results = []
-        
-        for site in self._site_info:
-            try:
-                engine = self._get_engine(site)
-                results = engine.search(
-                    query,
-                    top_k=top_k,  # Get top_k per site, then merge
-                    highlight=highlight,
-                    snippet_length=snippet_length,
-                )
-                
-                # Annotate results with site info
-                site_label = site.get('url') or site.get('name') or site['hash']
-                for r in results:
-                    r['site'] = site_label
-                    r['site_hash'] = site['hash']
-                
-                all_results.extend(results)
-            except Exception:
-                # Skip sites that fail to load
-                continue
-        
-        # Sort by BM25 score descending
+
+        def _search_one(site):
+            engine = self._get_engine(site)
+            results = engine.search(
+                query,
+                top_k=top_k,
+                highlight=highlight,
+                snippet_length=snippet_length,
+            )
+            site_label = site.get('url') or site.get('name') or site['hash']
+            for r in results:
+                r['site'] = site_label
+                r['site_hash'] = site['hash']
+            return results
+
+        # Parallel per-site search (stdlib threads; release GIL on I/O)
+        workers = min(8, max(1, len(self._site_info)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_search_one, s): s for s in self._site_info}
+            for fut in as_completed(futures):
+                try:
+                    all_results.extend(fut.result())
+                except Exception:
+                    continue
+
         all_results.sort(key=lambda r: r.get('score', 0), reverse=True)
-        
         return all_results[:top_k]
     
     def search_enhanced(

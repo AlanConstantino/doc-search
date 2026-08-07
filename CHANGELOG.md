@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-08-06
+
+### Added
+- **Faster search** — `heapq.nlargest` top-k, precomputed IDF, `array.array` postings, binary `.pkl.gz` index (+ optional mmap `.postings` sidecar)
+- **In-index previews** — title/headings/body preview stored in the index so rerank/snippets avoid page JSON I/O
+- **Tighter default recall** — rerank recall multiplier 4, max candidates 200 (snappier serve)
+- **Normalized query cache keys** — collapses case/whitespace for instant-search hits
+- **Fielded BM25** — title / headings / body weighted at score time
+- **Bigram phrase postings** — faster quoted-phrase recall/filter
+- **Static document priors** — length, URL depth, doc type, inbound links
+- **Section/anchor chunks** — heading sections indexed as `url#slug`
+- **Lighter stemming policy** — stem for recall + unstemmed exact-match bonus
+- **Code-aware tokenization** — CamelCase, snake_case, dotted identifiers
+- **Click log + CTR boost** — `clicks.db` via `/api/click`, boosts frequent URLs
+- **Parallel multi-site search** — `ThreadPoolExecutor` across site indexes
+
 ## [2.4.0] - 2026-08-06
 
 ### Removed

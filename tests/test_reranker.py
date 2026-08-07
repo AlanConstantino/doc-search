@@ -20,9 +20,9 @@ class TestRerankConfig(unittest.TestCase):
         """Should have sensible defaults."""
         config = RerankConfig()
         
-        self.assertEqual(config.recall_multiplier, 10)
-        self.assertEqual(config.max_candidates, 500)
-        self.assertEqual(config.candidate_limit, 100)
+        self.assertEqual(config.recall_multiplier, 4)
+        self.assertEqual(config.max_candidates, 200)
+        self.assertEqual(config.candidate_limit, 80)
         self.assertAlmostEqual(config.weight_bm25, 0.60)
         self.assertAlmostEqual(config.weight_field, 0.20)
         self.assertAlmostEqual(config.weight_coverage, 0.10)
@@ -55,14 +55,14 @@ class TestRerankerRecall(unittest.TestCase):
     
     def test_compute_recall_k_basic(self):
         """Should multiply top_k by recall_multiplier."""
-        # Default multiplier is 10
-        self.assertEqual(self.reranker.compute_recall_k(10), 100)
-        self.assertEqual(self.reranker.compute_recall_k(20), 200)
-    
+        # Default multiplier is 4 (tighter serve profile)
+        self.assertEqual(self.reranker.compute_recall_k(10), 40)
+        self.assertEqual(self.reranker.compute_recall_k(20), 80)
+
     def test_compute_recall_k_capped(self):
         """Should cap at max_candidates."""
-        # Default max is 500
-        self.assertEqual(self.reranker.compute_recall_k(100), 500)  # 100*10=1000, capped to 500
+        # Default max is 200
+        self.assertEqual(self.reranker.compute_recall_k(100), 200)  # 100*4=400, capped to 200
     
     def test_compute_recall_k_custom_config(self):
         """Should respect custom config."""
@@ -701,7 +701,7 @@ class TestCreateReranker(unittest.TestCase):
     def test_create_default(self):
         reranker = Reranker()
         self.assertIsInstance(reranker, Reranker)
-        self.assertEqual(reranker.config.recall_multiplier, 10)
+        self.assertEqual(reranker.config.recall_multiplier, 4)
 
     def test_create_with_config(self):
         reranker = Reranker(RerankConfig(recall_multiplier=5, weight_bm25=0.6))

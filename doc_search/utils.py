@@ -517,76 +517,79 @@ STOP_WORDS = frozenset([
 # Matches words that start with a letter, plus pure numeric tokens.
 _WORD_PATTERN = re.compile(r'\b(?:[a-z][a-z0-9_]*|\d+)\b')
 
+# Code-aware splits: CamelCase, snake_case, dotted identifiers
+_CAMEL_1 = re.compile(r'([a-z0-9])([A-Z])')
+_CAMEL_2 = re.compile(r'([A-Z]+)([A-Z][a-z])')
+_DOTTED_ID = re.compile(r'\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b')
+
+
+def _split_code_token(token: str) -> list:
+    """Split a single CamelCase / snake_case token into parts (lowercased)."""
+    if '_' in token:
+        parts = token.split('_')
+    else:
+        s = _CAMEL_2.sub(r'\1\n\2', token)
+        s = _CAMEL_1.sub(r'\1\n\2', s)
+        parts = s.split('\n')
+    out = []
+    for p in parts:
+        p = p.lower()
+        if p and (len(p) > 1 or p.isdigit()) and p not in STOP_WORDS:
+            out.append(p)
+    return out or ([token.lower()] if token else [])
+
+
+def _raw_tokens(text: str) -> list:
+    """Extract raw lowercase tokens with code-aware splitting (no stemming)."""
+    if not text:
+        return []
+    # Dotted identifiers → spaces (os.path.join → os path join)
+    expanded = _DOTTED_ID.sub(lambda m: m.group(0).replace('.', ' '), text)
+    tokens = []
+    for m in re.finditer(r'\b[A-Za-z][A-Za-z0-9_]*\b|\b\d+\b', expanded):
+        raw = m.group(0)
+        if raw.isdigit():
+            tokens.append(raw)
+            continue
+        if any(c.isupper() for c in raw[1:]) or '_' in raw:
+            tokens.extend(_split_code_token(raw))
+            # also keep full lower form when useful (httpServer → httpserver)
+            full = raw.lower()
+            if len(full) > 2 and full not in STOP_WORDS and full not in tokens:
+                tokens.append(full)
+        else:
+            w = raw.lower()
+            if (len(w) > 1 or w.isdigit()) and w not in STOP_WORDS:
+                tokens.append(w)
+    return tokens
+
 
 def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
-    
-    This function performs the following transformations:
-    
-    1. **Case normalization**: All text is converted to lowercase.
-    
-    2. **Word extraction**: Uses regex pattern ``[a-z][a-z0-9_]*`` to extract
-       words that start with a letter and contain only letters, digits, or
-       underscores. This means:
-       - Words must start with a-z (not numbers or symbols)
-       - Words can contain digits after the first letter (e.g., "python3")
-       - Underscores are allowed (e.g., "my_function")
-       - Punctuation and special characters are stripped
-    
-    3. **Stop word removal**: Common English words (articles, prepositions,
-       pronouns, etc.) are filtered out. See ``STOP_WORDS`` for the full list.
-       These words appear in nearly every document and don't help distinguish
-       between documents.
-    
-    4. **Short word filtering**: Single-character tokens are removed since
-       they're typically not meaningful for search (e.g., "a", "I" are already
-       stop words, and other single letters are usually noise).
-    
-    5. **Optional stemming**: When ``apply_stemming=True``, words are reduced
-       to their root form using the Porter Stemming algorithm (e.g.,
-       "running" → "run", "files" → "file").
-    
-    Args:
-        text: The input text to tokenize.
-        apply_stemming: If True, apply Porter stemming to each token.
-            Default is False.
-    
-    Returns:
-        A list of processed tokens (lowercase strings).
-    
-    Examples:
-        >>> tokenize("The quick brown fox")
-        ['quick', 'brown', 'fox']
-        
-        >>> tokenize("Python3 programming is fun!")
-        ['python3', 'programming', 'fun']
-        
-        >>> tokenize("running files", apply_stemming=True)
-        ['run', 'file']
-        
-        >>> tokenize("A B C test")  # Single letters filtered
-        ['test']
-    
-    Note:
-        - Numbers alone are not tokenized (must start with a letter)
-        - Email addresses and URLs are split at punctuation
-        - Non-ASCII characters are ignored (English-only tokenization)
+
+    Code-aware: splits CamelCase, snake_case, and dotted.ids.
+    Optional Porter stemming when apply_stemming=True.
     """
-    # Convert to lowercase and extract words using pre-compiled pattern
-    words = _WORD_PATTERN.findall(text.lower())
-    
-    # Filter out stop words and single-character alphabetic words.
-    # Keep pure numeric tokens even when they are one character long.
-    # Using set membership check (STOP_WORDS is already a frozenset)
-    tokens = [w for w in words if (len(w) > 1 or w.isdigit()) and w not in STOP_WORDS]
-    
-    # Apply stemming if requested
+    tokens = _raw_tokens(text)
     if apply_stemming:
         from .stemmer import stem
         tokens = [stem(t) for t in tokens]
-    
     return tokens
+
+
+def tokenize_with_exact(text: str, apply_stemming: bool = True):
+    """
+    Return (stemmed_tokens, exact_tokens).
+
+    Stemmed forms power recall; exact (unstemmed) forms power match bonus.
+    """
+    exact = _raw_tokens(text)
+    if not apply_stemming:
+        return list(exact), list(exact)
+    from .stemmer import stem
+    stemmed = [stem(t) for t in exact]
+    return stemmed, exact
 
 
 def format_size(size_bytes: int) -> str:

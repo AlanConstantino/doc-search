@@ -242,11 +242,15 @@ class SearchCache:
             )
             self._db.commit()
     
+    @staticmethod
+    def normalize_query(query: str) -> str:
+        """Normalize query for cache hits across near-duplicate instant-search keys."""
+        return ' '.join((query or '').lower().split())
+
     def _make_key(self, query: str, **kwargs) -> str:
         """Create a cache key from query and parameters."""
-        # Sort kwargs for consistent key generation
         sorted_kwargs = sorted(kwargs.items())
-        return f"{query}|{sorted_kwargs}"
+        return f"{self.normalize_query(query)}|{sorted_kwargs}"
     
     def get(self, query: str, **kwargs) -> Optional[Any]:
         """
@@ -489,51 +493,79 @@ class SearchEngine:
         """
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
-        
-        # Try to find pages directory
+
         pages_dir = None
         parent = index_path.parent
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
-        
-        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl, 
+
+        # Load CTR click counts when available
+        clicks_db = parent / 'clicks.db'
+        if clicks_db.exists():
+            try:
+                from .click_log import ClickLog
+                index.set_click_counts(ClickLog(str(clicks_db)).counts())
+            except Exception:
+                pass
+
+        return cls(index, pages_dir, cache_size=cache_size, cache_ttl=cache_ttl,
                    cache_path=cache_path, index_path=index_path)
-    
-    def _load_page_text(self, url: str) -> Optional[str]:
-        """Load full page text from disk with LRU caching.
-        
-        Caches up to 200 page texts to avoid redundant disk reads
-        during reranking + snippet generation in the same search.
-        """
-        if not self.pages_dir:
+
+    def _preview_for_url(self, url: str) -> Optional[str]:
+        """Return in-index preview/headings text without touching disk."""
+        doc_id = self.index.get_doc_id(url)
+        if doc_id is None:
             return None
-        
-        # Check cache first
+        doc = self.index.get_document(doc_id) or {}
+        parts = [doc.get('title') or '', doc.get('headings_text') or '', doc.get('preview') or '']
+        text = ' '.join(p for p in parts if p).strip()
+        return text or None
+
+    def _load_page_text(self, url: str) -> Optional[str]:
+        """Load page text: prefer in-index preview, else disk JSON (LRU cached)."""
+        # Strip anchor for page file lookup / preview parent
+        base_url = url.split('#', 1)[0]
+
         if url in self._page_text_cache:
             return self._page_text_cache[url]
-        
+        if base_url in self._page_text_cache and '#' in url:
+            # chunk: prefer its own preview first
+            pass
+
+        preview = self._preview_for_url(url) or self._preview_for_url(base_url)
+        # Use preview when present (avoids disk for rerank/snippets)
+        if preview and len(preview) >= 40:
+            text = preview
+            if len(self._page_text_cache) >= 200:
+                first_key = next(iter(self._page_text_cache))
+                del self._page_text_cache[first_key]
+            self._page_text_cache[url] = text
+            return text
+
+        if not self.pages_dir:
+            self._page_text_cache[url] = preview
+            return preview
+
         from .utils import url_to_filename
-        filename = url_to_filename(url) + '.json'
+        filename = url_to_filename(base_url) + '.json'
         filepath = self.pages_dir / filename
-        
+
         if not filepath.exists():
-            self._page_text_cache[url] = None
-            return None
-        
+            self._page_text_cache[url] = preview
+            return preview
+
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            text = data.get('text', '')
-            # Evict oldest if cache is full
+            text = data.get('text', '') or preview
             if len(self._page_text_cache) >= 200:
-                # Remove first inserted entry
                 first_key = next(iter(self._page_text_cache))
                 del self._page_text_cache[first_key]
             self._page_text_cache[url] = text
             return text
         except (json.JSONDecodeError, IOError):
-            self._page_text_cache[url] = None
-            return None
+            self._page_text_cache[url] = preview
+            return preview
     
     def search(
         self, 
@@ -596,24 +628,27 @@ class SearchEngine:
             if phrases or (self.pages_dir and snippet_length > 0):
                 page_text = self._load_page_text(r['url'])
             
-            # Check phrase matches
-            if phrases and page_text:
-                # Must contain all phrases
+            # Phrase filter: bigrams first (no disk), then text fallback
+            if phrases:
                 all_phrases_found = True
                 for phrase in phrases:
-                    if not check_phrase_match(page_text, phrase):
-                        # Also check title
-                        if not check_phrase_match(r.get('title', ''), phrase):
-                            all_phrases_found = False
-                            break
-                
+                    ok = False
+                    if hasattr(self.index, 'has_phrase_bigrams'):
+                        ok = self.index.has_phrase_bigrams(phrase, r['url'])
+                    if not ok and page_text:
+                        ok = check_phrase_match(page_text, phrase) or check_phrase_match(r.get('title', ''), phrase)
+                    if not ok and not page_text:
+                        # try title-only
+                        ok = check_phrase_match(r.get('title', ''), phrase)
+                    if not ok:
+                        all_phrases_found = False
+                        break
                 if not all_phrases_found:
                     continue
-            
-            # Generate better snippet
-            snippet = r.get('description', '')
+
+            # Snippet from preview/description without requiring full body
+            snippet = r.get('description', '') or r.get('preview', '')
             if page_text:
-                # Normalize text for cleaner snippets (fixes PDF/Word artifacts)
                 normalized_text = normalize_document_text(page_text)
                 snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
             
@@ -990,13 +1025,20 @@ class EnhancedSearchEngine(SearchEngine):
         """Load enhanced search engine from saved index."""
         index_path = Path(index_path)
         index = BM25Index.load(index_path)
-        
-        # Try to find pages directory
+
         pages_dir = None
         parent = index_path.parent
         if (parent / 'pages').is_dir():
             pages_dir = parent / 'pages'
-        
+
+        clicks_db = parent / 'clicks.db'
+        if clicks_db.exists():
+            try:
+                from .click_log import ClickLog
+                index.set_click_counts(ClickLog(str(clicks_db)).counts())
+            except Exception:
+                pass
+
         return cls(index, pages_dir, index_path=index_path, **kwargs)
     
     def get_spelling_suggestion(self, query: str) -> Optional[str]:
@@ -1327,25 +1369,27 @@ class EnhancedSearchEngine(SearchEngine):
         
         for r in candidates_to_process:
             page_text = None
-            if phrases or (self.pages_dir and snippet_length > 0):
+            if phrases or snippet_length > 0:
                 page_text = self._load_page_text(r['url'])
-            
-            # Check phrase matches (still filter for exact phrase matches)
-            if phrases and page_text:
+
+            if phrases:
                 all_phrases_found = True
                 for phrase in phrases:
-                    if not check_phrase_match(page_text, phrase):
-                        if not check_phrase_match(r.get('title', ''), phrase):
-                            all_phrases_found = False
-                            break
-                
+                    ok = False
+                    if hasattr(self.index, 'has_phrase_bigrams'):
+                        ok = self.index.has_phrase_bigrams(phrase, r['url'])
+                    if not ok and page_text:
+                        ok = check_phrase_match(page_text, phrase) or check_phrase_match(r.get('title', ''), phrase)
+                    if not ok and not page_text:
+                        ok = check_phrase_match(r.get('title', ''), phrase)
+                    if not ok:
+                        all_phrases_found = False
+                        break
                 if not all_phrases_found:
                     continue
-            
-            # Generate snippet
-            snippet = r.get('description', '')
+
+            snippet = r.get('description', '') or r.get('preview', '')
             if page_text:
-                # Normalize text for cleaner snippets (fixes PDF/Word artifacts)
                 normalized_text = normalize_document_text(page_text)
                 snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
             

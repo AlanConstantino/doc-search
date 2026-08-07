@@ -67,14 +67,14 @@ DEFAULT_RATE_LIMIT_BACKOFF = 60
 # Reranking Configuration (Two-Stage Retrieval)
 # =============================================================================
 
-# Recall stage: fetch this multiple of top_k candidates
-RERANK_RECALL_MULTIPLIER = 10
+# Recall stage: fetch this multiple of top_k candidates (tighter = faster serve)
+RERANK_RECALL_MULTIPLIER = 4
 
 # Maximum candidates to fetch in recall stage
-RERANK_MAX_CANDIDATES = 500
+RERANK_MAX_CANDIDATES = 200
 
 # Number of candidates to rerank (balance speed vs quality)
-RERANK_CANDIDATE_LIMIT = 100
+RERANK_CANDIDATE_LIMIT = 80
 
 # Score component weights (must sum to ~1.0)
 RERANK_WEIGHT_BM25 = 0.60          # Base BM25 relevance (dominant signal)
