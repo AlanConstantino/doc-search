@@ -494,21 +494,33 @@ def is_html_content(content_type: str) -> bool:
 #   - Modal verbs: can, could, may, might, must, shall, should, will, would
 #   - Common adverbs: how, when, where, why, very, just, now, etc.
 #   - Quantifiers: all, any, both, each, every, few, more, most, some, etc.
+# Minimal English glue words only.
+# Programming / docs keywords are intentionally kept so multi-word queries
+# like "async with", "yield from", "for loop", "not implemented" stay multi-term
+# at both index and query time (same analyzer).
 STOP_WORDS = frozenset([
-    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-    'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 'that',
-    'the', 'to', 'was', 'were', 'will', 'with', 'the', 'this', 'but',
-    'they', 'have', 'had', 'what', 'when', 'where', 'who', 'which',
-    'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
-    'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only',
-    'own', 'same', 'so', 'than', 'too', 'very', 'can', 'just', 'should',
-    'now', 'your', 'you', 'we', 'our', 'their', 'his', 'her', 'my',
-    'me', 'him', 'them', 'us', 'i', 'am', 'been', 'being', 'do', 'does',
-    'did', 'doing', 'would', 'could', 'might', 'must', 'shall', 'if',
-    'then', 'else', 'there', 'here', 'about', 'above', 'after', 'again',
-    'against', 'below', 'between', 'down', 'during', 'into', 'over',
-    'through', 'under', 'until', 'up', 'out', 'off', 'once', 'any'
+    # articles / demonstratives
+    'a', 'an', 'the', 'this', 'that', 'these', 'those',
+    # pure pronouns
+    'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him', 'his',
+    'she', 'her', 'it', 'its', 'they', 'them', 'their', 'us',
+    # copula / auxiliaries that rarely carry docs intent alone
+    'am', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+    'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can',
+    # wh- / discourse glue
+    'what', 'when', 'where', 'who', 'which', 'why', 'how',
+    'than', 'then', 'so', 'very', 'just', 'also', 'too', 'now',
+    'only', 'own', 'same', 'such', 'some', 'any', 'all', 'each',
+    'every', 'both', 'few', 'more', 'most', 'other',
+    # prepositions that are weak alone in prose (NOT: with/for/from/in/on/to/as/by/at)
+    'of', 'about', 'above', 'after', 'again', 'against', 'below',
+    'between', 'during', 'into', 'through', 'under', 'until',
+    'once', 'there', 'here', 'but',
 ])
+# Kept searchable (critical for multi-word Python/docs queries):
+# and, or, not, if, else, for, from, with, as, in, on, to, by, at, is,
+# no, nor, up, out, off, over, down
 
 
 

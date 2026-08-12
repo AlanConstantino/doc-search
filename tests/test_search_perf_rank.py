@@ -158,6 +158,36 @@ class TestIndustryRanking(unittest.TestCase):
         top = idx.search('asyncio gather', 5)
         self.assertEqual(top[0]['url'], 'https://title')
 
+
+    def test_async_with_is_multi_term(self):
+        """async with must rank the page that has both terms / bigram."""
+        idx = BM25Index()
+        idx.add_document(
+            0, 'https://async-with', 'Async With Statement',
+            'Use async with lock to acquire asynchronously. async with is special.',
+        )
+        idx.add_document(
+            1, 'https://async-only', 'Asyncio Primer',
+            'async async async functions and coroutines everywhere async.',
+        )
+        idx.rebuild_idf_cache()
+        top = idx.search('async with', 5)
+        self.assertTrue(top)
+        self.assertEqual(top[0]['url'], 'https://async-with')
+        self.assertGreaterEqual(top[0].get('_term_coverage', 0), 0.99)
+
+    def test_quoted_multi_word_phrase(self):
+        from doc_search.searcher import SearchEngine
+        idx = BM25Index()
+        idx.add_document(0, 'https://a', 'A', 'foo bar appears together as foo bar here')
+        idx.add_document(1, 'https://b', 'B', 'foo something bar far apart')
+        idx.rebuild_idf_cache()
+        eng = SearchEngine(idx)
+        # phrase filter path
+        hits = eng.search('"foo bar"', top_k=5)
+        urls = [h['url'] for h in hits]
+        self.assertIn('https://a', urls)
+
     def test_expansion_weights_prefer_original_terms(self):
         idx = BM25Index()
         idx.add_document(0, 'https://orig', 'Error Handling',

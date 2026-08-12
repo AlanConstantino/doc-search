@@ -142,6 +142,22 @@ class TestTokenize(unittest.TestCase):
         tokens = tokenize("snake_case variable")
         self.assertIn("snake_case", tokens)
 
+
+    def test_keeps_programming_keywords(self):
+        """Docs/search keywords must not be stripped as stopwords."""
+        cases = {
+            'async with': ['async', 'with'],
+            'yield from': ['yield', 'from'],
+            'for loop': ['for', 'loop'],
+            'with open': ['with', 'open'],
+            'not implemented': ['not', 'implemented'],
+            'if else': ['if', 'else'],
+        }
+        for query, expected in cases.items():
+            tokens = tokenize(query)
+            for term in expected:
+                self.assertIn(term, tokens, msg=f'{query!r} missing {term!r}: {tokens}')
+
     def test_keeps_numeric_tokens(self):
         """Should keep pure numeric tokens for number search."""
         tokens = tokenize("Version 2024 and 7")

@@ -56,8 +56,11 @@ CTR_MULT_MAX = 0.25
 # Soft-AND / coordination: prefer docs matching more distinct query terms
 # (Lucene coord-like; modern systems use coverage in LTR — we bake a light version
 # into first-stage BM25 so expansions can't rank a one-term cousin above a full match.)
-COORD_FULL_MATCH_BONUS = 0.15  # when all unique query stems match
-COORD_PARTIAL_POWER = 0.85     # score *= (matched/total) ** power  (soft, not hard AND)
+COORD_FULL_MATCH_BONUS = 0.28  # when all unique query stems match
+COORD_PARTIAL_POWER = 0.65     # stronger soft-AND (lower = harsher on partial match)
+# Adjacent query-term bigrams (multi-word phrases without quotes)
+QUERY_BIGRAM_BOOST = 0.55
+QUERY_BIGRAM_IDF_SCALE = 0.55
 
 PREVIEW_CHARS = 600
 INDEX_FORMAT_VERSION = 3
@@ -923,14 +926,30 @@ class BM25Index:
                 postings = self.bigrams.get(bg)
                 if not postings:
                     continue
-                idf_bg = max(self._idf(a), self._idf(btm)) * 0.45
+                idf_bg = max(self._idf(a), self._idf(btm)) * QUERY_BIGRAM_IDF_SCALE
                 for doc_id, tf, _, _ in postings.iter_rows():
-                    scores[doc_id] += idf_bg * min(int(tf), 5) * 0.40
+                    scores[doc_id] += idf_bg * min(int(tf), 5) * QUERY_BIGRAM_BOOST
+
+        # Count matched adjacent primary bigrams per doc (multi-word signal)
+        query_bigrams = []
+        if len(unique_stems) >= 2:
+            query_bigrams = [f'{a} {b}' for a, b in zip(unique_stems, unique_stems[1:])]
+        bigram_hits: Dict[int, int] = defaultdict(int)
+        for bg in query_bigrams:
+            postings = self.bigrams.get(bg)
+            if not postings:
+                continue
+            seen_docs = set()
+            for doc_id, tf, _, _ in postings.iter_rows():
+                if doc_id not in seen_docs:
+                    bigram_hits[doc_id] += 1
+                    seen_docs.add(doc_id)
 
         if not scores:
             return []
 
         exact_set = set(exact_terms)
+        n_query_bigrams = len(query_bigrams)
         for doc_id in list(scores.keys()):
             doc = self.documents.get(doc_id)
             if not doc:
@@ -951,6 +970,14 @@ class BM25Index:
                 if coverage >= 1.0:
                     coord *= (1.0 + COORD_FULL_MATCH_BONUS)
                 base *= coord
+
+            # Multi-word: reward ordered adjacent bigram coverage
+            if n_query_bigrams > 0:
+                bg_cov = bigram_hits.get(doc_id, 0) / n_query_bigrams
+                if bg_cov > 0:
+                    base *= (1.0 + 0.35 * bg_cov)
+                    if bg_cov >= 0.999 and coverage >= 0.999:
+                        base *= 1.12  # full term + full bigram chain
 
             # Exact unstemmed forms (title/headings) — multiplicative
             if exact_set and doc.get('exact_terms'):

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-08-12
+
+### Fixed
+- **Multi-word search** — stopword list no longer drops programming/docs keywords (`with`, `for`, `from`, `as`, `in`, `on`, `to`, `by`, `at`, `is`, `and`, `or`, `not`, `if`, `else`, …). Queries like `async with`, `with open`, `yield from`, and `for loop` stay multi-term at index and query time
+- **Multi-word ranking** — stronger soft-AND coordination, higher adjacent bigram boost, and a bonus when the full term set and bigram chain both match
+
+### Changed
+- Stopwords reduced to pure English glue (articles, pronouns, weak auxiliaries, discourse fillers). Same analyzer still applies at index + query time
+
+### Notes
+- **Reindex required** for full effect on existing sites (`python -m doc_search index <site> --full`) so keywords like `with`/`for` are posted into the inverted index
+
 ## [2.6.2] - 2026-08-12
 
 ### Changed
