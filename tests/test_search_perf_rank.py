@@ -33,6 +33,7 @@ class TestFieldedBM25AndBigrams(unittest.TestCase):
             0, 'https://ex.com/py', 'Python Tutorial',
             'Python list comprehension makes code short.',
             headings=[(1, 'List Comprehension')],
+            index_chunks=True,
         )
         self.idx.add_document(
             1, 'https://ex.com/java', 'Java Guide',

@@ -165,47 +165,74 @@ class ContentSuggester:
         """
         Build suggestion index from page content.
 
-        Args:
-            pages_dir: Path to directory containing page JSON files
-            verbose: Print progress
-
-        Returns:
-            Number of entries indexed
+        Prefer ``build_from_documents`` when a BM25 index is already in memory
+        so we do not re-read the full pages corpus (industry: suggest from
+        short fields / in-index metadata).
         """
         if not pages_dir.exists():
             return 0
 
-        # Count term/phrase frequencies across all documents
-        freq: Counter = Counter()
-        doc_count = 0
-
+        records = []
         for page_file in sorted(pages_dir.glob('*.json')):
             try:
                 with open(page_file, encoding='utf-8') as f:
                     data = json.load(f)
-
-                text = data.get('text', '')
-                if not text:
-                    continue
-
-                # Extract terms and phrases, count unique per doc
-                seen_in_doc: set = set()
-                for term in self._extract_terms_and_phrases(text):
-                    if term not in seen_in_doc:
-                        freq[term] += 1
-                        seen_in_doc.add(term)
-
-                doc_count += 1
             except (json.JSONDecodeError, IOError):
                 continue
+            records.append(data)
+        return self._build_from_records(records, verbose=verbose)
 
-        # Filter by minimum frequency and take top entries
+    def build_from_documents(
+        self,
+        documents,
+        verbose: bool = False,
+    ) -> int:
+        """
+        Build suggestions from in-memory index documents.
+
+        Uses title, headings_text, description, and preview — not full body
+        text and not a second pass over page JSON files.
+        """
+        records = []
+        for doc in documents:
+            if not isinstance(doc, dict):
+                continue
+            if doc.get('is_chunk'):
+                continue
+            # Compose a short suggest field (title-heavy)
+            parts = [
+                doc.get('title') or '',
+                doc.get('headings_text') or '',
+                doc.get('description') or '',
+                doc.get('preview') or '',
+            ]
+            text = ' '.join(p for p in parts if p)
+            if not text.strip():
+                continue
+            records.append({'text': text})
+        return self._build_from_records(records, verbose=verbose)
+
+    def _build_from_records(self, records, verbose: bool = False) -> int:
+        """Shared frequency aggregation for page JSON or in-memory docs."""
+        freq: Counter = Counter()
+        doc_count = 0
+
+        for data in records:
+            text = data.get('text', '')
+            if not text:
+                continue
+            seen_in_doc: set = set()
+            for term in self._extract_terms_and_phrases(text):
+                if term not in seen_in_doc:
+                    freq[term] += 1
+                    seen_in_doc.add(term)
+            doc_count += 1
+
         valid = [(term, count) for term, count in freq.items()
                  if count >= _MIN_FREQUENCY]
         valid.sort(key=lambda x: -x[1])
         valid = valid[:_MAX_ENTRIES]
 
-        # Build entries
         self.entries = []
         for term, count in valid:
             words = [w.lower() for w in re.findall(r'[a-zA-Z0-9]+', term)]
@@ -215,11 +242,10 @@ class ContentSuggester:
                 'words': words,
             })
 
-        # Build n-gram index
         self._build_ngram_index()
 
         if verbose:
-            print(f"Content suggester: {len(self.entries)} entries from {doc_count} pages "
+            print(f"Content suggester: {len(self.entries)} entries from {doc_count} docs "
                   f"({len(self._ngram_index)} n-grams)")
 
         return len(self.entries)

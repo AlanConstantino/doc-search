@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-08-12
+
+### Changed
+- **Industry-shaped indexer** — extract ≠ index: build trusts crawl-time `text`/`title`/`headings` by default instead of re-parsing every page’s `raw_html`
+- **Section chunks opt-in** — heading/`#anchor` mini-docs are off by default; enable with `--chunks` (was always-on in 2.5)
+- **Linear index bookkeeping** — O(1) running average document length and monotonic doc ids (removes accidental O(n²) avgdl updates)
+- **Leaner per-document analysis** — exact-match terms from title/headings only; body bigrams limited to the lead tokens; optional body size cap
+- **Faster deletes** — `remove_document` uses per-doc term/bigram lists instead of scanning the full vocabulary
+- **Content suggestions** — built from in-memory index metadata (title/headings/preview), not a second full walk of `pages/*.json`
+- **URL filters at index time** — skip genindex/search-style URLs by default (`--no-url-filter` to disable)
+
+### Added
+- CLI: `--reparse` to re-extract text from saved `raw_html` when needed
+- CLI: `--chunks` to enable section/anchor chunk documents
+- CLI: `--max-body-chars` (default 200000) to bound pathological pages
+- CLI: `--no-url-filter` to index genindex/search URLs
+- `BM25Index.build_from_pages(..., reparse=, index_chunks=, max_body_chars=, skip_url_substrings=)`
+- `ContentSuggester.build_from_documents()` for suggest indexes without re-reading pages
+- Architecture note documenting the new indexing posture
+
+### Performance
+- Full BM25 build on a ~541-page Python docs crawl: on the order of **~2s** without chunks (was effectively dominated by DOM reparse + always-on chunks before)
+
 ## [2.5.0] - 2026-08-06
 
 ### Added

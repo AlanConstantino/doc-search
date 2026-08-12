@@ -122,7 +122,15 @@ def _add_index_parser(subparsers):
     index_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     index_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
-                             help='HTML parser for text extraction: dom (default, better content detection) or stream (legacy)')
+                             help='HTML parser used only with --reparse (default: dom)')
+    index_parser.add_argument('--reparse', action='store_true',
+                             help='Re-extract text from saved raw_html (default: trust crawl-time text)')
+    index_parser.add_argument('--chunks', action='store_true',
+                             help='Index heading sections as separate anchor docs (off by default)')
+    index_parser.add_argument('--max-body-chars', type=int, default=200000,
+                             help='Max body characters to analyze per doc (default: 200000)')
+    index_parser.add_argument('--no-url-filter', action='store_true',
+                             help='Do not skip genindex/search/changelog-style URLs')
     index_parser.add_argument('--full', action='store_true',
                              help='Force a complete rebuild (skip incremental)')
     index_parser.add_argument('--no-suggestions', action='store_true',

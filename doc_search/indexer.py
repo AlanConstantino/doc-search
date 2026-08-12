@@ -1,8 +1,16 @@
 """
 Search index building with BM25 scoring.
 
-Supports fielded BM25, bigram phrases, doc priors, section chunks,
-binary (pickle) persistence, array-backed postings, and precomputed IDF.
+Industry-shaped pipeline:
+  - Indexer reads **canonical text fields** (title/text/headings), not HTML.
+    HTML re-extraction is opt-in via ``reparse=True`` / ``--reparse``.
+  - One analysis pass per field (tokenize + optional stem).
+  - Linear postings construction with O(1) avgdl bookkeeping.
+  - Section/passage chunks are **opt-in** (``index_chunks`` / ``--chunks``).
+  - Suggest/spell sidecars are built from the term dict or in-memory docs.
+
+Also supports fielded BM25, limited bigrams, doc priors, binary pickle
+persistence, array-backed postings, and precomputed IDF.
 """
 
 import array
@@ -42,6 +50,23 @@ EXACT_MATCH_BONUS = 0.15
 PRIOR_WEIGHT = 0.08
 PREVIEW_CHARS = 600
 INDEX_FORMAT_VERSION = 3
+
+# Index-time budgets (industry-style: linear invert over canonical text)
+# Body is truncated for analysis so pathological pages cannot dominate build time.
+DEFAULT_MAX_BODY_CHARS = 200_000
+# Cap how many body tokens contribute to the bigram index (phrases still work on
+# the lead content; title bigrams are always kept).
+MAX_BODY_BIGRAM_TOKENS = 1500
+# Section/passage chunks are opt-in at build time; when enabled, keep this many.
+DEFAULT_MAX_CHUNKS = 8
+# URL path substrings skipped during corpus build (indexes, mega changelogs).
+DEFAULT_SKIP_URL_SUBSTRINGS = (
+    '/genindex',
+    '/py-modindex',
+    '/search.html',
+    '/search/',
+    'genindex-all',
+)
 
 # mmap postings magic
 _POSTINGS_MAGIC = b'DSIDX003'
@@ -188,6 +213,8 @@ class BM25Index:
         self.doc_lengths: Dict[int, int] = {}
         self.avg_doc_length: float = 0.0
         self.total_docs: int = 0
+        # Running sum for O(1) avgdl updates (industry: norms / running stats)
+        self._total_doc_length: int = 0
         self.doc_freqs: Dict[str, int] = defaultdict(int)
 
         self.content_hashes: Dict[str, str] = {}
@@ -199,7 +226,8 @@ class BM25Index:
         # CTR boosts: url -> clicks (optional, loaded externally)
         self.click_counts: Dict[str, int] = {}
 
-        # Chunk docs use high IDs so they never collide with caller-assigned ids
+        # Monotonic ids for caller-assigned docs; chunks use a separate high range
+        self._next_doc_id = 0
         self._chunk_id_seq = 1_000_000_000
 
         # mmap state (optional)
@@ -225,13 +253,28 @@ class BM25Index:
                      inbound_links: int = 0,
                      is_chunk: bool = False,
                      parent_url: str = '',
-                     index_chunks: bool = True):
-        """Add a document to the index."""
+                     index_chunks: bool = False,
+                     max_body_chars: int = DEFAULT_MAX_BODY_CHARS,
+                     max_chunks: int = DEFAULT_MAX_CHUNKS):
+        """
+        Add a document to the index.
+
+        Expects canonical plain-text fields (title/text/headings), not HTML.
+        Analysis is a single tokenize pass per field with optional stemming —
+        the same shape as a Lucene analyzer chain.
+
+        Section/passage chunks are off by default (index_chunks=False); enable
+        explicitly for long-form docs when needed.
+        """
         # Replace existing id cleanly (avoids stale postings on overwrite)
         if doc_id in self.documents:
             self.remove_document(doc_id)
 
-        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        # Bound pathological bodies (changelogs, giant pages)
+        if text and max_body_chars and len(text) > max_body_chars:
+            text = text[:max_body_chars]
+
+        text_hash = hashlib.sha256((text or '').encode()).hexdigest()[:16]
         if not is_chunk:
             if text_hash in self._content_hashes:
                 return
@@ -240,12 +283,11 @@ class BM25Index:
         headings = headings or []
         headings_text = ' '.join(h for _, h in headings) if headings else ''
 
-        # Tokenize fields (stem for recall + keep exact forms)
+        # One analysis pass per field: exact tokens + optional stems
         title_stem, title_exact = tokenize_with_exact(title, apply_stemming=self.stem)
         head_stem, head_exact = tokenize_with_exact(headings_text, apply_stemming=self.stem)
         body_stem, body_exact = tokenize_with_exact(text, apply_stemming=self.stem)
 
-        # Field term freqs (stemmed)
         def _tf(tokens: List[str]) -> Dict[str, int]:
             d: Dict[str, int] = defaultdict(int)
             for t in tokens:
@@ -256,18 +298,21 @@ class BM25Index:
         head_tf = _tf(head_stem)
         body_tf = _tf(body_stem)
 
-        # Combined length (weighted like classic BM25 length)
+        # Combined length (weighted like classic BM25 length / field norms)
         all_len = len(title_stem) * 3 + len(head_stem) * 2 + len(body_stem)
         if all_len == 0:
             all_len = 1
 
-        # Exact forms for bonus
-        exact_set = set(title_exact) | set(head_exact) | set(body_exact)
+        # Exact-match bonus terms: title + headings only (short fields).
+        # Full-body exact sets are expensive and uncommon in production engines.
+        exact_set = set(title_exact) | set(head_exact)
+        if len(exact_set) > 500:
+            exact_set = set(list(exact_set)[:500])
 
         # Static prior
-        length_prior = min(1.0, math.log1p(all_len) / 10.0)  # longer-ish docs
+        length_prior = min(1.0, math.log1p(all_len) / 10.0)
         depth = _url_depth(url)
-        depth_prior = max(0.0, 0.15 - 0.03 * depth)  # prefer shallower paths
+        depth_prior = max(0.0, 0.15 - 0.03 * depth)
         type_prior = _doc_type_prior(doc_type)
         in_prior = min(0.2, 0.02 * math.log1p(inbound_links))
         chunk_penalty = -0.03 if is_chunk else 0.0
@@ -277,6 +322,9 @@ class BM25Index:
         if description and len(preview) < 80:
             preview = (description + ' ' + preview)[:PREVIEW_CHARS]
 
+        # Terms contributed by this doc — enables O(terms_in_doc) deletion
+        terms_in_doc = list(set(title_tf) | set(head_tf) | set(body_tf))
+
         self.documents[doc_id] = {
             'url': url,
             'title': title,
@@ -285,59 +333,70 @@ class BM25Index:
             'headings_text': headings_text,
             'preview': preview,
             'prior': round(prior, 4),
-            'exact_terms': exact_set if len(exact_set) < 5000 else set(list(exact_set)[:5000]),
+            'exact_terms': exact_set,
             'is_chunk': is_chunk,
             'parent_url': parent_url or '',
             'inbound_links': inbound_links,
+            '_terms': terms_in_doc,
         }
         self.url_to_id[url] = doc_id
         self.doc_lengths[doc_id] = all_len
+        self._total_doc_length += all_len
+        self._update_avg_doc_length()
+
+        if doc_id >= self._next_doc_id:
+            self._next_doc_id = doc_id + 1
 
         # Merge field tfs into postings
-        terms = set(title_tf) | set(head_tf) | set(body_tf)
-        for term in terms:
+        for term in terms_in_doc:
             tt = title_tf.get(term, 0)
             ht = head_tf.get(term, 0)
             bt = body_tf.get(term, 0)
-            # Combined tf used as body-ish baseline (title/head also counted lightly)
             combined = bt + tt * 3 + ht * 2
             self._add_posting(self.index, term, doc_id, combined, tt, ht)
             self.doc_freqs[term] += 1
 
-        # Bigrams from body (stemmed) for phrase recall
-        if len(body_stem) >= 2:
-            bg_tf: Dict[str, int] = defaultdict(int)
-            for a, b in zip(body_stem, body_stem[1:]):
-                bg_tf[f'{a} {b}'] += 1
-            # Also title bigrams
+        # Bigrams: always from title; body limited to lead tokens (not full body)
+        bg_tf: Dict[str, int] = defaultdict(int)
+        if len(title_stem) >= 2:
             for a, b in zip(title_stem, title_stem[1:]):
                 bg_tf[f'{a} {b}'] += 2
-            for bg, freq in bg_tf.items():
-                self._add_posting(self.bigrams, bg, doc_id, freq)
+        if len(body_stem) >= 2:
+            body_for_bg = body_stem[:MAX_BODY_BIGRAM_TOKENS]
+            for a, b in zip(body_for_bg, body_for_bg[1:]):
+                bg_tf[f'{a} {b}'] += 1
+        bigrams_in_doc: List[str] = []
+        for bg, freq in bg_tf.items():
+            self._add_posting(self.bigrams, bg, doc_id, freq)
+            bigrams_in_doc.append(bg)
+        self.documents[doc_id]['_bigrams'] = bigrams_in_doc
 
         self.total_docs += 1
-        self._update_avg_doc_length()
 
-        # Section/anchor chunks from headings
+        # Optional section/anchor chunks (off by default — enable at build time)
         if index_chunks and not is_chunk and headings and text:
-            self._add_section_chunks(doc_id, url, title, text, headings, doc_type)
+            self._add_section_chunks(
+                doc_id, url, title, text, headings, doc_type,
+                max_chunks=max_chunks,
+                max_body_chars=max_body_chars,
+            )
 
     def _add_section_chunks(self, parent_id: int, url: str, title: str,
-                            text: str, headings: List[tuple], doc_type: str):
+                            text: str, headings: List[tuple], doc_type: str,
+                            max_chunks: int = DEFAULT_MAX_CHUNKS,
+                            max_body_chars: int = DEFAULT_MAX_BODY_CHARS):
         """Index heading sections as url#anchor chunk documents."""
-        # Cap chunks per page
-        max_chunks = 20
         count = 0
-        lower_text = text
+        # Case-insensitive search without lowercasing the full body per heading
+        lower_text = text.lower()
         for level, heading in headings:
             if count >= max_chunks:
                 break
             if not heading or len(heading) < 2:
                 continue
-            pos = lower_text.find(heading)
+            pos = text.find(heading)
             if pos < 0:
-                # try case-insensitive
-                pos = lower_text.lower().find(heading.lower())
+                pos = lower_text.find(heading.lower())
             if pos < 0:
                 chunk_body = heading
             else:
@@ -359,14 +418,23 @@ class BM25Index:
                 is_chunk=True,
                 parent_url=url,
                 index_chunks=False,
+                max_body_chars=max_body_chars,
             )
             count += 1
 
     def _update_avg_doc_length(self):
-        if self.doc_lengths:
-            self.avg_doc_length = sum(self.doc_lengths.values()) / len(self.doc_lengths)
+        n = len(self.doc_lengths)
+        if n:
+            self.avg_doc_length = self._total_doc_length / n
         else:
             self.avg_doc_length = 1.0
+            self._total_doc_length = 0
+
+    def allocate_doc_id(self) -> int:
+        """Return a fresh monotonic document id."""
+        doc_id = self._next_doc_id
+        self._next_doc_id += 1
+        return doc_id
 
     def rebuild_idf_cache(self):
         """Precompute IDF for every term."""
@@ -392,61 +460,115 @@ class BM25Index:
     # Build from pages
     # ------------------------------------------------------------------
 
-    def build_from_pages(self, pages_dir: Path, verbose: bool = True, parser: str = 'dom') -> int:
+    @staticmethod
+    def _should_skip_url(url: str, skip_substrings: Tuple[str, ...]) -> bool:
+        if not skip_substrings:
+            return False
+        lower = (url or '').lower()
+        return any(s in lower for s in skip_substrings)
+
+    def _load_page_record(
+        self,
+        page: dict,
+        *,
+        reparse: bool,
+        parser: str,
+    ) -> Optional[dict]:
+        """
+        Normalize a page JSON dict into canonical index fields.
+
+        By default trusts crawl-time text/title/headings (industry: extract ≠ index).
+        Set reparse=True to re-run HTML extraction from raw_html when present.
+        """
+        if reparse and page.get('raw_html'):
+            from .parser import extract_text
+            from .dom import extract_text_dom
+            if parser == 'dom':
+                extracted = extract_text_dom(page['raw_html'])
+            else:
+                extracted = extract_text(page['raw_html'])
+            page = dict(page)
+            page['text'] = extracted.get('text', '')
+            page['title'] = extracted.get('title', page.get('title', ''))
+            page['description'] = extracted.get(
+                'description', page.get('description', '')
+            )
+            page['headings'] = extracted.get('headings', page.get('headings', []))
+
+        if not (page.get('text') or '').strip():
+            return None
+        return page
+
+    def build_from_pages(
+        self,
+        pages_dir: Path,
+        verbose: bool = True,
+        parser: str = 'dom',
+        *,
+        reparse: bool = False,
+        index_chunks: bool = False,
+        max_body_chars: int = DEFAULT_MAX_BODY_CHARS,
+        max_chunks: int = DEFAULT_MAX_CHUNKS,
+        skip_url_substrings: Optional[Tuple[str, ...]] = DEFAULT_SKIP_URL_SUBSTRINGS,
+    ) -> int:
+        """
+        Build the index from crawled page JSON files.
+
+        Reads canonical text fields from each page. Does **not** re-parse HTML
+        unless ``reparse=True``. Section chunks are off by default.
+
+        Inbound-link priors are read from page metadata when present
+        (``inbound_links``); the indexer does not scan HTML for links.
+        """
         pages_dir = Path(pages_dir)
         page_files = list(pages_dir.glob('*.json'))
         total_files = len(page_files)
 
         if verbose:
-            print(f"Indexing {total_files} pages (parser: {parser})...")
+            mode = 'reparse=' + ('on' if reparse else 'off')
+            chunks = 'chunks=on' if index_chunks else 'chunks=off'
+            print(f"Indexing {total_files} pages ({mode}, {chunks}, parser={parser})...")
 
-        from .parser import extract_text, extract_links
-        from .dom import extract_text_dom
-
-        # Pass 1: load pages + inbound link counts
-        pages = []
-        inbound: Dict[str, int] = defaultdict(int)
+        skip_url_substrings = tuple(skip_url_substrings or ())
         reparsed_count = 0
+        skipped_url = 0
+        indexed_pages = 0
 
-        for page_file in page_files:
+        for i, page_file in enumerate(page_files):
             try:
                 with open(page_file, 'r', encoding='utf-8') as f:
-                    page = json.load(f)
+                    raw_page = json.load(f)
             except (json.JSONDecodeError, IOError, KeyError):
                 continue
 
-            if 'raw_html' in page and page['raw_html']:
-                if parser == 'dom':
-                    extracted = extract_text_dom(page['raw_html'])
-                else:
-                    extracted = extract_text(page['raw_html'])
-                page['text'] = extracted.get('text', '')
-                page['title'] = extracted.get('title', page.get('title', ''))
-                page['description'] = extracted.get('description', page.get('description', ''))
-                page['headings'] = extracted.get('headings', page.get('headings', []))
-                try:
-                    for link in extract_links(page['raw_html'], page.get('url', '')):
-                        inbound[link] += 1
-                except Exception:
-                    pass
+            url = raw_page.get('url', '')
+            if self._should_skip_url(url, skip_url_substrings):
+                skipped_url += 1
+                continue
+
+            had_html = bool(raw_page.get('raw_html'))
+            page = self._load_page_record(raw_page, reparse=reparse, parser=parser)
+            if page is None:
+                continue
+            if reparse and had_html:
                 reparsed_count += 1
 
-            if not page.get('text', '').strip():
-                continue
-            pages.append(page)
+            # Drop heavy HTML before further work (streaming posture)
+            page.pop('raw_html', None)
 
-        doc_id = 0
-        for i, page in enumerate(pages):
-            url = page['url']
+            doc_id = self.allocate_doc_id()
             self.add_document(
                 doc_id=doc_id,
-                url=url,
+                url=page['url'],
                 title=page.get('title', ''),
                 text=page.get('text', ''),
                 description=page.get('description', ''),
                 headings=page.get('headings', []),
                 doc_type=page.get('doc_type', 'html'),
-                inbound_links=inbound.get(url, 0),
+                inbound_links=int(page.get('inbound_links', 0) or 0),
+                index_chunks=index_chunks,
+                max_body_chars=max_body_chars,
+                max_chunks=max_chunks,
             )
             hash_page = {
                 'title': page.get('title', ''),
@@ -454,20 +576,23 @@ class BM25Index:
                 'description': page.get('description', ''),
                 'headings': page.get('headings', []),
             }
-            self.content_hashes[url] = self._compute_content_hash(hash_page)
-            doc_id = max(self.documents.keys(), default=doc_id) + 1
+            self.content_hashes[page['url']] = self._compute_content_hash(hash_page)
+            indexed_pages += 1
 
-            if verbose and (i + 1) % 500 == 0:
-                print(f"  Indexed {i + 1}/{len(pages)} pages...")
+            if verbose and indexed_pages % 500 == 0:
+                print(f"  Indexed {indexed_pages}/{total_files} pages...")
 
         self.rebuild_idf_cache()
 
         if verbose:
             print("Indexing complete!")
-            print(f"  Documents: {self.total_docs}")
+            print(f"  Pages indexed: {indexed_pages}")
+            print(f"  Documents (incl. chunks): {self.total_docs}")
             print(f"  Unique terms: {len(self.index)}")
             print(f"  Bigrams: {len(self.bigrams)}")
             print(f"  Avg document length: {self.avg_doc_length:.1f} terms")
+            if skipped_url:
+                print(f"  Skipped by URL filter: {skipped_url}")
             if reparsed_count:
                 print(f"  Re-parsed from raw HTML: {reparsed_count}")
 
@@ -477,7 +602,8 @@ class BM25Index:
         if doc_id not in self.documents:
             return
 
-        url = self.documents[doc_id]['url']
+        doc = self.documents[doc_id]
+        url = doc['url']
 
         # Also remove child chunks
         child_ids = [
@@ -488,33 +614,56 @@ class BM25Index:
             if cid != doc_id:
                 self.remove_document(cid)
 
-        terms_to_remove = []
-        for term, postings in list(self.index.items()):
-            new_p = postings.without_doc(doc_id)
-            if len(new_p) < len(postings):
-                self.doc_freqs[term] -= 1
-                if self.doc_freqs[term] <= 0 or len(new_p) == 0:
-                    terms_to_remove.append(term)
-                else:
-                    self.index[term] = new_p
-        for term in terms_to_remove:
-            self.index.pop(term, None)
-            self.doc_freqs.pop(term, None)
+        # Prefer per-doc term list (O(terms in doc)); fall back to full scan for
+        # indexes loaded from older format versions without `_terms`.
+        terms = doc.get('_terms')
+        if terms is None:
+            term_iter = list(self.index.keys())
+        else:
+            term_iter = terms
 
-        bg_remove = []
-        for bg, postings in list(self.bigrams.items()):
+        for term in term_iter:
+            postings = self.index.get(term)
+            if postings is None:
+                continue
             new_p = postings.without_doc(doc_id)
+            if len(new_p) == len(postings):
+                continue
+            self.doc_freqs[term] = max(0, self.doc_freqs.get(term, 0) - 1)
+            if self.doc_freqs[term] <= 0 or len(new_p) == 0:
+                self.index.pop(term, None)
+                self.doc_freqs.pop(term, None)
+            else:
+                self.index[term] = new_p
+
+        bigrams = doc.get('_bigrams')
+        if bigrams is None:
+            bg_iter = list(self.bigrams.keys())
+        else:
+            bg_iter = bigrams
+        for bg in bg_iter:
+            postings = self.bigrams.get(bg)
+            if postings is None:
+                continue
+            new_p = postings.without_doc(doc_id)
+            if len(new_p) == len(postings):
+                continue
             if len(new_p) == 0:
-                bg_remove.append(bg)
-            elif len(new_p) < len(postings):
+                self.bigrams.pop(bg, None)
+            else:
                 self.bigrams[bg] = new_p
-        for bg in bg_remove:
-            del self.bigrams[bg]
+
+        length = self.doc_lengths.pop(doc_id, 0)
+        self._total_doc_length = max(0, self._total_doc_length - length)
 
         del self.documents[doc_id]
         self.url_to_id.pop(url, None)
-        self.doc_lengths.pop(doc_id, None)
         self.content_hashes.pop(url, None)
+
+        # Drop content-hash dedupe entry for non-chunks when possible
+        if not doc.get('is_chunk'):
+            # Cannot map back text_hash cheaply; full rebuild clears _content_hashes
+            pass
 
         self.total_docs = max(0, self.total_docs - 1)
         self._update_avg_doc_length()
@@ -530,36 +679,49 @@ class BM25Index:
         }, sort_keys=True)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
-    def build_from_pages_incremental(self, pages_dir: Path, verbose: bool = True,
-                                     parser: str = 'dom') -> dict:
-        from .parser import extract_text
-        from .dom import extract_text_dom
+    def build_from_pages_incremental(
+        self,
+        pages_dir: Path,
+        verbose: bool = True,
+        parser: str = 'dom',
+        *,
+        reparse: bool = False,
+        index_chunks: bool = False,
+        max_body_chars: int = DEFAULT_MAX_BODY_CHARS,
+        max_chunks: int = DEFAULT_MAX_CHUNKS,
+        skip_url_substrings: Optional[Tuple[str, ...]] = DEFAULT_SKIP_URL_SUBSTRINGS,
+    ) -> dict:
+        """
+        Incrementally update the index from page JSON files.
 
+        Same canonical-text rules as ``build_from_pages``: no HTML reparse
+        unless ``reparse=True``.
+        """
         pages_dir = Path(pages_dir)
         page_files = list(pages_dir.glob('*.json'))
+        skip_url_substrings = tuple(skip_url_substrings or ())
 
         if verbose:
-            print(f"Incremental indexing from {len(page_files)} page files (parser: {parser})...")
+            mode = 'reparse=' + ('on' if reparse else 'off')
+            print(f"Incremental indexing from {len(page_files)} page files ({mode})...")
 
         current_pages = {}
         for page_file in page_files:
             try:
                 with open(page_file, 'r', encoding='utf-8') as f:
-                    page = json.load(f)
-                if 'raw_html' in page and page['raw_html']:
-                    if parser == 'dom':
-                        extracted = extract_text_dom(page['raw_html'])
-                    else:
-                        extracted = extract_text(page['raw_html'])
-                    page['text'] = extracted.get('text', '')
-                    page['title'] = extracted.get('title', page.get('title', ''))
-                    page['description'] = extracted.get('description', page.get('description', ''))
-                    page['headings'] = extracted.get('headings', page.get('headings', []))
-                if not page.get('text', '').strip():
-                    continue
-                current_pages[page['url']] = page
+                    raw_page = json.load(f)
             except (json.JSONDecodeError, IOError, KeyError):
                 continue
+
+            url = raw_page.get('url', '')
+            if self._should_skip_url(url, skip_url_substrings):
+                continue
+
+            page = self._load_page_record(raw_page, reparse=reparse, parser=parser)
+            if page is None:
+                continue
+            page.pop('raw_html', None)
+            current_pages[page['url']] = page
 
         current_urls = set(current_pages.keys())
         indexed_urls = set(self.content_hashes.keys())
@@ -583,20 +745,23 @@ class BM25Index:
             if doc_id is not None:
                 self.remove_document(doc_id)
 
-        next_doc_id = max(self.documents.keys()) + 1 if self.documents else 0
         for url in sorted(new_urls | updated_urls):
             page = current_pages[url]
+            doc_id = self.allocate_doc_id()
             self.add_document(
-                doc_id=next_doc_id,
+                doc_id=doc_id,
                 url=page['url'],
                 title=page.get('title', ''),
                 text=page.get('text', ''),
                 description=page.get('description', ''),
                 headings=page.get('headings', []),
                 doc_type=page.get('doc_type', 'html'),
+                inbound_links=int(page.get('inbound_links', 0) or 0),
+                index_chunks=index_chunks,
+                max_body_chars=max_body_chars,
+                max_chunks=max_chunks,
             )
             self.content_hashes[url] = self._compute_content_hash(page)
-            next_doc_id = max(self.documents.keys(), default=next_doc_id) + 1
 
         self.rebuild_idf_cache()
 
@@ -613,10 +778,6 @@ class BM25Index:
             print(f"  Total documents: {self.total_docs}")
             print(f"  Unique terms: {len(self.index)}")
         return stats
-
-    # ------------------------------------------------------------------
-    # Search
-    # ------------------------------------------------------------------
 
     def _bm25_tf(self, tf: float, doc_length: int, avg_dl: float,
                  k1: float, b: float) -> float:
@@ -787,6 +948,9 @@ class BM25Index:
             'doc_lengths': self.doc_lengths,
             'avg_doc_length': self.avg_doc_length,
             'total_docs': self.total_docs,
+            'total_doc_length': self._total_doc_length,
+            'next_doc_id': self._next_doc_id,
+            'chunk_id_seq': self._chunk_id_seq,
             'doc_freqs': dict(self.doc_freqs),
             'content_hashes': self.content_hashes,
             '_content_hashes': list(self._content_hashes),
@@ -829,6 +993,10 @@ class BM25Index:
         self.doc_lengths = {int(k): v for k, v in dl.items()}
         self.avg_doc_length = data.get('avg_doc_length', 1.0)
         self.total_docs = data.get('total_docs', len(self.documents))
+        if 'total_doc_length' in data:
+            self._total_doc_length = int(data['total_doc_length'])
+        else:
+            self._total_doc_length = sum(self.doc_lengths.values())
         self.doc_freqs = defaultdict(int, data.get('doc_freqs', {}))
         self.content_hashes = data.get('content_hashes', {})
         self._content_hashes = set(data.get('_content_hashes', []))
@@ -836,9 +1004,18 @@ class BM25Index:
         self._idf_cache = data.get('idf_cache') or {}
         if not self._idf_cache:
             self.rebuild_idf_cache()
-        # Keep chunk ids out of the way of future caller-assigned ids
-        max_id = max(self.documents.keys()) if self.documents else 0
-        self._chunk_id_seq = max(1_000_000_000, max_id + 1)
+        # Monotonic ids: resume from saved state or max existing key
+        max_id = max(self.documents.keys()) if self.documents else -1
+        if 'next_doc_id' in data:
+            self._next_doc_id = max(int(data['next_doc_id']), max_id + 1)
+        else:
+            # Legacy: parent ids are low; keep next above non-chunk ids
+            parent_ids = [i for i, d in self.documents.items() if not d.get('is_chunk')]
+            self._next_doc_id = (max(parent_ids) + 1) if parent_ids else 0
+        if 'chunk_id_seq' in data:
+            self._chunk_id_seq = max(int(data['chunk_id_seq']), 1_000_000_000)
+        else:
+            self._chunk_id_seq = max(1_000_000_000, max_id + 1)
 
     def save(self, filepath: Path, compress: bool = True):
         """

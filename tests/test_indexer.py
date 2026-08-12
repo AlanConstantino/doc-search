@@ -165,5 +165,119 @@ class TestBM25IndexNumericSearch(unittest.TestCase):
         self.assertEqual(results[0]['url'], 'https://example.com/release-notes')
 
 
+
+class TestIndustryIndexPath(unittest.TestCase):
+    """Indexer follows extract≠index, O(1) avgdl, optional chunks."""
+
+    def test_chunks_off_by_default(self):
+        idx = BM25Index()
+        idx.add_document(
+            0, 'https://ex.com/py', 'Python Tutorial',
+            'Python list comprehension makes code short.',
+            headings=[(1, 'List Comprehension')],
+        )
+        self.assertNotIn('https://ex.com/py#list-comprehension', idx.url_to_id)
+
+    def test_running_avgdl(self):
+        idx = BM25Index()
+        idx.add_document(0, 'https://a', 'A', 'alpha beta gamma')
+        avg1 = idx.avg_doc_length
+        idx.add_document(1, 'https://b', 'B', 'alpha')
+        # Removing should keep avg consistent with sum/n
+        length_sum = sum(idx.doc_lengths.values())
+        self.assertAlmostEqual(idx.avg_doc_length, length_sum / len(idx.doc_lengths))
+        idx.remove_document(0)
+        if idx.doc_lengths:
+            self.assertAlmostEqual(
+                idx.avg_doc_length,
+                sum(idx.doc_lengths.values()) / len(idx.doc_lengths),
+            )
+        self.assertEqual(idx._total_doc_length, sum(idx.doc_lengths.values()))
+
+    def test_build_trusts_text_without_reparse(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        idx = BM25Index()
+        with tempfile.TemporaryDirectory() as td:
+            pages = Path(td)
+            # Misleading raw_html would change title if reparsed; stream/dom
+            # would not produce CANONICAL_MARKER from this fake html alone.
+            page = {
+                'url': 'https://ex.com/doc',
+                'title': 'Canonical Title',
+                'text': 'canonical body unique_marker_xyz',
+                'description': '',
+                'headings': [],
+                'raw_html': '<html><title>OTHER</title><body>other body</body></html>',
+            }
+            (pages / 'p.json').write_text(json.dumps(page), encoding='utf-8')
+            n = idx.build_from_pages(pages, verbose=False, reparse=False)
+            self.assertGreaterEqual(n, 1)
+            doc = idx.get_document(idx.get_doc_id('https://ex.com/doc'))
+            self.assertEqual(doc['title'], 'Canonical Title')
+            # unique token from canonical text should be searchable
+            hits = idx.search('unique_marker_xyz', 5)
+            self.assertTrue(hits)
+
+    def test_build_reparse_overrides_text(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        idx = BM25Index()
+        with tempfile.TemporaryDirectory() as td:
+            pages = Path(td)
+            page = {
+                'url': 'https://ex.com/doc',
+                'title': 'Old',
+                'text': 'old body',
+                'description': '',
+                'headings': [],
+                'raw_html': (
+                    '<html><head><title>Fresh Title</title></head>'
+                    '<body><main><h1>Fresh Title</h1>'
+                    '<p>fresh_reparse_token_zzz content here</p></main></body></html>'
+                ),
+            }
+            (pages / 'p.json').write_text(json.dumps(page), encoding='utf-8')
+            idx.build_from_pages(pages, verbose=False, reparse=True, parser='dom')
+            doc = idx.get_document(idx.get_doc_id('https://ex.com/doc'))
+            self.assertIn('Fresh', doc['title'])
+            hits = idx.search('fresh_reparse_token_zzz', 5)
+            self.assertTrue(hits)
+
+    def test_skip_genindex_urls(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        idx = BM25Index()
+        with tempfile.TemporaryDirectory() as td:
+            pages = Path(td)
+            for name, url in [
+                ('a.json', 'https://ex.com/library/os.html'),
+                ('b.json', 'https://ex.com/genindex.html'),
+            ]:
+                (pages / name).write_text(json.dumps({
+                    'url': url,
+                    'title': 'T',
+                    'text': 'hello world content',
+                    'headings': [],
+                }), encoding='utf-8')
+            idx.build_from_pages(pages, verbose=False)
+            self.assertTrue(idx.has_url('https://ex.com/library/os.html'))
+            self.assertFalse(idx.has_url('https://ex.com/genindex.html'))
+
+    def test_remove_uses_term_list(self):
+        idx = BM25Index()
+        idx.add_document(0, 'https://a', 'Alpha', 'zebra unique_term_aaa')
+        idx.add_document(1, 'https://b', 'Beta', 'zebra unique_term_bbb')
+        self.assertIn('unique_term_aaa', idx.index or {})
+        # after stemming may differ — check via search
+        idx.remove_document(0)
+        self.assertFalse(idx.has_url('https://a'))
+        self.assertTrue(idx.has_url('https://b'))
+
+
+
 if __name__ == '__main__':
     unittest.main()

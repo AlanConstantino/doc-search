@@ -229,7 +229,22 @@ def cmd_index(args):
     stem = not getattr(args, 'no_stemming', False)
     parser = getattr(args, 'parser', 'dom')
     full_rebuild = getattr(args, 'full', False)
-    
+    reparse = getattr(args, 'reparse', False)
+    index_chunks = getattr(args, 'chunks', False)
+    max_body_chars = getattr(args, 'max_body_chars', 200000)
+    # None → indexer default skip list; empty tuple disables filtering
+    skip_url_substrings = () if getattr(args, 'no_url_filter', False) else None
+
+    build_kwargs = dict(
+        verbose=not args.quiet,
+        parser=parser,
+        reparse=reparse,
+        index_chunks=index_chunks,
+        max_body_chars=max_body_chars,
+    )
+    if skip_url_substrings is not None:
+        build_kwargs['skip_url_substrings'] = skip_url_substrings
+
     # Try incremental indexing if not forced full and existing index available
     existing_index = None
     if not full_rebuild:
@@ -245,13 +260,15 @@ def cmd_index(args):
                 except Exception:
                     existing_index = None
                 break
-    
+
     if existing_index is not None and existing_index.content_hashes:
         # Incremental update
         if not args.quiet:
             print("Performing incremental index update...")
+            if reparse:
+                print("  (reparse enabled — re-extracting text from raw_html)")
         index = existing_index
-        incr_stats = index.build_from_pages_incremental(pages_dir, verbose=not args.quiet, parser=parser)
+        incr_stats = index.build_from_pages_incremental(pages_dir, **build_kwargs)
         num_docs = index.total_docs
     else:
         # Full rebuild
@@ -259,9 +276,11 @@ def cmd_index(args):
             if not full_rebuild and existing_index is not None:
                 print("No content hashes in existing index, performing full rebuild...")
             print("Performing full index build...")
+            if not reparse:
+                print("  Using crawl-time text (pass --reparse to re-extract from raw_html)")
         index = BM25Index(k1=args.k1, b=args.b, stem=stem)
-        num_docs = index.build_from_pages(pages_dir, verbose=not args.quiet, parser=parser)
-    
+        num_docs = index.build_from_pages(pages_dir, **build_kwargs)
+
     if not args.quiet:
         print(f"Stemming: {'enabled' if stem else 'disabled'}")
     
@@ -311,7 +330,10 @@ def cmd_index(args):
         from ..content_suggester import ContentSuggester
         suggest_max_words = getattr(args, 'suggest_max_words', 3)
         content_suggester = ContentSuggester(max_words=suggest_max_words)
-        content_suggester.build_from_pages(pages_dir, verbose=not args.quiet)
+        # Prefer in-memory index docs (title/headings/preview) — no second pages walk
+        content_suggester.build_from_documents(
+            index.documents.values(), verbose=not args.quiet
+        )
         suggest_path = content_suggester.save(str(site_dir / 'suggestions'), compress=not args.no_compress)
 
         stats = content_suggester.get_stats()

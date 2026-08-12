@@ -475,6 +475,13 @@ The crawler orchestrates a multi-step pipeline that transforms URLs into stored 
 
 ### Index Building: Pages → Tokenize → BM25 Index
 
+> **Indexing posture (v2.5+):** The indexer treats crawl-time `text`/`title`/`headings`
+> as canonical (extract ≠ index). It does **not** re-parse `raw_html` unless
+> `reparse=True` / CLI `--reparse`. Section chunks and HTML link scans are off by
+> default. Average document length uses a running total (O(1) per add). Content
+> suggestions are built from in-memory document metadata, not a second pages walk.
+
+
 The indexer transforms crawled pages into a searchable inverted index:
 
 ```
