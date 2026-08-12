@@ -33,7 +33,10 @@ def _compile_terms_pattern(terms: FrozenSet[str]) -> Pattern:
         Compiled regex pattern
     """
     # Sort by length (longest first) to match longer terms before shorter ones
-    sorted_terms = sorted(terms, key=len, reverse=True)
+    sorted_terms = sorted((t for t in terms if t), key=len, reverse=True)
+    if not sorted_terms:
+        # Never-matching pattern
+        return re.compile(r'(?!x)x')
     pattern = r'\b(' + '|'.join(re.escape(t) for t in sorted_terms) + r')\b'
     return re.compile(pattern, re.IGNORECASE)
 
@@ -41,59 +44,59 @@ def _compile_terms_pattern(terms: FrozenSet[str]) -> Pattern:
 def highlight_terms(text: str, terms: Set[str], marker: str = '**') -> str:
     """
     Highlight search terms in text using markers.
-    
-    Args:
-        text: Text to highlight
-        terms: Set of terms to highlight (lowercase)
-        marker: Marker to wrap terms with (e.g., '**' or 'CAPS')
-        
-    Returns:
-        Text with highlighted terms
+
+    Only whole-word matches of the provided terms are wrapped. Callers should
+    pass the *original* query terms (not large expansion sets) so result
+    blurbs stay readable.
     """
     if not terms or not text:
         return text
-    
-    # Convert to frozenset for caching
-    terms_frozen = frozenset(terms)
+
+    cleaned = set()
+    for t in terms:
+        if not t:
+            continue
+        tl = str(t).lower().strip()
+        if not tl or tl.endswith('*'):
+            continue
+        if len(tl) < 2 and not tl.isdigit():
+            continue
+        cleaned.add(tl)
+    if not cleaned:
+        return text
+
+    terms_frozen = frozenset(cleaned)
     pattern = _compile_terms_pattern(terms_frozen)
-    
+
     def replacer(match):
         word = match.group(0)
-        if word.lower() in terms:
-            return f"{marker}{word}{marker}"
-        return word
-    
+        return f"{marker}{word}{marker}"
+
     return pattern.sub(replacer, text)
+
 
 
 def highlight_terms_ansi(text: str, terms: Set[str]) -> str:
     """
     Highlight search terms in text using ANSI color codes.
-    
-    Args:
-        text: Text to highlight
-        terms: Set of terms to highlight (lowercase)
-        
-    Returns:
-        Text with ANSI-highlighted terms
     """
     if not terms or not text:
         return text
-    
-    # Use cached pattern compilation
-    terms_frozen = frozenset(terms)
+
+    cleaned = {str(t).lower().strip() for t in terms if t and str(t).strip()}
+    cleaned = {t for t in cleaned if t and not t.endswith('*') and (len(t) >= 2 or t.isdigit())}
+    if not cleaned:
+        return text
+
+    terms_frozen = frozenset(cleaned)
     pattern = _compile_terms_pattern(terms_frozen)
-    
+
     def replacer(match):
-        word = match.group(0)
-        if word.lower() in terms:
-            return highlight_match(word)
-        return word
-    
+        return highlight_match(match.group(0))
+
     return pattern.sub(replacer, text)
 
 
-@lru_cache(maxsize=128)
 def _compile_phrase_pattern(phrase_words: tuple) -> Pattern:
     """
     Compile a regex pattern for phrase matching.
@@ -172,126 +175,106 @@ def normalize_document_text(text: str) -> str:
     return text.strip()
 
 
-def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]], 
+def find_best_snippet(text: str, terms: Set[str], phrases: List[List[str]],
                        snippet_length: int = DEFAULT_SNIPPET_LENGTH) -> str:
     """
     Find the most relevant snippet from text.
-    
+
     Strategy:
-        1. Find section with highest query term density
-        2. Prefer sections containing phrase matches
-        3. Return ~snippet_length chars of context
-    
-    Args:
-        text: Full document text
-        terms: Set of search terms (lowercase)
-        phrases: List of phrase word lists
-        snippet_length: Target snippet length in chars
-        
-    Returns:
-        Most relevant snippet from text
+        1. Locate query-term matches
+        2. Score nearby windows by term density / phrase hits
+        3. Return ~snippet_length chars centered on the best cluster
     """
     if not text:
         return ""
-    
+
     text = text.strip()
-    
-    # If text is short enough, return it all
-    if len(text) <= snippet_length:
-        return text
-    
-    # Tokenize text with positions using pre-compiled pattern
+    snippet_length = max(40, int(snippet_length or DEFAULT_SNIPPET_LENGTH))
+
     matches = list(_SNIPPET_WORD_PATTERN.finditer(text))
-    
     if not matches:
-        return text[:snippet_length] + '...'
-    
-    # Pre-lowercase all words once and build lookup
-    all_query_terms = set(terms)
-    for phrase in phrases:
-        all_query_terms.update(phrase)
-    
-    # Pre-compute lowercase words and find term positions
+        if len(text) <= snippet_length:
+            return text
+        return text[:snippet_length].rsplit(' ', 1)[0] + '...'
+
+    all_query_terms = {t.lower() for t in (terms or set()) if t}
+    for phrase in phrases or []:
+        all_query_terms.update(w.lower() for w in phrase if w)
+
     word_lower = [m.group(0).lower() for m in matches]
     term_positions = [i for i, w in enumerate(word_lower) if w in all_query_terms]
-    
-    # If no terms found, return start of text
+
+    # No query terms in body → plain lead-in, do not pretend relevance
     if not term_positions:
-        return text[:snippet_length] + '...'
-    
-    # Score each position by term density in surrounding window
+        if len(text) <= snippet_length:
+            return text
+        cut = text[:snippet_length].rsplit(' ', 1)[0]
+        return cut + '...'
+
+    # Very short docs: whole text is fine
+    if len(text) <= min(snippet_length, 120):
+        return text
+
     window_words = SNIPPET_WINDOW_WORDS
     best_score = -1
     best_start = 0
-    
-    # Only check windows starting near term matches (optimization)
+
     candidate_starts = set()
     for pos in term_positions:
-        # Add positions around each term match
         for offset in range(-window_words, 1):
             candidate = pos + offset
             if 0 <= candidate < len(matches):
                 candidate_starts.add(candidate)
-    
+
     for i in sorted(candidate_starts):
-        # Calculate score for window starting at this word
         window_end = min(i + window_words, len(matches))
-        
         score = 0
         found_terms = set()
-        
         for j in range(i, window_end):
             if word_lower[j] in all_query_terms:
                 score += 1
                 found_terms.add(word_lower[j])
-        
-        # Bonus for having multiple different terms
         score += len(found_terms) * TERM_DIVERSITY_BONUS
-        
-        # Check for phrase matches in this window (only if we have phrases)
+
         if phrases:
             window_start_char = matches[i].start()
             window_end_char = matches[window_end - 1].end() if window_end > i else window_start_char + snippet_length
             window_text = text[window_start_char:window_end_char + 50]
-            
             for phrase in phrases:
                 if check_phrase_match(window_text, phrase):
                     score += PHRASE_MATCH_BONUS
-        
+
         if score > best_score:
             best_score = score
             best_start = i
-    
-    # Extract snippet around best position
-    start_match = matches[best_start]
-    start_char = max(0, start_match.start() - 20)
-    
-    # Find end position
+
+    # Character window centered on the best match cluster
     end_word_idx = min(best_start + window_words, len(matches) - 1)
-    end_char = min(len(text), matches[end_word_idx].end() + 20)
-    
-    # Adjust to word boundaries
+    region_start = matches[best_start].start()
+    region_end = matches[end_word_idx].end()
+    region_mid = (region_start + region_end) // 2
+    half = max(40, snippet_length // 2)
+    start_char = max(0, region_mid - half)
+    end_char = min(len(text), start_char + snippet_length)
+    if end_char - start_char < snippet_length and start_char > 0:
+        start_char = max(0, end_char - snippet_length)
+
     if start_char > 0:
-        # Find previous space
-        space_pos = text.rfind(' ', 0, start_char)
-        if space_pos > start_char - 30:
+        space_pos = text.rfind(' ', 0, start_char + 1)
+        if space_pos != -1 and space_pos > start_char - 40:
             start_char = space_pos + 1
-    
     if end_char < len(text):
-        # Find next space
         space_pos = text.find(' ', end_char)
-        if space_pos != -1 and space_pos < end_char + 30:
+        if space_pos != -1 and space_pos < end_char + 40:
             end_char = space_pos
-    
-    snippet = text[start_char:end_char]
-    
-    # Add ellipsis if truncated
+
+    snippet = text[start_char:end_char].strip()
     if start_char > 0:
         snippet = '...' + snippet
     if end_char < len(text):
         snippet = snippet + '...'
-    
     return snippet
+
 
 
 def format_results(

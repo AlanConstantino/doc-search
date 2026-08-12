@@ -158,6 +158,26 @@ class TestFindBestSnippet(unittest.TestCase):
         self.assertIn('list comprehension', result.lower())
 
 
+    def test_snippet_centers_on_match_not_lead(self):
+        """Snippet should come from the relevant section, not the document start."""
+        filler = "lorem ipsum dolor sit amet. " * 40
+        text = filler + "Python list comprehension is powerful. " + filler
+        result = find_best_snippet(text, {'python', 'list', 'comprehension'}, [], 100)
+        self.assertIn('comprehension', result.lower())
+        self.assertTrue(result.startswith('...') or 'Python' in result)
+        # Should not be longer than a modest window
+        self.assertLessEqual(len(result), 160)
+
+    def test_highlight_only_given_terms(self):
+        """Highlight must not mark unrelated words."""
+        text = "Python list comprehension tutorial for beginners"
+        result = highlight_terms(text, {'list', 'comprehension'})
+        self.assertIn('**list**', result)
+        self.assertIn('**comprehension**', result)
+        self.assertNotIn('**Python**', result)
+        self.assertNotIn('**tutorial**', result)
+
+
 class TestIntegration(unittest.TestCase):
     """Integration tests."""
     

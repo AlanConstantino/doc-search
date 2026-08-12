@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-08-12
+
+### Fixed
+- **Web UI over-highlighting** — instant-search `highlightSnippet` used an over-escaped regex (`/\\*\\*/`), so almost the entire result blurb was wrapped in `<mark>`
+- **Snippet source quality** — prefer full page body for passage selection; stop stitching title + all headings into the snippet preview
+- **Selective term marks** — highlight original query terms only (not synonym/n-gram expansions); center a short window on the densest match cluster
+
 ## [2.6.0] - 2026-08-12
 
 ### Changed

@@ -512,60 +512,119 @@ class SearchEngine:
                    cache_path=cache_path, index_path=index_path)
 
     def _preview_for_url(self, url: str) -> Optional[str]:
-        """Return in-index preview/headings text without touching disk."""
+        """Return in-index body preview only (not title + all headings).
+
+        Title/headings were previously concatenated into the snippet source,
+        which made the UI highlight a long meta-ish block instead of a tight
+        passage around the query terms.
+        """
         doc_id = self.index.get_doc_id(url)
         if doc_id is None:
             return None
         doc = self.index.get_document(doc_id) or {}
-        parts = [doc.get('title') or '', doc.get('headings_text') or '', doc.get('preview') or '']
-        text = ' '.join(p for p in parts if p).strip()
-        return text or None
+        preview = (doc.get('preview') or '').strip()
+        if preview:
+            return preview
+        # Fall back to description, then a short headings hint
+        desc = (doc.get('description') or '').strip()
+        if desc:
+            return desc
+        headings = (doc.get('headings_text') or '').strip()
+        return headings or None
+
+    def _cache_page_text(self, url: str, text: Optional[str]) -> Optional[str]:
+        """Store text in the small LRU page cache."""
+        if len(self._page_text_cache) >= 200:
+            first_key = next(iter(self._page_text_cache))
+            del self._page_text_cache[first_key]
+        self._page_text_cache[url] = text
+        return text
 
     def _load_page_text(self, url: str) -> Optional[str]:
-        """Load page text: prefer in-index preview, else disk JSON (LRU cached)."""
-        # Strip anchor for page file lookup / preview parent
+        """Load page body text for snippets/phrases (LRU cached).
+
+        Prefers full page text from ``pages_dir`` so ``find_best_snippet`` can
+        pick the most relevant window. Falls back to the short in-index
+        body preview when disk text is unavailable.
+        """
         base_url = url.split('#', 1)[0]
 
         if url in self._page_text_cache:
             return self._page_text_cache[url]
-        if base_url in self._page_text_cache and '#' in url:
-            # chunk: prefer its own preview first
-            pass
 
+        # Prefer full body from disk — needed for tight, relevant snippets
+        if self.pages_dir:
+            from .utils import url_to_filename
+            filename = url_to_filename(base_url) + '.json'
+            filepath = self.pages_dir / filename
+            if filepath.exists():
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    body = (data.get('text') or '').strip()
+                    if body:
+                        return self._cache_page_text(url, body)
+                except (json.JSONDecodeError, IOError):
+                    pass
+
+        # Index-only fallback: body preview / description (not title+all headings)
         preview = self._preview_for_url(url) or self._preview_for_url(base_url)
-        # Use preview when present (avoids disk for rerank/snippets)
-        if preview and len(preview) >= 40:
-            text = preview
-            if len(self._page_text_cache) >= 200:
-                first_key = next(iter(self._page_text_cache))
-                del self._page_text_cache[first_key]
-            self._page_text_cache[url] = text
-            return text
+        return self._cache_page_text(url, preview)
 
-        if not self.pages_dir:
-            self._page_text_cache[url] = preview
-            return preview
+    def _make_snippet(
+        self,
+        result_row: Dict[str, Any],
+        *,
+        select_terms: Set[str],
+        highlight_term_set: Set[str],
+        phrases: List[List[str]],
+        snippet_length: int,
+        do_highlight: bool,
+        page_text: Optional[str] = None,
+    ) -> str:
+        """Build a short, query-focused snippet with selective highlighting.
 
-        from .utils import url_to_filename
-        filename = url_to_filename(base_url) + '.json'
-        filepath = self.pages_dir / filename
+        Selection uses ``select_terms`` (where the best window is). Mark-up uses
+        ``highlight_term_set`` only (original query terms), so synonym/ngram
+        expansions do not paint the whole blurb.
+        """
+        if page_text is None and snippet_length > 0:
+            page_text = self._load_page_text(result_row.get('url', ''))
 
-        if not filepath.exists():
-            self._page_text_cache[url] = preview
-            return preview
+        # Prefer full/normalized body; then index preview; avoid raw meta dump
+        source = ''
+        if page_text:
+            source = normalize_document_text(page_text)
+        if not source:
+            source = (
+                (result_row.get('preview') or '').strip()
+                or (result_row.get('description') or '').strip()
+            )
 
+        if not source:
+            return ''
+
+        # Always window to the densest match region when longer than target
+        snippet = find_best_snippet(
+            source, select_terms, phrases, snippet_length
+        )
+
+        # Hard cap so the UI never shows a wall of highlighted text
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            text = data.get('text', '') or preview
-            if len(self._page_text_cache) >= 200:
-                first_key = next(iter(self._page_text_cache))
-                del self._page_text_cache[first_key]
-            self._page_text_cache[url] = text
-            return text
-        except (json.JSONDecodeError, IOError):
-            self._page_text_cache[url] = preview
-            return preview
+            from .constants import MAX_SNIPPET_LENGTH
+            max_len = min(max(snippet_length + 40, snippet_length), MAX_SNIPPET_LENGTH)
+        except Exception:
+            max_len = min(snippet_length + 40, 200)
+
+        if len(snippet) > max_len:
+            # Keep left side (find_best_snippet already centered on match)
+            cut = snippet[:max_len].rsplit(' ', 1)[0]
+            snippet = cut + ('...' if not snippet.endswith('...') else '')
+
+        if do_highlight and snippet and highlight_term_set:
+            snippet = highlight_terms(snippet, highlight_term_set)
+
+        return snippet
     
     def search(
         self, 
@@ -616,18 +675,18 @@ class SearchEngine:
         if min_score > 0:
             bm25_results = [r for r in bm25_results if r['score'] >= min_score]
         
-        # If we have phrases, filter results that don't contain them
+        # Terms for snippet window selection + selective highlight (query only)
         results = []
-        terms_set = set(terms)
+        select_terms: Set[str] = set(terms)
         for phrase in phrases:
-            terms_set.update(phrase)
-        
+            select_terms.update(phrase)
+        highlight_terms_set: Set[str] = set(select_terms)
+
         for r in bm25_results:
-            # Load full text if we need to check phrases or generate snippets
             page_text = None
-            if phrases or (self.pages_dir and snippet_length > 0):
+            if phrases or snippet_length > 0:
                 page_text = self._load_page_text(r['url'])
-            
+
             # Phrase filter: bigrams first (no disk), then text fallback
             if phrases:
                 all_phrases_found = True
@@ -638,7 +697,6 @@ class SearchEngine:
                     if not ok and page_text:
                         ok = check_phrase_match(page_text, phrase) or check_phrase_match(r.get('title', ''), phrase)
                     if not ok and not page_text:
-                        # try title-only
                         ok = check_phrase_match(r.get('title', ''), phrase)
                     if not ok:
                         all_phrases_found = False
@@ -646,16 +704,16 @@ class SearchEngine:
                 if not all_phrases_found:
                     continue
 
-            # Snippet from preview/description without requiring full body
-            snippet = r.get('description', '') or r.get('preview', '')
-            if page_text:
-                normalized_text = normalize_document_text(page_text)
-                snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
-            
-            # Highlight terms if requested
-            if highlight and snippet:
-                snippet = highlight_terms(snippet, terms_set)
-            
+            snippet = self._make_snippet(
+                r,
+                select_terms=select_terms,
+                highlight_term_set=highlight_terms_set,
+                phrases=phrases,
+                snippet_length=snippet_length,
+                do_highlight=highlight,
+                page_text=page_text,
+            )
+
             result = {
                 'url': r['url'],
                 'title': r.get('title', ''),
@@ -663,12 +721,12 @@ class SearchEngine:
                 'description': r.get('description', ''),  # Keep original too
                 'score': r.get('score', 0)
             }
-            
+
             results.append(result)
-            
+
             if len(results) >= top_k:
                 break
-        
+
         # Cache the results
         if self._cache:
             self._cache.set(
@@ -1362,11 +1420,19 @@ class EnhancedSearchEngine(SearchEngine):
         # Filter by phrases, generate snippets, format results
         # =====================================================================
         results = []
-        # Use expanded terms for highlighting (includes wildcard expansions and synonyms)
-        terms_set = set(expanded_terms)
+        # Window selection may use expanded terms (better passage pick);
+        # highlighting uses original query terms only so the blurb is not
+        # painted end-to-end by synonyms / n-gram expansions.
+        select_terms: Set[str] = set(expanded_terms)
         for phrase in phrases:
-            terms_set.update(phrase)
-        
+            select_terms.update(phrase)
+        highlight_terms_set: Set[str] = set(original_terms)
+        for phrase in phrases:
+            highlight_terms_set.update(phrase)
+        highlight_terms_set = {t for t in highlight_terms_set if t and not str(t).endswith('*')}
+        if not highlight_terms_set:
+            highlight_terms_set = {t for t in select_terms if t and not str(t).endswith('*')}
+
         for r in candidates_to_process:
             page_text = None
             if phrases or snippet_length > 0:
@@ -1388,14 +1454,16 @@ class EnhancedSearchEngine(SearchEngine):
                 if not all_phrases_found:
                     continue
 
-            snippet = r.get('description', '') or r.get('preview', '')
-            if page_text:
-                normalized_text = normalize_document_text(page_text)
-                snippet = find_best_snippet(normalized_text, terms_set, phrases, snippet_length)
-            
-            if highlight and snippet:
-                snippet = highlight_terms(snippet, terms_set)
-            
+            snippet = self._make_snippet(
+                r,
+                select_terms=select_terms,
+                highlight_term_set=highlight_terms_set,
+                phrases=phrases,
+                snippet_length=snippet_length,
+                do_highlight=highlight,
+                page_text=page_text,
+            )
+
             # Use final_score from reranking if available, otherwise BM25 score
             score = r.get('final_score', r.get('score', 0))
             

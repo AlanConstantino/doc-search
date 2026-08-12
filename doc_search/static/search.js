@@ -805,7 +805,7 @@
     
     function highlightSnippet(text) {
         if (!text) return '';
-        return escapeHtml(text).replace(/\\*\\*([^*]+)\\*\\*/g, '<mark>$1</mark>');
+        return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<mark>$1</mark>');
     }
     
     function getScoreClass(pct) {
