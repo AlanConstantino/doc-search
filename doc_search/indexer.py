@@ -44,10 +44,21 @@ FIELD_WEIGHT_HEADINGS = 2.5
 FIELD_WEIGHT_BODY = 1.0
 
 # Exact (unstemmed) match bonus applied on top of stemmed BM25
-EXACT_MATCH_BONUS = 0.15
+EXACT_MATCH_BONUS = 0.20
 
-# Doc prior weights
+# Multiplicative priors / CTR (industry: guide BM25, don't swamp it)
 PRIOR_WEIGHT = 0.08
+PRIOR_MULT_MAX = 0.12          # score *= 1 + prior * PRIOR_MULT_SCALE, capped
+PRIOR_MULT_SCALE = 1.0
+CTR_MULT_SCALE = 0.04          # score *= 1 + CTR_MULT_SCALE * log1p(clicks)
+CTR_MULT_MAX = 0.25
+
+# Soft-AND / coordination: prefer docs matching more distinct query terms
+# (Lucene coord-like; modern systems use coverage in LTR — we bake a light version
+# into first-stage BM25 so expansions can't rank a one-term cousin above a full match.)
+COORD_FULL_MATCH_BONUS = 0.15  # when all unique query stems match
+COORD_PARTIAL_POWER = 0.85     # score *= (matched/total) ** power  (soft, not hard AND)
+
 PREVIEW_CHARS = 600
 INDEX_FORMAT_VERSION = 3
 
@@ -803,80 +814,177 @@ class BM25Index:
             rows.append((doc_id, tf, tt, ht))
         return rows
 
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """Search using fielded BM25 + bigrams + priors + exact bonus + CTR."""
-        # Tokenize with exact forms for bonus
+    def search(self, query: str, top_k: int = 10,
+               term_weights: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
+        """
+        Search using fielded BM25 + coordination + multiplicative signals.
+
+        Industry-aligned first stage:
+          - BM25F-style field mix (title > headings > body)
+          - Soft-AND coordination (prefer multi-term coverage)
+          - Multiplicative exact / prior / CTR boosts (guide, don't replace BM25)
+          - Bigram boost for adjacent query terms
+          - Optional per-term weights (original=1.0, synonym/expansion < 1)
+        """
         stem_terms, exact_terms = tokenize_with_exact(query, apply_stemming=self.stem)
         if not stem_terms and not exact_terms:
-            # fallback
             stem_terms = tokenize(query, apply_stemming=self.stem)
             exact_terms = tokenize(query, apply_stemming=False)
 
+        # Unique stems preserve IDF sum semantics; track multiplicity lightly
         if not stem_terms:
             return []
 
+        # Deduplicate while preserving order (coord over distinct terms)
+        seen = set()
+        unique_stems: List[str] = []
+        for t in stem_terms:
+            if t not in seen:
+                seen.add(t)
+                unique_stems.append(t)
+
+        n_query_terms = len(unique_stems)
         scores: Dict[int, float] = defaultdict(float)
+        matched_terms: Dict[int, set] = defaultdict(set)
+        title_hits: Dict[int, int] = defaultdict(int)
+        head_hits: Dict[int, int] = defaultdict(int)
+
         avg_dl = self.avg_doc_length if self.avg_doc_length > 0 else 1.0
         k1, b = self.k1, self.b
         doc_lengths = self.doc_lengths
+        # Field weights for BM25F-style combination (not renormalized away)
         w_title, w_head, w_body = FIELD_WEIGHT_TITLE, FIELD_WEIGHT_HEADINGS, FIELD_WEIGHT_BODY
-        w_sum = w_title + w_head + w_body
 
-        # Fielded BM25 over stemmed terms (mmap postings when available)
-        for term in stem_terms:
+        # Optional query-term weights (keys may be unstemmed; map onto stems)
+        tw = term_weights or {}
+        stem_weight: Dict[str, float] = {}
+        if tw:
+            # Build weight per unique stem: max weight of any exact token that stems here
+            from .stemmer import stem as _stem
+            for raw, w in tw.items():
+                if not raw:
+                    continue
+                st = _stem(raw.lower()) if self.stem else raw.lower()
+                stem_weight[st] = max(float(w), stem_weight.get(st, 0.0))
+                # also allow already-stemmed keys
+                stem_weight[raw.lower()] = max(float(w), stem_weight.get(raw.lower(), 0.0))
+
+        if stem_weight:
+            primary_stems = {t for t in unique_stems if stem_weight.get(t, 1.0) >= 0.999}
+            if not primary_stems:
+                primary_stems = set(unique_stems)
+        else:
+            primary_stems = set(unique_stems)
+
+        for term in unique_stems:
             idf = self._idf(term)
             if idf == 0:
+                continue
+            tw_i = stem_weight.get(term, 1.0) if stem_weight else 1.0
+            if tw_i <= 0:
                 continue
             rows = self._posting_rows(term)
             if not rows:
                 continue
             for doc_id, tf, title_tf, head_tf in rows:
                 doc_length = doc_lengths.get(doc_id, avg_dl)
-                body_tf = max(0, tf - title_tf * 3 - head_tf * 2)
-                field_score = (
-                    w_title * self._bm25_tf(title_tf, doc_length, avg_dl, k1, b) +
-                    w_head * self._bm25_tf(head_tf, doc_length, avg_dl, k1, b) +
-                    w_body * self._bm25_tf(body_tf + title_tf + head_tf, doc_length, avg_dl, k1, b)
-                ) / w_sum
-                scores[doc_id] += idf * field_score
+                # Reconstruct body tf from combined posting (combined = body + 3*title + 2*head)
+                body_tf = max(0, int(tf) - int(title_tf) * 3 - int(head_tf) * 2)
 
-        # Bigram boost for adjacent query terms
-        if len(stem_terms) >= 2:
-            for a, btm in zip(stem_terms, stem_terms[1:]):
+                # BM25F: separate field TFs, then weighted sum * shared IDF
+                # (industry multi_match best_fields-ish blend with strong title)
+                t_part = self._bm25_tf(title_tf, doc_length, avg_dl, k1, b) if title_tf else 0.0
+                h_part = self._bm25_tf(head_tf, doc_length, avg_dl, k1, b) if head_tf else 0.0
+                # Body channel uses body tf only (do not re-add title/head)
+                b_part = self._bm25_tf(body_tf, doc_length, avg_dl, k1, b) if body_tf else 0.0
+                # If only title/head contributed to combined tf, still count a minimal body-less doc
+                if body_tf == 0 and title_tf == 0 and head_tf == 0 and tf > 0:
+                    b_part = self._bm25_tf(tf, doc_length, avg_dl, k1, b)
+
+                field_score = (
+                    w_title * t_part +
+                    w_head * h_part +
+                    w_body * b_part
+                )
+                # Normalize by body weight so pure-body scores stay on a familiar scale
+                field_score = field_score / w_body
+
+                scores[doc_id] += idf * field_score * tw_i
+                matched_terms[doc_id].add(term)
+                if title_tf:
+                    title_hits[doc_id] += 1
+                if head_tf:
+                    head_hits[doc_id] += 1
+
+        # Bigram boost for adjacent unique query pairs (phrase-ish recall)
+        if len(unique_stems) >= 2:
+            for a, btm in zip(unique_stems, unique_stems[1:]):
                 bg = f'{a} {btm}'
                 postings = self.bigrams.get(bg)
                 if not postings:
                     continue
-                # fixed boost scaled by rarity
-                idf_bg = self._idf(a) * 0.5
+                idf_bg = max(self._idf(a), self._idf(btm)) * 0.45
                 for doc_id, tf, _, _ in postings.iter_rows():
-                    scores[doc_id] += idf_bg * min(tf, 5) * 0.35
+                    scores[doc_id] += idf_bg * min(int(tf), 5) * 0.40
 
         if not scores:
             return []
 
-        # Exact match bonus + prior + CTR
         exact_set = set(exact_terms)
         for doc_id in list(scores.keys()):
             doc = self.documents.get(doc_id)
             if not doc:
+                scores.pop(doc_id, None)
                 continue
+
+            base = scores[doc_id]
+            matched = matched_terms.get(doc_id) or set()
+
+            # Soft-AND on primary query stems (weight≈1.0). Expansions
+            # contribute score but shouldn't satisfy coordination alone.
+            primary_matched = matched & primary_stems
+            coverage = len(primary_matched) / len(primary_stems) if primary_stems else 1.0
+
+            # Soft-AND coordination (Lucene-style coverage pressure)
+            if len(primary_stems) > 1:
+                coord = coverage ** COORD_PARTIAL_POWER
+                if coverage >= 1.0:
+                    coord *= (1.0 + COORD_FULL_MATCH_BONUS)
+                base *= coord
+
+            # Exact unstemmed forms (title/headings) — multiplicative
             if exact_set and doc.get('exact_terms'):
                 hits = len(exact_set & doc['exact_terms'])
                 if hits:
-                    scores[doc_id] *= (1.0 + EXACT_MATCH_BONUS * hits / max(1, len(exact_set)))
-            scores[doc_id] += PRIOR_WEIGHT * float(doc.get('prior', 0.0))
-            # CTR
+                    base *= (1.0 + EXACT_MATCH_BONUS * hits / max(1, len(exact_set)))
+
+            # Title-term coverage bonus (docs whose title hits more query stems)
+            th = title_hits.get(doc_id, 0)
+            if th and n_query_terms:
+                base *= (1.0 + 0.12 * (th / n_query_terms))
+
+            # Static prior — multiplicative, capped (industry function_score style)
+            prior = float(doc.get('prior', 0.0) or 0.0)
+            if prior:
+                base *= (1.0 + min(PRIOR_MULT_MAX, max(0.0, prior) * PRIOR_MULT_SCALE * PRIOR_WEIGHT / 0.08))
+
+            # CTR — multiplicative, capped
             clicks = self.click_counts.get(doc.get('url', ''), 0)
             if clicks:
-                scores[doc_id] += 0.05 * math.log1p(clicks)
+                base *= (1.0 + min(CTR_MULT_MAX, CTR_MULT_SCALE * math.log1p(clicks)))
 
-        # heapq top-k (faster than full sort)
+            # Mild chunk penalty already in prior; tiny extra so parents win ties
+            if doc.get('is_chunk'):
+                base *= 0.97
+
+            scores[doc_id] = base
+
         top = heapq.nlargest(top_k, scores.items(), key=lambda x: x[1])
 
         results = []
         for doc_id, score in top:
             doc = self.documents[doc_id]
+            mset = matched_terms.get(doc_id) or set()
             results.append({
                 'url': doc['url'],
                 'title': doc['title'],
@@ -886,6 +994,12 @@ class BM25Index:
                 'preview': doc.get('preview', ''),
                 'headings_text': doc.get('headings_text', ''),
                 'is_chunk': doc.get('is_chunk', False),
+                # Evidence for rerank / UI (industry: matched terms available)
+                '_matched_terms': sorted(mset),
+                '_term_coverage': round(
+                    len(mset & primary_stems) / max(1, len(primary_stems)), 4
+                ),
+                '_title_term_hits': title_hits.get(doc_id, 0),
             })
         return results
 

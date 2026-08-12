@@ -37,6 +37,9 @@ from .constants import (
     RERANK_RECALL_MULTIPLIER,
     RERANK_MAX_CANDIDATES,
     RERANK_CANDIDATE_LIMIT,
+    RERANK_ORIG_COVERAGE_POWER,
+    RERANK_ORIG_FULL_BONUS,
+    RERANK_TITLE_MATCH_BONUS,
     FIELD_WEIGHT_TITLE,
     FIELD_WEIGHT_HEADINGS,
     FIELD_WEIGHT_BODY,
@@ -85,6 +88,9 @@ class RerankConfig:
     title_coverage_beta: float = RERANK_TITLE_COVERAGE_BETA
     full_coverage_bonus: float = RERANK_FULL_COVERAGE_BONUS
     max_coverage_terms: int = RERANK_MAX_COVERAGE_TERMS
+    orig_coverage_power: float = RERANK_ORIG_COVERAGE_POWER
+    orig_full_bonus: float = RERANK_ORIG_FULL_BONUS
+    title_match_bonus: float = RERANK_TITLE_MATCH_BONUS
     # Phrase proximity settings
     phrase_max_slop: int = PHRASE_MAX_SLOP
     phrase_exact_title: float = PHRASE_EXACT_MATCH_TITLE
@@ -561,42 +567,83 @@ class Reranker:
                 term_weights=term_weights
             )
         
-        # Phrase scores
+        # Phrase scores — title phrases dominate (industry: match in title > body)
         phrase_score = 0.0
         if phrases:
-            phrase_score += self._compute_phrase_score(title, phrases, in_title=True)
+            title_p = self._compute_phrase_score(title, phrases, in_title=True)
+            head_p = 0.0
+            body_p = 0.0
             if headings_text:
-                # Headings phrase match is between title and body
-                phrase_score += self._compute_phrase_score(headings_text, phrases, in_title=False) * 1.5
+                head_p = self._compute_phrase_score(headings_text, phrases, in_title=False) * 1.2
             if body_text:
-                phrase_score += self._compute_phrase_score(body_text, phrases, in_title=False)
-            # Normalize phrase score (cap at 1.0)
-            phrase_score = min(1.0, phrase_score)
+                body_p = self._compute_phrase_score(body_text, phrases, in_title=False)
+            # Weight channels before cap so title exact beats body exact
+            phrase_raw = title_p * 1.0 + head_p * 0.55 + body_p * 0.35
+            phrase_score = min(1.0, phrase_raw)
+            # Extra multiplicative cue when title has an exact/strong phrase
+            if title_p > 0:
+                # applied later onto weighted_score via phrase channel strength
+                phrase_score = min(1.0, phrase_score + 0.15)
         
-        # Combine scores with weights
+        # Combine scores with weights (BM25-dominant linear blend)
         weighted_score = (
             bm25_score * self.config.weight_bm25 +
             field_score * self.config.weight_field +
             phrase_score * self.config.weight_phrase
         )
-        
-        # Apply coverage as a multiplier (not additive)
-        # This ensures documents matching more terms get boosted
+
+        # Coverage multipliers (industry: side signals guide BM25)
         coverage_multiplier = body_coverage * title_coverage
         weighted_score *= coverage_multiplier
-        
-        # Add coverage component for transparency
-        # (coverage effect is multiplicative, but we log the raw coverage for debugging)
-        avg_coverage = (body_coverage + title_coverage) / 2 - 1.0  # Normalize to 0-based
-        
+
+        # Soft-AND on original terms using first-stage evidence when present.
+        # Fallback: max of title/body coverage fractions (title-only matches must
+        # not be crushed — industry treats title hits as first-class).
+        stage1_cov = doc.get('_term_coverage')
+        if stage1_cov is None and original_terms:
+            def _frac(mult, beta):
+                return min(1.0, max(0.0, (mult - 1.0) / max(beta, 1e-6)))
+            body_frac = _frac(body_coverage, self.config.coverage_beta)
+            title_frac = _frac(title_coverage, self.config.title_coverage_beta)
+            stage1_cov = max(body_frac, title_frac)
+        title_hit_frac = 0.0
+        if stage1_cov is not None and original_terms and len(original_terms) > 1:
+            cov = max(0.0, min(1.0, float(stage1_cov)))
+            # Milder floor so title-only pages stay competitive
+            coord = cov ** self.config.orig_coverage_power
+            if cov >= 0.999:
+                coord *= (1.0 + self.config.orig_full_bonus)
+            weighted_score *= max(0.35, coord)
+
+        # Title match multiplicative boost (original terms in title)
+        if original_terms and title:
+            title_lower = title.lower()
+            hits = sum(1 for t in original_terms if t and t.lower() in title_lower)
+            title_hit_frac = hits / max(1, len(original_terms))
+            if title_hit_frac:
+                weighted_score *= (1.0 + self.config.title_match_bonus * title_hit_frac)
+        elif doc.get('_title_term_hits') and original_terms:
+            title_hit_frac = min(
+                1.0, float(doc['_title_term_hits']) / max(1, len(original_terms))
+            )
+            if title_hit_frac:
+                weighted_score *= (1.0 + self.config.title_match_bonus * title_hit_frac)
+
+        if doc.get('is_chunk'):
+            weighted_score *= 0.98
+
+        avg_coverage = (body_coverage + title_coverage) / 2 - 1.0
+
         components = {
             'bm25': bm25_score * self.config.weight_bm25,
             'field': field_score * self.config.weight_field,
             'coverage': avg_coverage * self.config.weight_coverage,
             'phrase': phrase_score * self.config.weight_phrase,
             'coverage_multiplier': coverage_multiplier,
+            'stage1_coverage': stage1_cov if stage1_cov is not None else -1.0,
+            'title_hit_frac': title_hit_frac,
         }
-        
+
         return weighted_score, components
     
     def rerank(

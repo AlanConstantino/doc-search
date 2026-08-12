@@ -23,8 +23,8 @@ class TestRerankConfig(unittest.TestCase):
         self.assertEqual(config.recall_multiplier, 4)
         self.assertEqual(config.max_candidates, 200)
         self.assertEqual(config.candidate_limit, 80)
-        self.assertAlmostEqual(config.weight_bm25, 0.60)
-        self.assertAlmostEqual(config.weight_field, 0.20)
+        self.assertAlmostEqual(config.weight_bm25, 0.55)
+        self.assertAlmostEqual(config.weight_field, 0.25)
         self.assertAlmostEqual(config.weight_coverage, 0.10)
         self.assertAlmostEqual(config.weight_phrase, 0.10)
         # Field weights
@@ -118,8 +118,9 @@ class TestRerankScoring(unittest.TestCase):
             ["python", "list", "comprehension"],
             beta=0.4
         )
-        # Full coverage: 1 + 0.4 + 0.2 (bonus) = 1.6
-        self.assertAlmostEqual(score, 1.6)
+        # Full coverage: 1 + beta + full_coverage_bonus
+        bonus = self.reranker.config.full_coverage_bonus
+        self.assertAlmostEqual(score, 1.0 + 0.4 + bonus)
     
     def test_coverage_score_partial(self):
         """Should give proportional boost for partial coverage."""

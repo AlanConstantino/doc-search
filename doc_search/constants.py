@@ -77,21 +77,28 @@ RERANK_MAX_CANDIDATES = 200
 RERANK_CANDIDATE_LIMIT = 80
 
 # Score component weights (must sum to ~1.0)
-RERANK_WEIGHT_BM25 = 0.60          # Base BM25 relevance (dominant signal)
-RERANK_WEIGHT_FIELD = 0.20         # Field-aware term matching (title > headings > body)
-RERANK_WEIGHT_COVERAGE = 0.10      # Query term coverage
+# Industry: BM25 dominates; side signals guide via multipliers more than additives.
+RERANK_WEIGHT_BM25 = 0.55          # Base BM25 relevance (dominant signal)
+RERANK_WEIGHT_FIELD = 0.25         # Field-aware term matching (title > headings > body)
+RERANK_WEIGHT_COVERAGE = 0.10      # Query term coverage (logged; applied multiplicatively)
 RERANK_WEIGHT_PHRASE = 0.10        # Phrase/proximity matches
 
 # Coverage boost strength (beta parameter)
 # coverage=1.0 (all terms) → boost = 1 + beta
 # coverage=0.5 (half terms) → boost = 1 + 0.5*beta
-RERANK_COVERAGE_BETA = 0.4
+RERANK_COVERAGE_BETA = 0.55
 
 # Title-specific coverage boost (stronger because title is more important)
-RERANK_TITLE_COVERAGE_BETA = 0.6
+RERANK_TITLE_COVERAGE_BETA = 0.85
 
 # Full coverage bonus: extra boost when all query terms are present
-RERANK_FULL_COVERAGE_BONUS = 0.2
+RERANK_FULL_COVERAGE_BONUS = 0.30
+
+# Soft-AND on original query terms at rerank (penalize expansion-only cousins)
+RERANK_ORIG_COVERAGE_POWER = 0.75
+RERANK_ORIG_FULL_BONUS = 0.18
+# Prefer title matches of original terms (multiplicative)
+RERANK_TITLE_MATCH_BONUS = 0.22
 
 # Maximum terms to consider for coverage (for very long queries)
 RERANK_MAX_COVERAGE_TERMS = 8

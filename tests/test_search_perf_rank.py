@@ -132,3 +132,44 @@ class TestPreviewAvoidsDisk(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestIndustryRanking(unittest.TestCase):
+    """First-stage BM25: coordination, title preference, weighted expansions."""
+
+    def test_multi_term_beats_single_term_cousin(self):
+        idx = BM25Index()
+        idx.add_document(0, 'https://a', 'List Comprehension',
+                         'List comprehension is a python feature for lists.')
+        idx.add_document(1, 'https://b', 'Comprehension Only',
+                         'Comprehension appears many times. comprehension comprehension.')
+        idx.rebuild_idf_cache()
+        top = idx.search('list comprehension', 5)
+        self.assertEqual(top[0]['url'], 'https://a')
+        self.assertGreaterEqual(top[0].get('_term_coverage', 0), 0.99)
+
+    def test_title_match_ranks_above_body_only(self):
+        idx = BM25Index()
+        idx.add_document(0, 'https://title', 'Asyncio Gather Guide',
+                         'This page is about concurrent programming helpers.')
+        idx.add_document(1, 'https://body', 'Misc Notes',
+                         'You can use asyncio gather for concurrent tasks. ' * 5)
+        idx.rebuild_idf_cache()
+        top = idx.search('asyncio gather', 5)
+        self.assertEqual(top[0]['url'], 'https://title')
+
+    def test_expansion_weights_prefer_original_terms(self):
+        idx = BM25Index()
+        idx.add_document(0, 'https://orig', 'Error Handling',
+                         'How to handle error conditions in code.')
+        idx.add_document(1, 'https://syn', 'Exception Handling',
+                         'How to handle exception conditions in code.')
+        idx.rebuild_idf_cache()
+        # Without weights, both may compete; with error=1.0 exception=0.5, orig wins
+        top = idx.search(
+            'error exception',
+            5,
+            term_weights={'error': 1.0, 'exception': 0.5},
+        )
+        self.assertEqual(top[0]['url'], 'https://orig')
+

@@ -1330,32 +1330,43 @@ class EnhancedSearchEngine(SearchEngine):
         all_terms_pass1 = list(pass1_terms)
         for phrase in phrases:
             all_terms_pass1.extend(phrase)
-        
+
+        expanded_terms = pass1_terms
+
+        # Original query terms (before expansion) — weights + rerank
+        original_terms = list(terms)
+        original_terms = [
+            t.rstrip('*') for t in original_terms
+            if not t.endswith('*') or len(t) > 1
+        ]
+
+        # Industry: expansions get lower weight than original terms at retrieval
+        term_weights = self._build_term_weights(
+            original_terms=original_terms,
+            expanded_terms=list(all_terms_pass1),
+            synonym_terms=synonym_terms,
+            wildcard_terms=wildcard_terms,
+        )
+
         # =====================================================================
-        # PASS 1: PRECISION
-        # BM25 with original terms + wildcards + synonyms (NO fuzzy)
+        # PASS 1: RECALL (weighted fielded BM25)
         # =====================================================================
         if enable_reranking:
-            # Fetch more candidates for reranking
             recall_k = self._reranker.compute_recall_k(top_k)
-            # Phrase queries need extra candidates since many will be
-            # filtered out by exact phrase matching post-rerank
             if phrases:
                 recall_k *= 2
         else:
-            # Legacy behavior: just fetch what we need plus some buffer
             recall_k = top_k * 3 if phrases or facet_filters else top_k
-        
-        bm25_results = self.index.search(' '.join(all_terms_pass1), top_k=recall_k)
-        
-        # min_score filtering is deferred to after reranking so that
-        # documents boosted by title/coverage signals aren't prematurely
-        # discarded based on raw BM25 scores alone.
-        # When reranking is disabled, filter on BM25 scores directly.
+
+        bm25_results = self.index.search(
+            ' '.join(all_terms_pass1),
+            top_k=recall_k,
+            term_weights=term_weights,
+        )
+
         if min_score > 0 and not enable_reranking:
             bm25_results = [r for r in bm25_results if r['score'] >= min_score]
-        
-        # Apply facet filters (reduces candidate set)
+
         if facet_filters and self._facets:
             filtered_urls = set()
             all_doc_ids = set()
@@ -1364,33 +1375,15 @@ class EnhancedSearchEngine(SearchEngine):
                 if doc_id is not None:
                     all_doc_ids.add(doc_id)
             filtered_doc_ids = self._facets.filter_by_facets(all_doc_ids, facet_filters)
-            
-            # Map back to URLs using document metadata
             for doc_id in filtered_doc_ids:
                 doc = self.index.get_document(doc_id)
                 if doc:
                     filtered_urls.add(doc['url'])
             bm25_results = [r for r in bm25_results if r['url'] in filtered_urls]
-        
-        expanded_terms = pass1_terms  # Default to Pass 1 terms
-        
+
         # =====================================================================
         # RERANKING
-        # Apply sophisticated scoring to reorder candidates
         # =====================================================================
-        # Get the original query terms (before expansion) for coverage scoring
-        original_terms = list(terms)
-        # Strip wildcards from original terms for matching
-        original_terms = [t.rstrip('*') for t in original_terms if not t.endswith('*') or len(t) > 1]
-        
-        # Build term weights for weighted coverage scoring
-        term_weights = self._build_term_weights(
-            original_terms=original_terms,
-            expanded_terms=expanded_terms,
-            synonym_terms=synonym_terms,
-            wildcard_terms=wildcard_terms
-        )
-        
         if enable_reranking and bm25_results:
             # Rerank candidates using multiple signals
             reranked = self._reranker.rerank(

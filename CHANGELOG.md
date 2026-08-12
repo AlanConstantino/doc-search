@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-08-12
+
+### Changed
+- **Industry-aligned ranking (first stage)** — BM25F-style field mix (title ≫ headings > body without double-counting title into body TF); soft-AND / coordination so multi-term queries prefer full coverage over one-term cousins
+- **Multiplicative priors & CTR** — static prior and click boosts multiply BM25 within caps (guide relevance, don’t swamp it)
+- **Weighted query expansions at retrieval** — synonyms / n-gram / wildcard terms score below original terms (`term_weights` on `BM25Index.search`)
+- **Stronger title preference** — title-term coverage bonus in BM25; rerank title-match multiplier and title-weighted phrases
+- **Rerank soft-AND** — uses stage-1 term coverage; title-only matches no longer crushed by body-only fallback
+- **Match evidence on results** — `_term_coverage`, `_matched_terms`, `_title_term_hits` for rerank / debugging
+
+### Fixed
+- Title phrase matches could lose to body-only phrase + coverage under the previous additive/coord mix
+
 ## [2.6.1] - 2026-08-12
 
 ### Fixed
