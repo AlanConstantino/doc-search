@@ -118,6 +118,7 @@ Press `Ctrl+C` to stop the server.
 ```bash
 --max-pages 500      # Limit number of pages
 --max-depth 5        # Limit link depth
+--same-path          # Only crawl /3.9/* (and store it separately from /3.6/)
 --delay 2.0          # Seconds between requests (default: 1.0)
 --workers 4          # Parallel crawlers (default: 1)
 --max-age 30         # Re-crawl pages older than N days

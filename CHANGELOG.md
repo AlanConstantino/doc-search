@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.9] - 2026-08-13
+
+### Added
+- **`--same-path` isolates versions** — crawling `https://docs.python.org/3.9/` with `--same-path` stays under `/3.9/*` and stores that path in its own folder, so `/3.6/` no longer lands in the same site data. Later `index` / `search` / `serve` of the same URL find that folder automatically.
+
 ## [2.6.7] - 2026-08-13
 
 ### Fixed

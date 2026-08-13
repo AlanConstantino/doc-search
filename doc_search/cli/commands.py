@@ -81,6 +81,26 @@ def refresh_default_data_dir(config_path=None) -> Path:
     return DEFAULT_DATA_DIR
 
 
+def resolve_include_path(url_or_path: str, include_path: bool = False) -> bool:
+    """True when this URL should use a path-scoped site folder.
+
+    Explicit ``include_path`` (``--separate-paths``) always wins. Otherwise,
+    a non-root URL path is treated as path-scoped if that folder already
+    exists — so ``index`` / ``search`` / ``serve`` find a ``--same-path``
+    crawl without repeating the flag.
+    """
+    if include_path:
+        return True
+    if not (url_or_path.startswith('http://') or url_or_path.startswith('https://')):
+        return False
+    from urllib.parse import urlparse
+    path = urlparse(url_or_path).path.rstrip('/')
+    if not path:
+        return False
+    scoped = DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=True)
+    return scoped.exists()
+
+
 def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
     """Get site data directory from URL, existing path, or hash.
     
@@ -100,7 +120,9 @@ def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
     """
     # Check if it's a URL (http:// or https://)
     if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
-        return DEFAULT_DATA_DIR / site_hash(url_or_path, include_path=include_path)
+        return DEFAULT_DATA_DIR / site_hash(
+            url_or_path, include_path=resolve_include_path(url_or_path, include_path)
+        )
     
     # Check if it's a hash (alphanumeric, typically 12 chars)
     # Support both raw hash and prefixed versions (files_xxx, site_xxx)
@@ -165,7 +187,8 @@ def get_auth(args) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
 
 def cmd_crawl(args):
     """Crawl a documentation site."""
-    separate_paths = getattr(args, 'separate_paths', False)
+    same_path = getattr(args, 'same_path', False)
+    separate_paths = getattr(args, 'separate_paths', False) or same_path
     try:
         site_dir = get_site_dir(args.url, include_path=separate_paths)
     except ValueError as e:
@@ -175,8 +198,11 @@ def cmd_crawl(args):
     
     print(f"Crawling: {args.url}")
     print(f"Data directory: {site_dir}")
-    if separate_paths:
-        print(f"Storage mode: separate paths")
+    if same_path:
+        print("Path restriction: only URLs under the starting path")
+        print("Storage mode: separate folder for this path")
+    elif separate_paths:
+        print("Storage mode: separate paths")
     print()
     
     # Get authentication
@@ -192,7 +218,7 @@ def cmd_crawl(args):
         max_depth=args.max_depth,
         auth=auth,
         auth_token=auth_token,
-        same_path=getattr(args, 'same_path', False),
+        same_path=same_path,
         ignore_robots=getattr(args, 'ignore_robots', False),
         verbose=not args.quiet,
         workers=args.workers,
@@ -238,7 +264,9 @@ def cmd_crawl(args):
         'url': args.url,
         'stats': {**stats, 'pages_crawled': total_pages},
         'doc_type_counts': doc_type_counts,
-        'site_size_bytes': site_size
+        'site_size_bytes': site_size,
+        'same_path': same_path,
+        'separate_paths': separate_paths,
     }
     with open(site_dir / 'metadata.json', 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)

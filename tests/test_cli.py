@@ -701,7 +701,35 @@ class TestCmdCrawl(CLITestCase):
             call_kwargs = MockCrawlerClass.call_args[1]
             self.assertTrue(call_kwargs['same_path'])
             self.assertEqual(code, 0)
-    
+
+    def test_crawl_same_path_uses_path_scoped_storage(self):
+        """--same-path should store /3.9/ separately from /3.6/."""
+        from doc_search.utils import site_hash
+        from doc_search.cli.commands import resolve_include_path
+
+        url_39 = 'https://docs.python.org/3.9/'
+        url_36 = 'https://docs.python.org/3.6/'
+        self.assertNotEqual(
+            site_hash(url_39, include_path=True),
+            site_hash(url_36, include_path=True),
+        )
+        self.assertEqual(site_hash(url_39), site_hash(url_36))
+
+        data_dir = Path(self.temp_dir.name)
+        mock_crawler = MockCrawler()
+        with patch('doc_search.cli.commands.Crawler') as MockCrawlerClass:
+            MockCrawlerClass.return_value = mock_crawler
+            with patch.object(commands, 'DEFAULT_DATA_DIR', data_dir):
+                code, out, _ = run_cli(['crawl', url_39, '--same-path', '--quiet'])
+            self.assertEqual(code, 0)
+            expected = data_dir / site_hash(url_39, include_path=True)
+            self.assertEqual(MockCrawlerClass.call_args[1]['data_dir'], expected)
+            self.assertTrue(expected.exists())
+
+        with patch.object(commands, 'DEFAULT_DATA_DIR', data_dir):
+            self.assertTrue(resolve_include_path(url_39, False))
+            self.assertEqual(get_site_dir(url_39), expected)
+
     def test_crawl_with_quiet(self):
         """Should pass verbose=False when --quiet flag is set."""
         mock_crawler = MockCrawler()

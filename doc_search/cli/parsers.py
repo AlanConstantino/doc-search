@@ -20,14 +20,14 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Crawl a documentation site (stays under /3.11/ path by default)
+  # Crawl a documentation site (entire domain by default)
   python -m doc_search crawl https://docs.python.org/3.11/
+  
+  # Stay under the starting path and store it separately from other versions
+  python -m doc_search crawl https://docs.python.org/3.9/ --same-path
   
   # Crawl with page limit and depth limit
   python -m doc_search crawl https://docs.python.org/3.11/ --max-pages 500 --max-depth 5
-  
-  # Restrict to starting path only
-  python -m doc_search crawl https://docs.example.com/guide/ --same-path
   
   # Crawl with authentication
   python -m doc_search crawl https://docs.example.com --user admin
@@ -89,7 +89,7 @@ def _add_crawl_parser(subparsers):
     crawl_parser.add_argument('--max-depth', type=int,
                              help='Maximum link depth from starting URL')
     crawl_parser.add_argument('--same-path', action='store_true',
-                             help='Only crawl URLs under the starting path (default: crawl entire domain)')
+                             help='Only crawl URLs under the starting path and store that path in its own folder (e.g. /3.9/ stays separate from /3.6/)')
     crawl_parser.add_argument('--ignore-robots', action='store_true',
                              help='Ignore robots.txt rules (use responsibly)')
     crawl_parser.add_argument('--fresh', '-f', action='store_true',
