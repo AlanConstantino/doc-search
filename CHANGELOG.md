@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.6.8] - 2026-08-13
+## [2.6.7] - 2026-08-13
 
 ### Fixed
 - **Crawl `--max-pages` hard cap** — `pages_crawled` never exceeds the requested limit. In-flight reservations are released on failed/skipped pages so the crawl keeps going until that many pages are actually saved (a 100-page crawl no longer stops at 97 after a few 404s).
