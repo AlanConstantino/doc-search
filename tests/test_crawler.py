@@ -740,7 +740,7 @@ class TestCrawlState(CrawlerTestCase):
         self.assertEqual(len(state.get_errors()), 100)
 
     def test_try_reserve_page_stops_at_limit(self):
-        """Reservations must not exceed max_pages."""
+        """In-flight reservations plus crawled pages must not exceed max_pages."""
         state = self.create_crawl_state()
         self.assertTrue(state.try_reserve_page(2))
         self.assertTrue(state.try_reserve_page(2))
@@ -754,14 +754,26 @@ class TestCrawlState(CrawlerTestCase):
         self.assertTrue(state.try_reserve_page(0))
         self.assertEqual(state.stats.get('pages_reserved', 0), 0)
 
-    def test_release_page_reservation(self):
-        """Failed / skipped pages give the slot back."""
+    def test_failed_reservation_is_released_for_retry(self):
+        """A failed fetch frees the in-flight slot so another URL can fill the cap."""
         state = self.create_crawl_state()
         self.assertTrue(state.try_reserve_page(1))
         self.assertFalse(state.try_reserve_page(1))
         state.release_page_reservation()
         self.assertTrue(state.try_reserve_page(1))
         self.assertEqual(state.stats['pages_reserved'], 1)
+
+    def test_record_crawled_page_hard_cap(self):
+        """pages_crawled must never exceed max_pages."""
+        state = self.create_crawl_state()
+        self.assertTrue(state.try_reserve_page(2))
+        self.assertTrue(state.record_crawled_page(2))
+        self.assertTrue(state.try_reserve_page(2))
+        self.assertTrue(state.record_crawled_page(2))
+        self.assertFalse(state.try_reserve_page(2))
+        self.assertFalse(state.record_crawled_page(2))
+        self.assertEqual(state.stats['pages_crawled'], 2)
+        self.assertEqual(state.stats['pages_reserved'], 0)
 
 
 # ============================================================================
@@ -2126,23 +2138,36 @@ class TestMaxPagesWithWorkers(CrawlerTestCase):
             )
         return pages
 
-    def test_parallel_crawl_does_not_exceed_max_pages(self):
-        """13 workers + 500-page site + max_pages=500 must crawl exactly 500."""
-        site = self._site_pages(520)
+    def test_parallel_crawl_failures_do_not_open_extra_slots(self):
+        """Failed fetches free a slot; crawl still fills max_pages and never exceeds it."""
+        site = self._site_pages(30)
         mock_open = mock_urlopen_factory(site)
         crawler = self.create_crawler(
             workers=13,
-            max_pages=500,
+            max_pages=5,
             ignore_robots=True,
             delay=0,
         )
-        with patch('doc_search.crawler.fetcher.urlopen', mock_open), \
-             patch('urllib.request.urlopen', mock_open):
+
+        calls = {'n': 0}
+
+        def flaky(request, timeout=None, context=None):
+            url = request.full_url if hasattr(request, 'full_url') else str(request)
+            if url.rstrip('/').endswith('robots.txt'):
+                return mock_open(request, timeout=timeout, context=context)
+            calls['n'] += 1
+            # Fail some early fetches so the old code would release slots.
+            if calls['n'] in (1, 2, 4):
+                raise HTTPError(url, 500, 'Server Error', {}, None)
+            return mock_open(request, timeout=timeout, context=context)
+
+        with patch('doc_search.crawler.fetcher.urlopen', flaky), \
+             patch('urllib.request.urlopen', flaky):
             stats = crawler.crawl(resume=False)
 
-        self.assertEqual(stats['pages_crawled'], 500)
+        self.assertEqual(stats['pages_crawled'], 5)
         saved = list((self.data_dir / 'pages').glob('*.json'))
-        self.assertEqual(len(saved), 500)
+        self.assertEqual(len(saved), 5)
 
     def test_parallel_crawl_odd_workers_small_limit(self):
         """Odd worker count must not overshoot a small max_pages."""

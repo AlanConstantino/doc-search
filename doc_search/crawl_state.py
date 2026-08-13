@@ -198,27 +198,46 @@ class CrawlState:
             self.stats[stat] = self.stats.get(stat, 0) + value
 
     def try_reserve_page(self, max_pages: Optional[int]) -> bool:
-        """Reserve one page slot against max_pages, if a limit is set.
+        """Reserve one in-flight slot if crawled + in-flight is under the cap.
 
-        Parallel workers used to check ``pages_crawled`` only after a fetch
-        finished, so N in-flight workers could overshoot the user limit.
-        Reservations are counted as soon as a URL is taken from the queue.
+        ``pages_reserved`` is the number of fetches currently running, not
+        a lifetime attempt counter. Failures release the slot so the crawl
+        can keep going until ``pages_crawled`` hits max_pages.
         """
         if not max_pages:
             return True
         with self._lock:
-            reserved = self.stats.get('pages_reserved', 0)
-            if reserved >= max_pages:
+            crawled = self.stats.get('pages_crawled', 0)
+            in_flight = self.stats.get('pages_reserved', 0)
+            if crawled + in_flight >= max_pages:
                 return False
-            self.stats['pages_reserved'] = reserved + 1
+            self.stats['pages_reserved'] = in_flight + 1
             return True
 
     def release_page_reservation(self) -> None:
-        """Give back a reservation that did not produce a crawled page."""
+        """Free an in-flight slot (failed / skipped / discarded page)."""
         with self._lock:
-            reserved = self.stats.get('pages_reserved', 0)
-            if reserved > 0:
-                self.stats['pages_reserved'] = reserved - 1
+            in_flight = self.stats.get('pages_reserved', 0)
+            if in_flight > 0:
+                self.stats['pages_reserved'] = in_flight - 1
+
+    def record_crawled_page(self, max_pages: Optional[int] = None) -> bool:
+        """Count a successfully saved page, never past max_pages.
+
+        Consumes the in-flight reservation. Returns True if the page
+        was counted and should be kept.
+        """
+        with self._lock:
+            crawled = self.stats.get('pages_crawled', 0)
+            in_flight = self.stats.get('pages_reserved', 0)
+            if max_pages and crawled >= max_pages:
+                if in_flight > 0:
+                    self.stats['pages_reserved'] = in_flight - 1
+                return False
+            self.stats['pages_crawled'] = crawled + 1
+            if in_flight > 0:
+                self.stats['pages_reserved'] = in_flight - 1
+            return True
     
     def get_progress(self, max_pages: Optional[int] = None) -> str:
         """Get progress string (thread-safe)."""

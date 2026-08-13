@@ -260,7 +260,14 @@ class Crawler:
         Wrapper for backward compatibility - delegates to PageProcessor module.
         """
         self._processor.save_page(url, data)
-    
+
+    def _commit_crawled_page(self, url: str, page_data: dict) -> bool:
+        """Save and count a page only if it still fits under max_pages."""
+        if not self.state.record_crawled_page(self.max_pages):
+            return False
+        self._processor.save_page(url, page_data)
+        return True
+
     # -------------------------------------------------------------------------
     # URL filtering (delegates to UrlFilter)
     # -------------------------------------------------------------------------
@@ -394,12 +401,9 @@ class Crawler:
             link_filter=self._should_crawl,
         )
         
-        # Save page data
-        self._processor.save_page(url, result['page_data'])
-        
-        # Update stats
-        self.state.increment_stat('pages_crawled')
-        
+        if not self._commit_crawled_page(url, result['page_data']):
+            return None
+
         return result['links'] or _NO_LINKS
     
     def _process_document(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
@@ -451,10 +455,8 @@ class Crawler:
                 doc_metadata=result['metadata'],
                 headings=headings,
             )
-            self._processor.save_page(url, page_data)
-            
-            # Update stats
-            self.state.increment_stat('pages_crawled')
+            if not self._commit_crawled_page(url, page_data):
+                return None
             self.state.increment_stat('docs_extracted')
             self.state.increment_stat('docs_pdf')
             
@@ -504,10 +506,8 @@ class Crawler:
             doc_metadata=result['metadata'],
             headings=headings,
         )
-        self._processor.save_page(url, page_data)
-        
-        # Update stats
-        self.state.increment_stat('pages_crawled')
+        if not self._commit_crawled_page(url, page_data):
+            return None
         self.state.increment_stat('docs_extracted')
         self.state.increment_stat('docs_pdf')
         
@@ -583,9 +583,8 @@ class Crawler:
                 doc_type='docx',
                 headings=headings,
             )
-            self._processor.save_page(url, page_data)
-            
-            self.state.increment_stat('pages_crawled')
+            if not self._commit_crawled_page(url, page_data):
+                return None
             self.state.increment_stat('docs_extracted')
             self.state.increment_stat('docs_docx')
             
@@ -638,9 +637,8 @@ class Crawler:
                     doc_type='xlsx',
                     headings=doc.get('headings', []),
                 )
-                self._processor.save_page(doc.get('url', url), page_data)
-                
-                self.state.increment_stat('pages_crawled')
+                if not self._commit_crawled_page(doc.get('url', url), page_data):
+                    return None
                 self.state.increment_stat('docs_extracted')
                 self.state.increment_stat('docs_xlsx')
             
@@ -695,9 +693,8 @@ class Crawler:
                 doc_pages=metadata.get('total_slides', 0),
                 headings=headings,
             )
-            self._processor.save_page(url, page_data)
-            
-            self.state.increment_stat('pages_crawled')
+            if not self._commit_crawled_page(url, page_data):
+                return None
             self.state.increment_stat('docs_extracted')
             self.state.increment_stat('docs_pptx')
             
@@ -845,31 +842,25 @@ class Crawler:
         """Pop the next URL that we are allowed to fetch under max_pages.
 
         Returns (url, depth) or None when the queue is empty or the page
-        budget is exhausted. A reservation is taken *before* the fetch so
-        parallel workers cannot overshoot ``max_pages``.
+        budget is exhausted. A reservation is an in-flight slot and is
+        released unless the page is successfully counted.
         """
         while True:
-            if self.max_pages and not self.state.try_reserve_page(self.max_pages):
-                self._log(f"\nReached max pages limit: {self.max_pages}")
-                return None
-
             item = self.state.pop_url()
             if item is None:
-                if self.max_pages:
-                    self.state.release_page_reservation()
                 return None
 
             url, depth = item
             if self.state.is_visited(url):
-                if self.max_pages:
-                    self.state.release_page_reservation()
                 continue
 
             if not self._should_crawl(url, depth):
-                if self.max_pages:
-                    self.state.release_page_reservation()
                 self.state.increment_stat('pages_skipped')
                 continue
+
+            if self.max_pages and not self.state.try_reserve_page(self.max_pages):
+                self._log(f"\nReached max pages limit: {self.max_pages}")
+                return None
 
             return url, depth
 
@@ -931,7 +922,7 @@ class Crawler:
                         pending = bool(self.state.pending)
                         at_limit = (
                             self.max_pages
-                            and self.state.stats.get('pages_reserved', 0) >= self.max_pages
+                            and self.state.stats.get('pages_crawled', 0) >= self.max_pages
                         )
                     if not pending or at_limit:
                         break
