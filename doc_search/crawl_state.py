@@ -57,6 +57,7 @@ class CrawlState:
         self.errors: List[CrawlError] = []  # Structured error tracking
         self.stats = {
             'pages_crawled': 0,
+            'pages_reserved': 0,
             'pages_failed': 0,
             'pages_skipped': 0,
             'pages_unchanged': 0,
@@ -131,6 +132,7 @@ class CrawlState:
             self.errors.clear()
             self.stats = {
                 'pages_crawled': 0,
+                'pages_reserved': 0,
                 'pages_failed': 0,
                 'pages_skipped': 0,
                 'pages_unchanged': 0,
@@ -194,6 +196,29 @@ class CrawlState:
         """Increment a stat counter (thread-safe)."""
         with self._lock:
             self.stats[stat] = self.stats.get(stat, 0) + value
+
+    def try_reserve_page(self, max_pages: Optional[int]) -> bool:
+        """Reserve one page slot against max_pages, if a limit is set.
+
+        Parallel workers used to check ``pages_crawled`` only after a fetch
+        finished, so N in-flight workers could overshoot the user limit.
+        Reservations are counted as soon as a URL is taken from the queue.
+        """
+        if not max_pages:
+            return True
+        with self._lock:
+            reserved = self.stats.get('pages_reserved', 0)
+            if reserved >= max_pages:
+                return False
+            self.stats['pages_reserved'] = reserved + 1
+            return True
+
+    def release_page_reservation(self) -> None:
+        """Give back a reservation that did not produce a crawled page."""
+        with self._lock:
+            reserved = self.stats.get('pages_reserved', 0)
+            if reserved > 0:
+                self.stats['pages_reserved'] = reserved - 1
     
     def get_progress(self, max_pages: Optional[int] = None) -> str:
         """Get progress string (thread-safe)."""

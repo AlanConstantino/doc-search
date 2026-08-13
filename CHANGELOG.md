@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.7] - 2026-08-13
+
+### Fixed
+- **Crawl `--max-pages` with workers** — parallel crawls no longer overshoot the requested page cap. Each URL reserves a slot before fetch, so `--max-pages 1000 --workers 13` stops at exactly 1000 pages.
+
 ## [2.6.6] - 2026-08-13
 
 ### Fixed

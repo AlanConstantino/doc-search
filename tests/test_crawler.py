@@ -739,6 +739,30 @@ class TestCrawlState(CrawlerTestCase):
         # Should have 100 errors (5 threads × 20 errors each)
         self.assertEqual(len(state.get_errors()), 100)
 
+    def test_try_reserve_page_stops_at_limit(self):
+        """Reservations must not exceed max_pages."""
+        state = self.create_crawl_state()
+        self.assertTrue(state.try_reserve_page(2))
+        self.assertTrue(state.try_reserve_page(2))
+        self.assertFalse(state.try_reserve_page(2))
+        self.assertEqual(state.stats['pages_reserved'], 2)
+
+    def test_try_reserve_page_unlimited(self):
+        """No limit means every reservation succeeds."""
+        state = self.create_crawl_state()
+        self.assertTrue(state.try_reserve_page(None))
+        self.assertTrue(state.try_reserve_page(0))
+        self.assertEqual(state.stats.get('pages_reserved', 0), 0)
+
+    def test_release_page_reservation(self):
+        """Failed / skipped pages give the slot back."""
+        state = self.create_crawl_state()
+        self.assertTrue(state.try_reserve_page(1))
+        self.assertFalse(state.try_reserve_page(1))
+        state.release_page_reservation()
+        self.assertTrue(state.try_reserve_page(1))
+        self.assertEqual(state.stats['pages_reserved'], 1)
+
 
 # ============================================================================
 # CrawlError Tests
@@ -2078,7 +2102,67 @@ class TestCrawlerGetCrawledPages(CrawlerTestCase):
 # Placeholder for Additional Tests
 # ============================================================================
 
+class TestMaxPagesWithWorkers(CrawlerTestCase):
+    """max_pages must be a hard cap even with many parallel workers."""
+
+    def _site_pages(self, n: int) -> Dict[str, str]:
+        """Fully connected mock site with n HTML pages plus robots.txt."""
+        pages: Dict[str, str] = {
+            'https://example.com/robots.txt': 'User-agent: *\nAllow: /\n',
+        }
+        for i in range(n):
+            # Chain plus a small fan-out so workers stay busy without
+            # generating a fully-connected 500×500 link graph.
+            targets = {(i + k) % n for k in (1, 2, 3, 7)}
+            links = ''.join(
+                f'<a href="{"/" if j == 0 else f"/p{j}"}">Page {j}</a>'
+                for j in sorted(targets) if j != i
+            )
+            url = 'https://example.com/' if i == 0 else f'https://example.com/p{i}'
+            title = 'Home' if i == 0 else f'Page {i}'
+            pages[url] = (
+                f'<!DOCTYPE html><html><head><title>{title}</title></head>'
+                f'<body><h1>{title}</h1>{links}</body></html>'
+            )
+        return pages
+
+    def test_parallel_crawl_does_not_exceed_max_pages(self):
+        """13 workers + 500-page site + max_pages=500 must crawl exactly 500."""
+        site = self._site_pages(520)
+        mock_open = mock_urlopen_factory(site)
+        crawler = self.create_crawler(
+            workers=13,
+            max_pages=500,
+            ignore_robots=True,
+            delay=0,
+        )
+        with patch('doc_search.crawler.fetcher.urlopen', mock_open), \
+             patch('urllib.request.urlopen', mock_open):
+            stats = crawler.crawl(resume=False)
+
+        self.assertEqual(stats['pages_crawled'], 500)
+        saved = list((self.data_dir / 'pages').glob('*.json'))
+        self.assertEqual(len(saved), 500)
+
+    def test_parallel_crawl_odd_workers_small_limit(self):
+        """Odd worker count must not overshoot a small max_pages."""
+        site = self._site_pages(40)
+        mock_open = mock_urlopen_factory(site)
+        crawler = self.create_crawler(
+            workers=13,
+            max_pages=7,
+            ignore_robots=True,
+            delay=0,
+        )
+        with patch('doc_search.crawler.fetcher.urlopen', mock_open), \
+             patch('urllib.request.urlopen', mock_open):
+            stats = crawler.crawl(resume=False)
+
+        self.assertEqual(stats['pages_crawled'], 7)
+
+
 class TestCrawlerPlaceholder(CrawlerTestCase):
+
     """Placeholder tests - to be expanded in subsequent issues."""
     
     def test_crawler_instantiation(self):

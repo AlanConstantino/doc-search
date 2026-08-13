@@ -28,6 +28,10 @@ from .fetcher import Fetcher
 from .url_filter import UrlFilter
 from .processor import PageProcessor, build_document_data
 
+# Distinguishes "crawled, no links" from "skipped / failed" so a page
+# reservation is only released when the URL did not count toward max_pages.
+_NO_LINKS: List = []
+
 
 class Crawler:
     """
@@ -396,7 +400,7 @@ class Crawler:
         # Update stats
         self.state.increment_stat('pages_crawled')
         
-        return result['links']
+        return result['links'] or _NO_LINKS
     
     def _process_document(self, url: str, depth: int) -> Optional[List[Tuple[str, int]]]:
         """
@@ -456,7 +460,7 @@ class Crawler:
             
             headings_count = len(headings)
             self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
-            return []
+            return _NO_LINKS
         
         if path.endswith('.docx'):
             return self._process_docx_url(url, depth)
@@ -509,7 +513,7 @@ class Crawler:
         
         headings_count = len(headings)
         self._log(f"  Extracted {result['pages']} pages, {len(result['text'])} chars, {headings_count} headings")
-        return []
+        return _NO_LINKS
     
     def _download_to_temp(self, url: str, content_bytes: bytes = None, suffix: str = '') -> 'Path':
         """Download a URL to a temp file, or write bytes to one. Returns Path.
@@ -586,7 +590,7 @@ class Crawler:
             self.state.increment_stat('docs_docx')
             
             self._log(f"  Extracted {len(doc.get('text', ''))} chars, {len(headings)} headings")
-            return []
+            return _NO_LINKS
         finally:
             os.unlink(tmp_path)
     
@@ -641,7 +645,7 @@ class Crawler:
                 self.state.increment_stat('docs_xlsx')
             
             self._log(f"  Extracted {len(documents)} sheets")
-            return []
+            return _NO_LINKS
         finally:
             os.unlink(tmp_path)
     
@@ -699,7 +703,7 @@ class Crawler:
             
             slides = metadata.get('total_slides', '?')
             self._log(f"  Extracted {slides} slides, {len(doc.get('text', ''))} chars")
-            return []
+            return _NO_LINKS
         finally:
             os.unlink(tmp_path)
     
@@ -837,82 +841,102 @@ class Crawler:
         
         return stats
     
+    def _claim_next_url(self):
+        """Pop the next URL that we are allowed to fetch under max_pages.
+
+        Returns (url, depth) or None when the queue is empty or the page
+        budget is exhausted. A reservation is taken *before* the fetch so
+        parallel workers cannot overshoot ``max_pages``.
+        """
+        while True:
+            if self.max_pages and not self.state.try_reserve_page(self.max_pages):
+                self._log(f"\nReached max pages limit: {self.max_pages}")
+                return None
+
+            item = self.state.pop_url()
+            if item is None:
+                if self.max_pages:
+                    self.state.release_page_reservation()
+                return None
+
+            url, depth = item
+            if self.state.is_visited(url):
+                if self.max_pages:
+                    self.state.release_page_reservation()
+                continue
+
+            if not self._should_crawl(url, depth):
+                if self.max_pages:
+                    self.state.release_page_reservation()
+                self.state.increment_stat('pages_skipped')
+                continue
+
+            return url, depth
+
+    def _finish_page_reservation(self, new_urls):
+        """Enqueue discovered links; keep the reservation for counted pages."""
+        if new_urls:
+            self.state.add_urls(new_urls)
+        # Keep the slot when the page counted (links or the _NO_LINKS sentinel).
+        # Release it for failures (None) and skips/unchanged (a fresh []).
+        if self.max_pages and new_urls is not _NO_LINKS and not new_urls:
+            self.state.release_page_reservation()
+
     def _crawl_single_threaded(self):
         """Single-threaded crawl implementation."""
         pages_since_checkpoint = 0
-        
+
         while True:
             if self._stop_requested:
                 break
-            
-            with self.state._lock:
-                if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
-                    self._log(f"\nReached max pages limit: {self.max_pages}")
-                    break
-            
-            item = self.state.pop_url()
-            if item is None:
+
+            claimed = self._claim_next_url()
+            if claimed is None:
                 break
-            
-            url, depth = item
-            
-            if self.state.is_visited(url):
-                continue
-            
-            if not self._should_crawl(url, depth):
-                self.state.increment_stat('pages_skipped')
-                continue
-            
+
+            url, depth = claimed
             new_urls = self._process_page(url, depth)
-            
-            if new_urls:
-                self.state.add_urls(new_urls)
-            
+            self._finish_page_reservation(new_urls)
+
             pages_since_checkpoint += 1
             if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
                 self._log_checkpoint()
                 pages_since_checkpoint = 0
-    
+
     def _crawl_parallel(self):
         """Parallel crawl using ThreadPoolExecutor."""
         pages_since_checkpoint = 0
         active_futures = set()
-        
+
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
             while True:
                 if self._stop_requested:
                     break
-                
-                with self.state._lock:
-                    if self.max_pages and self.state.stats['pages_crawled'] >= self.max_pages:
-                        self._log(f"\nReached max pages limit: {self.max_pages}")
-                        break
-                
-                # Submit new tasks to keep workers busy
+
+                # Submit only while a page slot remains. Reservations are
+                # taken in _claim_next_url, so in-flight work cannot exceed
+                # max_pages even with an odd worker count.
                 while len(active_futures) < self.workers:
-                    item = self.state.pop_url()
-                    if item is None:
+                    claimed = self._claim_next_url()
+                    if claimed is None:
                         break
-                    
-                    url, depth = item
-                    
-                    if self.state.is_visited(url):
-                        continue
-                    
-                    if not self._should_crawl(url, depth):
-                        self.state.increment_stat('pages_skipped')
-                        continue
-                    
+
+                    url, depth = claimed
                     future = executor.submit(self._process_page, url, depth)
                     future.url_depth = (url, depth)
                     active_futures.add(future)
-                
+
                 if not active_futures:
                     with self.state._lock:
-                        if not self.state.pending:
-                            break
+                        pending = bool(self.state.pending)
+                        at_limit = (
+                            self.max_pages
+                            and self.state.stats.get('pages_reserved', 0) >= self.max_pages
+                        )
+                    if not pending or at_limit:
+                        break
                     continue
-                
+
                 # Wait for at least one task to complete
                 try:
                     done_futures = set()
@@ -920,25 +944,26 @@ class Crawler:
                         done_futures.add(future)
                         try:
                             new_urls = future.result()
-                            if new_urls:
-                                self.state.add_urls(new_urls)
+                            self._finish_page_reservation(new_urls)
                         except Exception as e:
                             self._log(f"  Worker error: {e}")
-                        
+                            if self.max_pages:
+                                self.state.release_page_reservation()
+
                         pages_since_checkpoint += 1
-                        
+
                         if pages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
                             self._log_checkpoint()
                             pages_since_checkpoint = 0
-                    
+
                     active_futures -= done_futures
-                    
+
                 except (TimeoutError, FuturesTimeoutError):
                     pass
-            
+
             for future in active_futures:
                 future.cancel()
-    
+
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------

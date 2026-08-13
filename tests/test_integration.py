@@ -532,7 +532,7 @@ class TestCrawlerConfiguration(unittest.TestCase):
         
         stats = crawler.crawl(resume=False)
         
-        self.assertLessEqual(stats['pages_crawled'], 2)
+        self.assertEqual(stats['pages_crawled'], 2)
     
     @patch('urllib.request.urlopen', mock_urlopen)
     @patch('doc_search.crawler.fetcher.urlopen', mock_urlopen)
