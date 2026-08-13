@@ -1461,6 +1461,17 @@ class TestServerSynonymsEnabled(ServerTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(self.engine._last_expand_synonyms, True)
 
+    def test_exact_match_quotes_query_and_disables_synonyms(self):
+        """Exact match must phrase-quote the query and pass expand_synonyms=False."""
+        self.engine.search_calls.clear()
+        status, headers, body = self.make_request('/?q=running+files&exact=1')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(self.engine._last_expand_synonyms, False)
+        self.assertTrue(self.engine.search_calls)
+        self.assertEqual(self.engine.search_calls[-1]['query'], '"running files"')
+        self.assertEqual(self.engine.search_calls[-1]['expand_synonyms'], False)
+
 
 class TestServerSynonymsDisabled(ServerTestCase):
     """Tests for server with synonyms disabled."""
@@ -1575,6 +1586,15 @@ class TestApiSearchEndpoint(ServerTestCase):
         data = json.loads(body)
         self.assertIn('page', data)
         self.assertIn('total_pages', data)
+
+    def test_api_search_exact_match_quotes_query(self):
+        """API exact=1 should wrap the query in quotes for phrase matching."""
+        self.engine.search_calls.clear()
+        status, headers, body = self.make_request('/api/search?q=running+files&exact=1')
+
+        self.assertEqual(status, 200)
+        self.assertTrue(self.engine.search_calls)
+        self.assertEqual(self.engine.search_calls[-1]['query'], '"running files"')
 
 
 class TestNoJavaScriptFlag(ServerTestCase):

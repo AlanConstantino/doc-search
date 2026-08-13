@@ -482,6 +482,34 @@ class SearchHandler(BaseHTTPRequestHandler):
         """Convert file:// URL to /files/ proxy URL for browser access."""
         return _file_url_to_serve_url(url)
 
+    def _prepare_search_query(self, query: str, exact_match: bool):
+        """Quote the query for phrase matching and decide synonym expansion.
+
+        Exact match is a phrase search on the surface form: wrap the query
+        in quotes (unless already quoted) and never expand synonyms.
+        """
+        search_query = query
+        if exact_match and not (query.startswith('"') and query.endswith('"')):
+            search_query = f'"{query}"'
+        expand_synonyms = self.enable_synonyms and not exact_match
+        return search_query, expand_synonyms
+
+    def _run_search(self, search_query: str, top_k: int, expand_synonyms: bool):
+        """Call engine.search, passing expand_synonyms only when supported."""
+        import inspect
+        search_fn = getattr(self.engine, 'search', None)
+        if search_fn is None:
+            return []
+        try:
+            sig = inspect.signature(search_fn)
+        except (TypeError, ValueError):
+            return search_fn(search_query, top_k=top_k)
+        if 'expand_synonyms' in sig.parameters:
+            return search_fn(
+                search_query, top_k=top_k, expand_synonyms=expand_synonyms
+            )
+        return search_fn(search_query, top_k=top_k)
+
     def do_GET(self):
         """Handle GET requests."""
         try:
@@ -493,8 +521,6 @@ class SearchHandler(BaseHTTPRequestHandler):
 
     def _handle_get(self):
         """Internal GET handler."""
-        import inspect
-        
         parsed = urllib.parse.urlparse(self.path)
         
         # Handle /health endpoint
@@ -561,23 +587,8 @@ class SearchHandler(BaseHTTPRequestHandler):
             # Perform search - fetch enough for pagination
             search_start = time.perf_counter()
             
-            # For exact match, wrap query in quotes for phrase matching
-            # (unless it's already quoted)
-            search_query = query
-            if exact_match and not (query.startswith('"') and query.endswith('"')):
-                search_query = f'"{query}"'
-            
-            # Pass expand_synonyms if enabled and engine supports it
-            # Exact match disables synonym expansion
-            use_synonyms = self.enable_synonyms and not exact_match
-            if use_synonyms and hasattr(self.engine, 'search'):
-                sig = inspect.signature(self.engine.search)
-                if 'expand_synonyms' in sig.parameters:
-                    all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
-                else:
-                    all_results = self.engine.search(search_query, top_k=max_results)
-            else:
-                all_results = self.engine.search(search_query, top_k=max_results)
+            search_query, expand_synonyms = self._prepare_search_query(query, exact_match)
+            all_results = self._run_search(search_query, max_results, expand_synonyms)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
 
             # Get facet counts before filtering (for accurate counts)
@@ -759,8 +770,6 @@ class SearchHandler(BaseHTTPRequestHandler):
             exact: 1 for exact match
             sort: relevance or date
         """
-        import inspect
-        
         query_params = urllib.parse.parse_qs(query_string)
         
         # Get search query
@@ -812,21 +821,8 @@ class SearchHandler(BaseHTTPRequestHandler):
             # Perform search
             search_start = time.perf_counter()
             
-            # For exact match, wrap query in quotes
-            search_query = query
-            if exact_match and not (query.startswith('"') and query.endswith('"')):
-                search_query = f'"{query}"'
-            
-            # Pass expand_synonyms if enabled
-            use_synonyms = self.enable_synonyms and not exact_match
-            if use_synonyms and hasattr(self.engine, 'search'):
-                sig = inspect.signature(self.engine.search)
-                if 'expand_synonyms' in sig.parameters:
-                    all_results = self.engine.search(search_query, top_k=max_results, expand_synonyms=True)
-                else:
-                    all_results = self.engine.search(search_query, top_k=max_results)
-            else:
-                all_results = self.engine.search(search_query, top_k=max_results)
+            search_query, expand_synonyms = self._prepare_search_query(query, exact_match)
+            all_results = self._run_search(search_query, max_results, expand_synonyms)
             elapsed_ms = (time.perf_counter() - search_start) * 1000
 
             # Get facet counts with cross-filtering

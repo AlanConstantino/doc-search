@@ -725,6 +725,40 @@ class TestSearchEngineFeatures(unittest.TestCase):
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_exact_phrase_rejects_stemmed_near_match(self):
+        """Quoted / exact-match search must not accept stemmed bigrams."""
+        self.index.add_document(
+            doc_id=4,
+            url='https://example.com/running-files',
+            title='Running Files Guide',
+            text='This document is about running files in production.',
+            description='running files'
+        )
+        self.index.add_document(
+            doc_id=5,
+            url='https://example.com/run-a-file',
+            title='How to run a file',
+            text='You can run a file from the command line.',
+            description='run a file'
+        )
+        self.index.add_document(
+            doc_id=6,
+            url='https://example.com/separate',
+            title='Separate mentions',
+            text='After running the tests, check the files in the output directory.',
+            description='separate'
+        )
+
+        engine = SearchEngine(self.index)
+        bag = engine.search('running files', top_k=10, snippet_length=0)
+        bag_urls = {r['url'] for r in bag}
+        self.assertIn('https://example.com/running-files', bag_urls)
+        self.assertIn('https://example.com/run-a-file', bag_urls)
+
+        exact = engine.search('"running files"', top_k=10, snippet_length=0)
+        exact_urls = {r['url'] for r in exact}
+        self.assertEqual(exact_urls, {'https://example.com/running-files'})
+
 
 class TestIndexStats(unittest.TestCase):
     """Test index statistics and metadata."""

@@ -48,6 +48,20 @@ class TestParseQuery(unittest.TestCase):
         self.assertEqual(terms, [])
         self.assertEqual(phrases, [])
 
+    def test_quoted_phrase_keeps_stopwords(self):
+        """Exact phrases must keep glue words the analyzer would otherwise drop."""
+        terms, phrases = parse_query('"list of lists"')
+        self.assertEqual(terms, [])
+        self.assertEqual(phrases, [['list', 'of', 'lists']])
+
+    def test_quoted_phrase_keeps_surface_form(self):
+        """Quoted phrases stay unstemmed and unsplit."""
+        terms, phrases = parse_query('"running files"')
+        self.assertEqual(terms, [])
+        self.assertEqual(phrases, [['running', 'files']])
+        terms, phrases = parse_query('"HTTPResponse"')
+        self.assertEqual(phrases, [['httpresponse']])
+
 
 class TestPhraseMatch(unittest.TestCase):
     """Tests for phrase matching."""
@@ -95,6 +109,17 @@ class TestPhraseMatch(unittest.TestCase):
         """Newline between words should still match."""
         text = 'quick\nbrown fox'
         self.assertTrue(check_phrase_match(text, ['quick', 'brown']))
+
+    def test_phrase_does_not_match_stemmed_variant(self):
+        """Stemmed near-matches are not exact phrases."""
+        self.assertFalse(check_phrase_match(
+            'You can run a file from the command line.',
+            ['running', 'files'],
+        ))
+        self.assertTrue(check_phrase_match(
+            'This document is about running files in production.',
+            ['running', 'files'],
+        ))
 
 
 class TestHighlightTerms(unittest.TestCase):

@@ -12,7 +12,7 @@ from threading import Lock
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .indexer import BM25Index
-from .utils import tokenize
+from .utils import tokenize, tokenize_phrase
 from .spellcheck import SpellChecker
 from .facets import FacetIndex
 from .synonyms import SynonymExpander
@@ -367,12 +367,12 @@ def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
     """
     phrases = []
     
-    # Extract quoted phrases
+    # Extract quoted phrases as literal surface tokens (keep stopwords,
+    # no stemming / CamelCase split) so exact-match can require them.
     phrase_pattern = r'"([^"]+)"'
     for match in re.finditer(phrase_pattern, query):
         phrase_text = match.group(1)
-        # Tokenize phrase but preserve order
-        phrase_words = tokenize(phrase_text)
+        phrase_words = tokenize_phrase(phrase_text)
         if phrase_words:
             phrases.append(phrase_words)
     
@@ -398,6 +398,31 @@ def parse_query(query: str) -> Tuple[List[str], List[List[str]]]:
     terms.extend(wildcards)
     
     return terms, phrases
+
+
+def document_has_phrases(
+    phrases: List[List[str]],
+    *,
+    title: str = "",
+    page_text: Optional[str] = None,
+) -> bool:
+    """True if every phrase appears as consecutive unstemmed words.
+
+    Used by the UI 'Exact match' toggle (quoted queries). Stemmed bigrams
+    are a recall shortcut and must not satisfy this check — otherwise
+    ``"running files"`` would also match ``run a file``.
+    """
+    if not phrases:
+        return True
+    for phrase in phrases:
+        if not phrase:
+            continue
+        if check_phrase_match(title or "", phrase):
+            continue
+        if page_text and check_phrase_match(page_text, phrase):
+            continue
+        return False
+    return True
 
 
 def find_phrase_positions(text: str, phrase_words: List[str]) -> List[int]:
@@ -687,22 +712,11 @@ class SearchEngine:
             if phrases or snippet_length > 0:
                 page_text = self._load_page_text(r['url'])
 
-            # Phrase filter: bigrams first (no disk), then text fallback
-            if phrases:
-                all_phrases_found = True
-                for phrase in phrases:
-                    ok = False
-                    if hasattr(self.index, 'has_phrase_bigrams'):
-                        ok = self.index.has_phrase_bigrams(phrase, r['url'])
-                    if not ok and page_text:
-                        ok = check_phrase_match(page_text, phrase) or check_phrase_match(r.get('title', ''), phrase)
-                    if not ok and not page_text:
-                        ok = check_phrase_match(r.get('title', ''), phrase)
-                    if not ok:
-                        all_phrases_found = False
-                        break
-                if not all_phrases_found:
-                    continue
+            # Phrase filter: require consecutive unstemmed words
+            if phrases and not document_has_phrases(
+                phrases, title=r.get('title', ''), page_text=page_text
+            ):
+                continue
 
             snippet = self._make_snippet(
                 r,
@@ -1431,21 +1445,10 @@ class EnhancedSearchEngine(SearchEngine):
             if phrases or snippet_length > 0:
                 page_text = self._load_page_text(r['url'])
 
-            if phrases:
-                all_phrases_found = True
-                for phrase in phrases:
-                    ok = False
-                    if hasattr(self.index, 'has_phrase_bigrams'):
-                        ok = self.index.has_phrase_bigrams(phrase, r['url'])
-                    if not ok and page_text:
-                        ok = check_phrase_match(page_text, phrase) or check_phrase_match(r.get('title', ''), phrase)
-                    if not ok and not page_text:
-                        ok = check_phrase_match(r.get('title', ''), phrase)
-                    if not ok:
-                        all_phrases_found = False
-                        break
-                if not all_phrases_found:
-                    continue
+            if phrases and not document_has_phrases(
+                phrases, title=r.get('title', ''), page_text=page_text
+            ):
+                continue
 
             snippet = self._make_snippet(
                 r,

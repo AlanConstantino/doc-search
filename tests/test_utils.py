@@ -6,7 +6,7 @@ import base64
 import ssl
 import unittest
 from doc_search.utils import (
-    normalize_url, tokenize, is_valid_url, get_domain,
+    normalize_url, tokenize, tokenize_phrase, is_valid_url, get_domain,
     hash_string, url_to_filename, site_hash, make_basic_auth_header,
     create_permissive_ssl_context
 )
@@ -121,6 +121,12 @@ class TestTokenize(unittest.TestCase):
         tokens = tokenize("the quick brown fox")
         self.assertNotIn("the", tokens)
         self.assertIn("quick", tokens)
+
+    def test_tokenize_phrase_keeps_stopwords_and_surface_form(self):
+        """Quoted/exact phrases keep glue words and do not stem or split."""
+        self.assertEqual(tokenize_phrase("list of lists"), ["list", "of", "lists"])
+        self.assertEqual(tokenize_phrase("running files"), ["running", "files"])
+        self.assertEqual(tokenize_phrase("HTTPResponse"), ["httpresponse"])
     
     def test_removes_short_words(self):
         """Should remove single-character words."""

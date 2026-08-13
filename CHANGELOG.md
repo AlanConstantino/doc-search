@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-08-13
+
+### Fixed
+- **Web UI exact match** — the checkbox now requires the query words as typed, in order. Stemmed near-matches (`running files` ≠ `run a file`) and synonym expansion no longer sneak through.
+
 ## [2.6.5] - 2026-08-13
 
 ### Fixed

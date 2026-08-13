@@ -641,6 +641,28 @@ def _maybe_stem(token: str, stem_fn) -> str:
     return stem_fn(token)
 
 
+# Literal phrase tokens: keep stopwords and the surface form (no CamelCase split).
+_PHRASE_TOKEN_RE = re.compile(
+    r'0[xX][0-9A-Fa-f]+'
+    r'|\d+(?:\.\d+)+'
+    r'|\d+[A-Za-z][A-Za-z0-9_]*'
+    r'|[A-Za-z][A-Za-z0-9_]*'
+    r'|\d+'
+)
+
+
+def tokenize_phrase(text: str) -> list:
+    """Tokenize a quoted / exact-match phrase as the user typed it.
+
+    Unlike ``tokenize()``, this keeps stopwords, 1-character words, and
+    CamelCase identifiers intact, and never stems. That way
+    ``"list of lists"`` and ``"HTTPResponse"`` can match literally.
+    """
+    if not text:
+        return []
+    return [m.group(0).lower() for m in _PHRASE_TOKEN_RE.finditer(text)]
+
+
 def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
