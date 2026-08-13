@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.5] - 2026-08-13
+
+### Fixed
+- **Number search** — queries like `1234` now match spaced and glued forms (`ticket 1234`, `ticket1234`); versions (`3.12`), thousands (`1,234`), hex (`0x1234`), and digit-leading tokens (`3d`, `7zip`) are indexed. Reindex with `--full`.
+
 ## [2.6.4] - 2026-08-13
 
 ### Added

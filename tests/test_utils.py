@@ -164,6 +164,40 @@ class TestTokenize(unittest.TestCase):
         self.assertIn("2024", tokens)
         self.assertIn("7", tokens)
 
+    def test_splits_glued_alphanumerics(self):
+        """ticket1234 should be searchable as 1234 and as ticket1234."""
+        tokens = tokenize("ticket1234")
+        self.assertIn("1234", tokens)
+        self.assertIn("ticket", tokens)
+        self.assertIn("ticket1234", tokens)
+
+    def test_digit_leading_tokens(self):
+        """Tokens that start with a digit must stay searchable."""
+        cases = {
+            "3d": ["3d", "3"],
+            "7zip": ["7zip", "7", "zip"],
+            "64bit": ["64bit", "64", "bit"],
+            "404page": ["404page", "404", "page"],
+        }
+        for query, expected in cases.items():
+            tokens = tokenize(query)
+            for term in expected:
+                self.assertIn(term, tokens, msg=f"{query!r} missing {term!r}: {tokens}")
+
+    def test_versions_and_hex(self):
+        """Versions, thousands separators, and hex should be kept as tokens."""
+        self.assertIn("3.12", tokenize("Python 3.12"))
+        self.assertIn("2.6.3", tokenize("v2.6.3"))
+        self.assertIn("12345", tokenize("12,345"))
+        self.assertIn("0x1234", tokenize("mask 0x1234"))
+        self.assertIn("1234", tokenize("mask 0x1234"))
+
+    def test_number_query_repeats_keep_tf(self):
+        """Repeated numbers must not be collapsed (BM25 tf)."""
+        tokens = tokenize("ticket 1234 ticket 1234")
+        self.assertEqual(tokens.count("1234"), 2)
+        self.assertEqual(tokens.count("ticket"), 2)
+
 
 class TestGetDomain(unittest.TestCase):
     """Tests for domain extraction."""

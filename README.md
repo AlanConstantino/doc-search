@@ -340,7 +340,7 @@ python -m pytest tests/test_crawler.py
 
 ## Limitations
 
-- **English only** — Tokenization assumes space-separated words
+- **English only** — Tokenization assumes space-separated words (numbers, versions, and glued IDs like `ticket1234` are kept)
 - **In-memory index** — Index loads into RAM (~10-50MB for 15K pages)
 - **Static HTML only** — No JavaScript rendering (SPAs won't work)
 

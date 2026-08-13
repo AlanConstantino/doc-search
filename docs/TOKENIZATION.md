@@ -9,7 +9,7 @@ When you crawl a website and build a search index, text goes through a **tokeniz
 ## The Tokenization Pipeline
 
 ```
-Raw Text → Lowercase → Word Extraction → Stop Word Removal → Short Word Filtering → [Optional Stemming]
+Raw Text → Structured Numbers → Word Extraction → Code Splits → Stop Word Removal → [Optional Stemming]
 ```
 
 ### 1. Case Normalization
@@ -24,70 +24,51 @@ This ensures searches are case-insensitive: searching for "Python", "PYTHON", or
 
 ### 2. Word Extraction
 
-Words are extracted using a regex pattern that matches:
-- Must **start with a letter** (a-z)
-- Can contain **letters, digits, or underscores** after the first character
+Words are extracted with a code-aware scanner that keeps:
 
-**Pattern:** `[a-z][a-z0-9_]*`
+- Letter-leading identifiers (`python`, `my_function`, `html5`)
+- Digit-leading tokens (`3d`, `7zip`, `64bit`)
+- Pure numbers (`1234`, `404`, `7`)
+- Structured forms: versions (`3.12`, `2.6.3`), thousands (`1,234` → `1234`), hex (`0x1234`)
 
-**Examples:**
+Glued alphanumerics are split **and** kept whole:
 
-| Input | Extracted Words |
-|-------|-----------------|
-| `"hello world"` | `['hello', 'world']` |
-| `"Python3.9"` | `['python3']` |
-| `"my_function()"` | `['my_function']` |
-| `"version 2.0"` | `['version']` |
-| `"$100 price"` | `['price']` |
-| `"123abc"` | `['abc']` |
+| Input | Tokens |
+|-------|--------|
+| `"hello world"` | `hello`, `world` |
+| `"ticket1234"` | `ticket`, `1234`, `ticket1234` |
+| `"Python 3.12"` | `python`, `3.12`, `3`, `12` |
+| `"mask 0x1234"` | `mask`, `0x1234`, `1234` |
+| `"3d model"` | `3d`, `3`, `model` |
+| `"my_function()"` | `my`, `function`, `my_function` |
+| `"os.path.join"` | `os`, `path`, `join` |
 
-**What gets filtered:**
-- Pure numbers (`123`, `2.0`)
-- Symbols and punctuation
-- Words starting with numbers
-- Non-ASCII characters (é, ñ, 中文)
+**Still filtered:**
+- Stop words (`the`, `a`, …)
+- Single letters (`x`, `y`) — single digits are kept
+- Bare symbols (`@`, `#`, `$`)
+- Non-ASCII letters (é, ñ, 中文)
 
 ### 3. Stop Word Removal
 
 Common English words that appear in almost every document are removed. These words don't help distinguish between documents.
 
-**Full Stop Word List (125 words):**
-
-| Category | Words |
-|----------|-------|
-| **Articles** | a, an, the |
-| **Prepositions** | about, above, after, against, at, before, below, between, by, down, during, for, from, in, into, of, off, on, once, out, over, through, to, under, until, up, with |
-| **Conjunctions** | and, as, but, if, nor, or, so, than, that, then, which |
-| **Pronouns** | he, her, him, his, i, it, its, me, my, our, she, their, them, they, us, we, who, you, your |
-| **Auxiliary Verbs** | am, are, be, been, being, did, do, does, doing, had, has, have, is, was, were |
-| **Modal Verbs** | can, could, might, must, shall, should, will, would |
-| **Adverbs** | again, also, else, ever, here, how, just, now, only, same, there, too, very, when, where, why |
-| **Quantifiers** | all, any, both, each, every, few, more, most, no, not, other, some, such |
+Programming keywords that are also English glue are **kept** so queries like `async with` stay multi-term: `and`, `or`, `not`, `if`, `else`, `for`, `from`, `with`, `as`, `in`, `on`, `to`, `by`, `at`, `is`.
 
 ### 4. Short Word Filtering
 
-Single-character tokens are removed since they're typically not meaningful for search:
-- Most single letters are already stop words (`a`, `i`)
-- Remaining single letters are usually noise from tokenization
-
-**Example:**
-```
-"A B C test" → ['test']
-```
+Single-character **letters** are removed. Single **digits** are kept so `PEP 8` and chapter `8` remain searchable.
 
 ### 5. Optional Stemming
 
-When enabled, words are reduced to their root form using the **Porter Stemming Algorithm**.
+When enabled, alphabetic words are reduced to their root form using the **Porter Stemming Algorithm**. Numeric tokens, versions, and hex are never stemmed.
 
 | Original | Stemmed |
 |----------|---------|
 | running | run |
 | files | file |
-| programming | program |
-| caresses | caress |
-| agreed | agre |
-
-Stemming helps match related word forms but can occasionally produce unexpected results.
+| ticket1234 | ticket1234 |
+| 3.12 | 3.12 |
 
 ## Impact on Search
 
@@ -95,14 +76,15 @@ Stemming helps match related word forms but can occasionally produce unexpected 
 
 ✅ **Regular words:** `python`, `programming`, `tutorial`  
 ✅ **Technical terms:** `numpy`, `django`, `api`  
-✅ **Mixed alphanumeric:** `python3`, `html5`, `oauth2`  
-✅ **Underscored terms:** `my_function`, `user_id`  
+✅ **Numbers:** `1234`, `404`, `2024`  
+✅ **Glued IDs:** `ticket1234` or just `1234`  
+✅ **Versions / hex:** `3.12`, `0x1234`  
+✅ **Digit-leading tokens:** `3d`, `7zip`, `64bit`  
 ✅ **Quoted phrases:** `"machine learning"` (matches exact sequence)
 
 ### What Won't Work
 
-❌ **Stop words alone:** Searching for "the" or "and" returns no results  
-❌ **Pure numbers:** Searching for `404` or `2024` won't match  
+❌ **Stop words alone:** Searching for "the" returns no results  
 ❌ **Symbols:** `@`, `#`, `$` are stripped  
 ❌ **Single letters:** `x`, `y`, `z` are filtered out
 
@@ -110,20 +92,19 @@ Stemming helps match related word forms but can occasionally produce unexpected 
 
 1. **Use specific terms:** Instead of "the python", search for "python"
 2. **Use phrases:** `"web server"` matches those words in sequence
-3. **Technical terms work well:** API names, function names, etc. are preserved
-4. **Skip common words:** Don't include "the", "a", "is" in your queries
+3. **Numbers work:** `1234` finds both `ticket 1234` and `ticket1234`
+4. **Reindex after tokenizer changes:** `python -m doc_search index <url> --full`
 
 ## Customization
 
 To modify tokenization behavior, edit `doc_search/utils.py`:
 
 - **Add/remove stop words:** Edit the `STOP_WORDS` frozenset
-- **Change word pattern:** Modify the regex in `tokenize()`
-- **Disable short word filtering:** Remove `len(w) > 1` check
+- **Change word pattern:** Modify the scanner in `_raw_tokens()`
 
 After changes, rebuild your index:
 ```bash
-python -m doc_search index <url>
+python -m doc_search index <url> --full
 ```
 
 ## Technical Details

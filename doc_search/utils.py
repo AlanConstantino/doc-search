@@ -525,68 +525,135 @@ STOP_WORDS = frozenset([
 
 
 
-# Pre-compiled regex pattern for tokenization (avoids repeated compilation)
-# Matches words that start with a letter, plus pure numeric tokens.
-_WORD_PATTERN = re.compile(r'\b(?:[a-z][a-z0-9_]*|\d+)\b')
-
 # Code-aware splits: CamelCase, snake_case, dotted identifiers
 _CAMEL_1 = re.compile(r'([a-z0-9])([A-Z])')
 _CAMEL_2 = re.compile(r'([A-Z]+)([A-Z][a-z])')
 _DOTTED_ID = re.compile(r'\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b')
 
+# Letter↔digit boundaries inside identifiers (ticket1234, 64bit, html5)
+_LETTER_DIGIT = re.compile(r'([A-Za-z])(\d)')
+_DIGIT_LETTER = re.compile(r'(\d)([A-Za-z])')
+
+# Keep structured numeric forms as a single token in addition to parts:
+# versions (3.12, 2.6.3), thousands (1,234), hex (0x1234).
+_VERSION_RE = re.compile(r'(?<![0-9])\d+(?:\.\d+){1,4}\b')
+_COMMA_NUM_RE = re.compile(r'\b\d{1,3}(?:,\d{3})+\b')
+_HEX_RE = re.compile(r'\b0[xX][0-9A-Fa-f]+\b')
+
+
+def _keep_token(token: str) -> bool:
+    """True if token is worth indexing / querying."""
+    if not token or token in STOP_WORDS:
+        return False
+    return len(token) > 1 or token.isdigit()
+
+
+def _split_alnum_parts(token: str) -> list:
+    """Split letter/digit runs so ticket1234 → ticket + 1234."""
+    if not token:
+        return []
+    s = _LETTER_DIGIT.sub(r'\1\n\2', token)
+    s = _DIGIT_LETTER.sub(r'\1\n\2', s)
+    return [p for p in s.split('\n') if p]
+
 
 def _split_code_token(token: str) -> list:
-    """Split a single CamelCase / snake_case token into parts (lowercased)."""
+    """Split a single CamelCase / snake_case / alphanum token into parts (lowercased)."""
     if '_' in token:
-        parts = token.split('_')
+        chunks = token.split('_')
     else:
         s = _CAMEL_2.sub(r'\1\n\2', token)
         s = _CAMEL_1.sub(r'\1\n\2', s)
-        parts = s.split('\n')
+        chunks = s.split('\n')
     out = []
-    for p in parts:
-        p = p.lower()
-        if p and (len(p) > 1 or p.isdigit()) and p not in STOP_WORDS:
-            out.append(p)
+    for chunk in chunks:
+        for p in _split_alnum_parts(chunk):
+            p = p.lower()
+            if _keep_token(p):
+                out.append(p)
     return out or ([token.lower()] if token else [])
+
+
+def _add_token(tokens: list, token: str) -> None:
+    if _keep_token(token):
+        tokens.append(token)
 
 
 def _raw_tokens(text: str) -> list:
     """Extract raw lowercase tokens with code-aware splitting (no stemming)."""
     if not text:
         return []
+
+    tokens: list = []
+
+    # Structured numeric forms first (before dotted-id rewrite eats the dots).
+    # Lookbehind on versions lets v2.6.3 / python3.12 yield the version as one token.
+    for m in _HEX_RE.finditer(text):
+        whole = m.group(0).lower()
+        _add_token(tokens, whole)
+        payload = whole[2:]
+        if len(payload) >= 2:
+            _add_token(tokens, payload)
+    for m in _VERSION_RE.finditer(text):
+        _add_token(tokens, m.group(0))
+    for m in _COMMA_NUM_RE.finditer(text):
+        _add_token(tokens, m.group(0).replace(',', ''))
+
     # Dotted identifiers → spaces (os.path.join → os path join)
     expanded = _DOTTED_ID.sub(lambda m: m.group(0).replace('.', ' '), text)
-    tokens = []
-    for m in re.finditer(r'\b[A-Za-z][A-Za-z0-9_]*\b|\b\d+\b', expanded):
+    for m in re.finditer(r'\b[A-Za-z][A-Za-z0-9_]*\b|\b\d+[A-Za-z][A-Za-z0-9_]*\b|\b\d+\b', expanded):
         raw = m.group(0)
-        if raw.isdigit():
-            tokens.append(raw)
+        # Whole hex already emitted (0x1234 + payload); skip 0x… fragments.
+        if raw.lower().startswith('0x'):
             continue
-        if any(c.isupper() for c in raw[1:]) or '_' in raw:
-            tokens.extend(_split_code_token(raw))
-            # also keep full lower form when useful (httpServer → httpserver)
+        if raw.isdigit():
+            _add_token(tokens, raw)
+            continue
+        mixed = (
+            any(c.isupper() for c in raw[1:])
+            or '_' in raw
+            or any(c.isdigit() for c in raw)
+        )
+        if mixed:
+            for part in _split_code_token(raw):
+                _add_token(tokens, part)
             full = raw.lower()
-            if len(full) > 2 and full not in STOP_WORDS and full not in tokens:
-                tokens.append(full)
+            # Keep full form for CamelCase / snake_case / alphanum (3d, html5)
+            if len(full) > 2 or (len(full) >= 2 and any(c.isdigit() for c in full)):
+                _add_token(tokens, full)
         else:
-            w = raw.lower()
-            if (len(w) > 1 or w.isdigit()) and w not in STOP_WORDS:
-                tokens.append(w)
+            _add_token(tokens, raw.lower())
     return tokens
+
+
+def _looks_numeric(token: str) -> bool:
+    """True for digits, versions, hex, or other tokens Porter stemming would mangle."""
+    if not token:
+        return False
+    if token[0].isdigit() or token.startswith('0x'):
+        return True
+    return any(c.isdigit() for c in token) and not token.isalpha()
+
+
+def _maybe_stem(token: str, stem_fn) -> str:
+    if _looks_numeric(token):
+        return token
+    return stem_fn(token)
 
 
 def tokenize(text: str, apply_stemming: bool = False) -> list:
     """
     Tokenize text into lowercase words for indexing and search.
 
-    Code-aware: splits CamelCase, snake_case, and dotted.ids.
-    Optional Porter stemming when apply_stemming=True.
+    Code-aware: splits CamelCase, snake_case, dotted.ids, and glued
+    alphanumerics (ticket1234 → ticket + 1234). Keeps versions (3.12),
+    hex (0x1234), and digit-leading tokens (3d, 7zip).
+    Optional Porter stemming when apply_stemming=True (skipped for numeric tokens).
     """
     tokens = _raw_tokens(text)
     if apply_stemming:
         from .stemmer import stem
-        tokens = [stem(t) for t in tokens]
+        tokens = [_maybe_stem(t, stem) for t in tokens]
     return tokens
 
 
@@ -595,12 +662,13 @@ def tokenize_with_exact(text: str, apply_stemming: bool = True):
     Return (stemmed_tokens, exact_tokens).
 
     Stemmed forms power recall; exact (unstemmed) forms power match bonus.
+    Numeric / version / hex tokens are never stemmed.
     """
     exact = _raw_tokens(text)
     if not apply_stemming:
         return list(exact), list(exact)
     from .stemmer import stem
-    stemmed = [stem(t) for t in exact]
+    stemmed = [_maybe_stem(t, stem) for t in exact]
     return stemmed, exact
 
 

@@ -164,6 +164,54 @@ class TestBM25IndexNumericSearch(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['url'], 'https://example.com/release-notes')
 
+    def test_number_only_query_matches_glued_identifier(self):
+        """Searching 1234 should hit both 'ticket 1234' and 'ticket1234'."""
+        index = BM25Index()
+        index.add_document(
+            doc_id=0,
+            url='https://example.com/spaced',
+            title='Spaced ticket',
+            text='The record id is ticket 1234 in the database.',
+        )
+        index.add_document(
+            doc_id=1,
+            url='https://example.com/glued',
+            title='Glued ticket',
+            text='The record id is ticket1234 in the database.',
+        )
+        index.add_document(
+            doc_id=2,
+            url='https://example.com/unrelated',
+            title='Unrelated',
+            text='No identifiers here, just prose.',
+        )
+        index.rebuild_idf_cache()
+
+        urls = {r['url'] for r in index.search('1234', top_k=10)}
+        self.assertIn('https://example.com/spaced', urls)
+        self.assertIn('https://example.com/glued', urls)
+        self.assertNotIn('https://example.com/unrelated', urls)
+
+    def test_version_query_keeps_dotted_form(self):
+        """A 3.12 query should match a page about Python 3.12."""
+        index = BM25Index()
+        index.add_document(
+            doc_id=0,
+            url='https://example.com/312',
+            title='Python 3.12',
+            text="What's new in Python 3.12.",
+        )
+        index.add_document(
+            doc_id=1,
+            url='https://example.com/other',
+            title='Other',
+            text='Unrelated chapter about exceptions.',
+        )
+        index.rebuild_idf_cache()
+        top = index.search('3.12', top_k=1)
+        self.assertTrue(top)
+        self.assertEqual(top[0]['url'], 'https://example.com/312')
+
 
 
 class TestIndustryIndexPath(unittest.TestCase):
