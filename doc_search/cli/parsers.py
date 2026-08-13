@@ -44,6 +44,16 @@ Examples:
     )
     
     parser.add_argument('--version', action='version', version=f'doc_search {__version__}')
+    parser.add_argument(
+        '--config',
+        metavar='PATH',
+        default=None,
+        help=(
+            'Path to doc_search JSON config file '
+            '(default: ./doc_search.json, package-root doc_search.json, '
+            'or ~/.doc_search/config.json)'
+        ),
+    )
     
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
@@ -116,9 +126,9 @@ def _add_index_parser(subparsers):
     index_parser.add_argument('--no-stemming', action='store_true',
                              help='Disable Porter stemming')
     index_parser.add_argument('--no-symspell', action='store_true',
-                             help='Skip building SymSpell index for suggestions')
+                             help='Skip building SymSpell index and remove any existing fuzzy index')
     index_parser.add_argument('--no-ngram', action='store_true',
-                             help='Skip building n-gram index for prefix/substring search')
+                             help='Skip building n-gram index and remove any existing ngram index')
     index_parser.add_argument('--separate-paths', action='store_true',
                              help='Use if site was crawled with --separate-paths')
     index_parser.add_argument('--parser', choices=['dom', 'stream'], default='dom',
@@ -134,7 +144,7 @@ def _add_index_parser(subparsers):
     index_parser.add_argument('--full', action='store_true',
                              help='Force a complete rebuild (skip incremental)')
     index_parser.add_argument('--no-suggestions', action='store_true',
-                             help='Skip building content suggestion index')
+                             help='Skip building content suggestion index and remove any existing one')
     index_parser.add_argument('--suggest-max-words', type=int, default=3,
                              help='Maximum words per suggestion phrase (default: 3, min: 1)')
     index_parser.add_argument('--quiet', '-q', action='store_true',
@@ -169,6 +179,29 @@ def _add_index_files_parser(subparsers):
                                     help='Force re-index all files (ignore cache)')
     index_files_parser.add_argument('--clean', action='store_true',
                                     help='Remove documents for deleted source files')
+    # Index-build options (passed through to cmd_index)
+    index_files_parser.add_argument('--k1', '-k', type=float, default=1.5,
+                                    help='BM25 k1 parameter (default: 1.5)')
+    index_files_parser.add_argument('--b', type=float, default=0.75,
+                                    help='BM25 b parameter (default: 0.75)')
+    index_files_parser.add_argument('--no-compress', action='store_true',
+                                    help='Do not gzip-compress the index')
+    index_files_parser.add_argument('--no-stemming', action='store_true',
+                                    help='Disable Porter stemming')
+    index_files_parser.add_argument('--no-symspell', action='store_true',
+                                    help='Skip building SymSpell index (and remove any existing one)')
+    index_files_parser.add_argument('--no-ngram', action='store_true',
+                                    help='Skip building n-gram index (and remove any existing one)')
+    index_files_parser.add_argument('--no-suggestions', action='store_true',
+                                    help='Skip building content suggestion index (and remove any existing one)')
+    index_files_parser.add_argument('--suggest-max-words', type=int, default=3,
+                                    help='Maximum words per suggestion phrase (default: 3)')
+    index_files_parser.add_argument('--chunks', action='store_true',
+                                    help='Index heading sections as separate documents')
+    index_files_parser.add_argument('--max-body-chars', type=int, default=200000,
+                                    help='Max body characters per document (default: 200000)')
+    index_files_parser.add_argument('--no-url-filter', action='store_true',
+                                    help='Do not skip genindex/search-style URLs')
     index_files_parser.set_defaults(func=cmd_index_files)
 
 
@@ -231,6 +264,12 @@ def _add_search_all_parser(subparsers):
                                    help='Suppress loading messages')
     search_all_parser.add_argument('--no-color', action='store_true',
                                    help='Disable colored output')
+    search_all_parser.add_argument('--symspell', action='store_true', default=False,
+                                   help='Enable SymSpell suggestions (default: off for multi-site)')
+    search_all_parser.add_argument('--ngram', action='store_true', default=False,
+                                   help='Enable n-gram prefix/substring search (default: off for multi-site)')
+    search_all_parser.add_argument('--synonyms', action='store_true', default=False,
+                                   help='Enable synonym expansion (default: off)')
     search_all_parser.set_defaults(func=cmd_search_all)
 
 
@@ -243,6 +282,8 @@ def _add_autocomplete_parser(subparsers):
                             help='Maximum suggestions (default: 10)')
     auto_parser.add_argument('--json', '-j', action='store_true',
                             help='Output as JSON')
+    auto_parser.add_argument('--separate-paths', action='store_true',
+                            help='Use if site was crawled with --separate-paths')
     auto_parser.set_defaults(func=cmd_autocomplete)
 
 

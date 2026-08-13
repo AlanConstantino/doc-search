@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.6.4] - 2026-08-13
+
+### Added
+- **Top-level JSON config** — loaded automatically on every CLI run; `doc_search.json` (cwd, package root, or `~/.doc_search/config.json`) with portable `sites_dir` (`~`, `$VAR`, `%VAR%`, `/` or `\`); `--config`, `DOC_SEARCH_CONFIG` / `DOC_SEARCH_SITES_DIR` overrides; `list` shows active path
+- **`doc_search.example.json`** — portable starter config (`sites_dir: ~/.doc_search/sites`) to copy into place
+
+### Fixed
+- **CLI flag wiring** — `index --no-symspell` / `--no-ngram` / `--no-suggestions` now delete existing side-index files (not just skip rebuild); `search-all --no-color` honored; `serve --all` passes synonym/symspell/ngram flags into multi-site engines; `index-files` accepts index feature flags; `index --parser` warns without `--reparse`; multi-site engine constructor accepts feature kwargs; `search-all` gains `--symspell` / `--ngram` / `--synonyms`; `autocomplete --separate-paths`
+
 ## [2.6.3] - 2026-08-12
 
 ### Fixed

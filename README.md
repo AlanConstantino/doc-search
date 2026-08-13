@@ -150,6 +150,8 @@ Press `Ctrl+C` to stop the server.
 | Variable | Description |
 |----------|-------------|
 | `DOC_SEARCH_NO_EMOJI` | Set to `1`, `true`, or `yes` to use ASCII fallbacks instead of emoji (for systems without emoji fonts) |
+| `DOC_SEARCH_CONFIG` | Path to a JSON config file (overrides default lookup of `./doc_search.json` and `~/.doc_search/config.json`) |
+| `DOC_SEARCH_SITES_DIR` | Override the sites data directory (takes precedence over `sites_dir` in the config file) |
 
 Example:
 ```bash
@@ -221,7 +223,7 @@ python -m doc_search index-files ~/Documents/
 
 ## Data Storage
 
-All data is stored in `~/.doc_search/sites/`:
+By default, all data is stored in `~/.doc_search/sites/`:
 
 ```
 ~/.doc_search/sites/<site-hash>/
@@ -229,6 +231,40 @@ All data is stored in `~/.doc_search/sites/`:
 ├── index.json.gz    # Search index
 └── metadata.json    # Site info
 ```
+
+### Changing the sites directory
+
+Set `sites_dir` in a top-level JSON config file. Prefer portable forms so the same file works on Windows, macOS, and Linux:
+
+```json
+{
+  "sites_dir": "~/.doc_search/sites"
+}
+```
+
+Other portable examples:
+
+```json
+{ "sites_dir": "~/Documents/doc-search/sites" }
+{ "sites_dir": "$HOME/.doc_search/sites" }
+{ "sites_dir": "%USERPROFILE%\.doc_search\sites" }
+```
+
+Path expansion supports `~`, `$VAR` / `${VAR}`, `%VAR%`, and both `/` and `\` separators.
+
+The CLI **loads this config automatically on every run** — no extra flags needed.
+
+Config file lookup (first existing file wins):
+
+1. `--config PATH` (CLI flag)
+2. `DOC_SEARCH_CONFIG` environment variable
+3. `./doc_search.json` (current working directory)
+4. `doc_search.json` next to the installed/package directory (project root)
+5. `~/.doc_search/config.json` (user-global; `~` is your home on every OS)
+
+You can also set `DOC_SEARCH_SITES_DIR` to override just the directory (takes precedence over the config file).
+
+A starter file is included at the repo root as [`doc_search.example.json`](doc_search.example.json). Copy it to `doc_search.json` (cwd or project root) or `~/.doc_search/config.json`.
 
 ## SSL Certificate Verification
 

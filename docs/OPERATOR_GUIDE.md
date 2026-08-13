@@ -158,7 +158,7 @@ python -m doc_search crawl https://docs.example.com --fresh
 
 ## Data Location
 
-All data is stored in `~/.doc_search/sites/`:
+By default, all data is stored in `~/.doc_search/sites/`:
 
 ```
 ~/.doc_search/sites/<site-hash>/
@@ -167,6 +167,39 @@ All data is stored in `~/.doc_search/sites/`:
 ├── metadata.json    # Site info and crawl stats
 └── crawl_state.json # Resume state for interrupted crawls
 ```
+
+### Custom sites directory
+
+Point storage somewhere else with a top-level JSON config. Use portable path forms:
+
+```json
+{
+  "sites_dir": "~/.doc_search/sites"
+}
+```
+
+```json
+{ "sites_dir": "~/Documents/doc-search/sites" }
+{ "sites_dir": "$HOME/search-data/sites" }
+{ "sites_dir": "%USERPROFILE%\search-data\sites" }
+```
+
+`~`, `$VAR` / `${VAR}`, `%VAR%`, and both `/` and `\` work on Windows, macOS, and Linux.
+
+The tool loads the config automatically on every command (no flag required).
+
+Lookup order (first existing file wins):
+
+1. `python -m doc_search --config PATH ...`
+2. `DOC_SEARCH_CONFIG` environment variable (path to a JSON file)
+3. `./doc_search.json` in the current working directory
+4. `doc_search.json` next to the package / project root
+5. `~/.doc_search/config.json` (`~` = user home on every OS)
+
+`DOC_SEARCH_SITES_DIR` overrides just the directory and beats the config file.
+`python -m doc_search list` prints the active sites directory and loaded config path.
+
+A starter file lives at [`doc_search.example.json`](../doc_search.example.json); copy it to `doc_search.json` or `~/.doc_search/config.json`.
 
 ## Troubleshooting
 

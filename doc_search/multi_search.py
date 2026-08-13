@@ -18,7 +18,7 @@ def discover_sites(data_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
     Discover all indexed sites in the data directory.
     
     Args:
-        data_dir: Directory containing site folders (default: ~/.doc_search/sites/)
+        data_dir: Directory containing site folders (default: from config / ~/.doc_search/sites/)
         
     Returns:
         List of dicts with 'path', 'url', 'name', 'index_path' keys
@@ -116,8 +116,15 @@ class MultiSiteSearchEngine:
         self,
         sites: Optional[List[Dict[str, Any]]] = None,
         data_dir: Optional[Path] = None,
-        site_filters: Optional[List[str]] = None
+        site_filters: Optional[List[str]] = None,
+        enable_spellcheck: bool = True,
+        enable_facets: bool = False,
+        enable_synonyms: bool = False,
+        enable_symspell: bool = False,
+        enable_ngram: bool = False,
+        synonym_groups=None,
     ):
+
         """
         Initialize multi-site search engine.
         
@@ -134,6 +141,14 @@ class MultiSiteSearchEngine:
         
         self._site_info = sites
         self._engines: Dict[str, SearchEngine] = {}
+        self._engine_kwargs = {
+            'enable_spellcheck': enable_spellcheck,
+            'enable_facets': enable_facets,
+            'enable_synonyms': enable_synonyms,
+            'enable_symspell': enable_symspell,
+            'enable_ngram': enable_ngram,
+            'synonym_groups': synonym_groups,
+        }
     
     @property
     def site_count(self) -> int:
@@ -151,11 +166,7 @@ class MultiSiteSearchEngine:
         if key not in self._engines:
             self._engines[key] = EnhancedSearchEngine.load(
                 site['index_path'],
-                enable_spellcheck=True,
-                enable_facets=False,
-                enable_synonyms=False,
-                enable_symspell=False,
-                enable_ngram=False,
+                **self._engine_kwargs,
             )
         return self._engines[key]
     

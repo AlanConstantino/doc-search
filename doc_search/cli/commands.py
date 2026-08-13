@@ -35,12 +35,50 @@ from ..utils import (
     Colors, style_success, style_error, style_info, style_title, style_url,
     emoji as _e,
 )
+from ..config import get_sites_dir, get_loaded_config_path, apply_runtime_config, reload_config
 from .. import __version__
 
 
+# Default data directory (from doc_search.json / env / ~/.doc_search/sites).
+# Mutable so tests can patch it; call refresh_default_data_dir() after config changes.
+DEFAULT_DATA_DIR = get_sites_dir()
 
-# Default data directory
-DEFAULT_DATA_DIR = Path.home() / '.doc_search' / 'sites'
+
+
+def _side_index_paths(site_dir: Path, stem: str):
+    """Candidate paths for a side index (fuzzy / ngram / suggestions)."""
+    return [
+        site_dir / f'{stem}.json.gz',
+        site_dir / f'{stem}.json',
+        site_dir / f'{stem}.pkl.gz',
+        site_dir / f'{stem}.pkl',
+    ]
+
+
+def _remove_side_indexes(site_dir: Path, stem: str, quiet: bool = False) -> int:
+    """Delete existing side-index files for ``stem``. Returns count removed."""
+    removed = 0
+    for path in _side_index_paths(site_dir, stem):
+        if path.exists() and path.is_file():
+            try:
+                path.unlink()
+                removed += 1
+                if not quiet:
+                    print(f"Removed stale side index: {path.name}")
+            except OSError as e:
+                if not quiet:
+                    print(style_error(f"Could not remove {path}: {e}"))
+    return removed
+
+
+def refresh_default_data_dir(config_path=None) -> Path:
+    """Reload config and refresh DEFAULT_DATA_DIR (and return the new path).
+
+    Prefer going through the CLI entrypoint, which calls this automatically.
+    """
+    global DEFAULT_DATA_DIR
+    DEFAULT_DATA_DIR = apply_runtime_config(config_path=config_path)
+    return DEFAULT_DATA_DIR
 
 
 def get_site_dir(url_or_path: str, include_path: bool = False) -> Path:
@@ -230,6 +268,11 @@ def cmd_index(args):
     parser = getattr(args, 'parser', 'dom')
     full_rebuild = getattr(args, 'full', False)
     reparse = getattr(args, 'reparse', False)
+    if not args.quiet and not reparse and getattr(args, 'parser', 'dom') != 'dom':
+        print(style_info(
+            f"Note: --parser={args.parser} has no effect without --reparse "
+            f"(using crawl-time text)."
+        ))
     index_chunks = getattr(args, 'chunks', False)
     max_body_chars = getattr(args, 'max_body_chars', 200000)
     # None → indexer default skip list; empty tuple disables filtering
@@ -294,38 +337,48 @@ def cmd_index(args):
     print(f"\nIndex saved to: {index_path}")
     print(f"Index size: {format_size(index_path.stat().st_size)}")
     
-    # Build and save fuzzy search index (SymSpell)
+    # Side indexes: build when enabled; remove stale artifacts when disabled so
+    # later search/serve cannot reload an old fuzzy/ngram/suggestions file.
     no_symspell = getattr(args, 'no_symspell', False)
-    if not no_symspell:
+    if no_symspell:
+        _remove_side_indexes(site_dir, 'fuzzy', quiet=args.quiet)
         if not args.quiet:
-            print(f"\nBuilding SymSpell index...")
-        
+            print("\nSymSpell index: skipped (--no-symspell)")
+    else:
+        if not args.quiet:
+            print("\nBuilding SymSpell index...")
+
         symspell = index.build_symspell(max_distance=2)
         fuzzy_path = symspell.save(str(site_dir / 'fuzzy'), compress=not args.no_compress)
-        
+
         stats = symspell.get_stats()
         print(f"SymSpell index saved to: {fuzzy_path}")
         print(f"SymSpell index: {stats['word_count']} words, {stats['unique_deletes']} deletion entries")
-    
-    # Build and save n-gram index for prefix/substring search
+
     no_ngram = getattr(args, 'no_ngram', False)
-    if not no_ngram:
+    if no_ngram:
+        _remove_side_indexes(site_dir, 'ngram', quiet=args.quiet)
         if not args.quiet:
-            print(f"\nBuilding n-gram index...")
-        
+            print("\nN-gram index: skipped (--no-ngram)")
+    else:
+        if not args.quiet:
+            print("\nBuilding n-gram index...")
+
         ngram_index = index.build_ngram_index(n=3)
         ngram_path = ngram_index.save(str(site_dir / 'ngram'), compress=not args.no_compress)
-        
+
         stats = ngram_index.get_stats()
         print(f"N-gram index saved to: {ngram_path}")
         print(f"N-gram index: {stats['term_count']} terms, {stats['ngram_count']} trigrams")
-    
-    # Build and save title suggestion index
-    # Build content-based suggestion index
+
     no_suggestions = getattr(args, 'no_suggestions', False)
-    if not no_suggestions:
+    if no_suggestions:
+        _remove_side_indexes(site_dir, 'suggestions', quiet=args.quiet)
         if not args.quiet:
-            print(f"\nBuilding content suggestion index...")
+            print("\nContent suggestions: skipped (--no-suggestions)")
+    else:
+        if not args.quiet:
+            print("\nBuilding content suggestion index...")
 
         from ..content_suggester import ContentSuggester
         suggest_max_words = getattr(args, 'suggest_max_words', 3)
@@ -340,7 +393,7 @@ def cmd_index(args):
         print(f"Content suggestions saved to: {suggest_path}")
         print(f"Content suggestions: {stats['total_entries']} entries "
               f"({stats['single_terms']} terms, {stats['phrases']} phrases)")
-    
+
     return 0
 
 
@@ -890,16 +943,28 @@ def cmd_list(args):
     """List all crawled sites."""
     if not DEFAULT_DATA_DIR.exists():
         print("No sites crawled yet.")
+        print(f"Sites directory: {DEFAULT_DATA_DIR}")
+        cfg = get_loaded_config_path()
+        if cfg:
+            print(f"Config: {cfg}")
         return 0
-    
+
     sites = list(DEFAULT_DATA_DIR.iterdir())
     if not sites:
         print("No sites crawled yet.")
+        print(f"Sites directory: {DEFAULT_DATA_DIR}")
+        cfg = get_loaded_config_path()
+        if cfg:
+            print(f"Config: {cfg}")
         return 0
-    
+
     refresh = getattr(args, 'refresh', False)
-    
+
     print(f"Crawled sites ({len(sites)}):")
+    print(f"Sites directory: {DEFAULT_DATA_DIR}")
+    cfg = get_loaded_config_path()
+    if cfg:
+        print(f"Config: {cfg}")
     print()
     
     for site_dir in sorted(sites):
@@ -1397,22 +1462,27 @@ def cmd_index_files(args):
     print(f"\nBuilding search index...")
     
     import argparse
+    # Plumb index feature flags from index-files CLI (defaults match prior behavior).
     index_args = argparse.Namespace(
         site_dir=str(site_dir),
-        k1=1.5,
-        b=0.75,
-        no_compress=False,
-        no_stemming=False,
-        no_symspell=False,
-        no_ngram=False,
-        no_suggestions=False,
-        suggest_max_words=3,
+        k1=getattr(args, 'k1', 1.5),
+        b=getattr(args, 'b', 0.75),
+        no_compress=getattr(args, 'no_compress', False),
+        no_stemming=getattr(args, 'no_stemming', False),
+        no_symspell=getattr(args, 'no_symspell', False),
+        no_ngram=getattr(args, 'no_ngram', False),
+        no_suggestions=getattr(args, 'no_suggestions', False),
+        suggest_max_words=getattr(args, 'suggest_max_words', 3),
         separate_paths=False,
-        parser='dom',
+        parser=getattr(args, 'parser', 'dom'),
+        reparse=getattr(args, 'reparse', False),
+        chunks=getattr(args, 'chunks', False),
+        max_body_chars=getattr(args, 'max_body_chars', 200000),
+        no_url_filter=getattr(args, 'no_url_filter', False),
         full=True,  # Always full rebuild for file indexing
         quiet=quiet,
     )
-    
+
     result = cmd_index(index_args)
     if result != 0:
         print(style_error("Failed to build search index"))
@@ -1426,8 +1496,13 @@ def cmd_search_all(args):
     from ..multi_search import MultiSiteSearchEngine
     
     site_filters = getattr(args, 'sites', None)
-    
-    engine = MultiSiteSearchEngine(site_filters=site_filters)
+
+    engine = MultiSiteSearchEngine(
+        site_filters=site_filters,
+        enable_symspell=getattr(args, 'symspell', False),
+        enable_ngram=getattr(args, 'ngram', False),
+        enable_synonyms=getattr(args, 'synonyms', False),
+    )
     
     if engine.site_count == 0:
         print(style_error("Error: No indexed sites found."))
@@ -1435,7 +1510,8 @@ def cmd_search_all(args):
         return 1
     
     if not args.quiet and not args.json:
-        print(style_info(f"Searching across {engine.site_count} site(s)..."))
+        msg = f"Searching across {engine.site_count} site(s)..."
+        print(style_info(msg) if not getattr(args, 'no_color', False) else msg)
     
     # Time the search
     start_time = time.perf_counter()
@@ -1463,20 +1539,31 @@ def cmd_search_all(args):
         }
         print(json.dumps(output, indent=2))
     else:
+        use_color = not getattr(args, 'no_color', False)
+
+        def _title(text):
+            return style_title(text) if use_color else text
+
+        def _url(text):
+            return style_url(text) if use_color else text
+
+        def _info(text):
+            return style_info(text) if use_color else text
+
         print()
         if results:
             for i, r in enumerate(results, 1):
                 site_label = r.get('site', 'unknown')
                 score_str = f" [{r['score']:.4f}]" if args.scores else ""
-                print(f"  {i}. {style_title(r.get('title', 'Untitled'))}{score_str}")
-                print(f"     {style_url(r['url'])}")
-                print(f"     {_e('globe')} {style_info(site_label)}")
+                print(f"  {i}. {_title(r.get('title', 'Untitled'))}{score_str}")
+                print(f"     {_url(r['url'])}")
+                print(f"     {_e('globe')} {_info(site_label)}")
                 if r.get('snippet'):
                     print(f"     {r['snippet']}")
                 print()
-            print(style_info(f"  {len(results)} result(s) across {engine.site_count} site(s) ({elapsed_ms:.1f}ms)"))
+            print(_info(f"  {len(results)} result(s) across {engine.site_count} site(s) ({elapsed_ms:.1f}ms)"))
         else:
-            print(style_info("  No results found."))
+            print(_info("  No results found."))
         print()
     
     return 0
@@ -1496,7 +1583,25 @@ def cmd_serve(args):
         from ..multi_search import MultiSiteSearchEngine
         
         site_filters = getattr(args, 'sites', None)
-        multi_engine = MultiSiteSearchEngine(site_filters=site_filters)
+        custom_synonyms = None
+        synonyms_file = getattr(args, 'synonyms_file', None)
+        if synonyms_file:
+            try:
+                from ..synonyms import load_synonyms_file
+                custom_synonyms = load_synonyms_file(synonyms_file)
+                print(style_info(
+                    f"Loaded {len(custom_synonyms)} synonym groups from {synonyms_file}"
+                ))
+            except (IOError, json.JSONDecodeError) as e:
+                print(style_error(f"Error loading synonyms file: {e}"))
+                return 1
+        multi_engine = MultiSiteSearchEngine(
+            site_filters=site_filters,
+            enable_synonyms=enable_synonyms or bool(custom_synonyms),
+            enable_symspell=not getattr(args, 'no_symspell', False),
+            enable_ngram=not getattr(args, 'no_ngram', False),
+            synonym_groups=custom_synonyms,
+        )
         
         if multi_engine.site_count == 0:
             print(style_error("Error: No indexed sites found."))

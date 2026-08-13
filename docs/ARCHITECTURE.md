@@ -209,6 +209,10 @@ doc_search/
 
 ## Storage Layout
 
+The sites root defaults to `~/.doc_search/sites/` and is configurable via
+top-level `doc_search.json` (`sites_dir`) or `DOC_SEARCH_SITES_DIR`
+(see `doc_search.config.get_sites_dir`).
+
 ```
 ~/.doc_search/
 └── sites/

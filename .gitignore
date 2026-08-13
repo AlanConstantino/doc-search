@@ -46,3 +46,6 @@ Thumbs.db
 test_data/
 *.json.gz
 .venv
+
+# Local config (copy from doc_search.example.json)
+doc_search.json
