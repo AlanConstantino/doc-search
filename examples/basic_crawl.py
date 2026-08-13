@@ -17,8 +17,8 @@ import json
 from pathlib import Path
 
 # Import from doc_search package
-from doc_search.crawler import Crawler
-from doc_search.utils import site_hash
+from doc_search.crawl import Crawler
+from doc_search.core import site_hash
 
 
 def main():

@@ -20,10 +20,10 @@ import shutil
 from pathlib import Path
 
 # Import from doc_search package
-from doc_search.crawler import Crawler
-from doc_search.indexer import BM25Index
-from doc_search.searcher import SearchEngine, EnhancedSearchEngine
-from doc_search.utils import format_size, format_duration
+from doc_search.crawl import Crawler
+from doc_search.index import BM25Index
+from doc_search.search import SearchEngine, EnhancedSearchEngine
+from doc_search.core import format_size, format_duration
 
 
 def crawl_site(base_url: str, data_dir: Path, max_pages: int = 10) -> dict:

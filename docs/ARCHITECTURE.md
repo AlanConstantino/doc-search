@@ -27,37 +27,57 @@ doc-search is a command-line tool for building and searching local indexes of do
 
 ## Module Organization
 
+Packages are layered. **Dependencies only point down.** `app` may import anything below it; `core` imports nothing above it.
+
 ```
 doc_search/
-├── __init__.py           # Package info, version
-├── __main__.py           # Entry point (python -m doc_search)
+├── __init__.py              # version
+├── __main__.py              # python -m doc_search → app.cli.main
 │
-├── cli/                  # Command-line interface
-│   ├── __init__.py       # CLI entry point (main function)
-│   ├── commands.py       # Command implementations
-│   └── parsers.py        # Argument parsing
+├── core/                    # foundation (no upward imports)
+│   ├── constants.py         # tunables (BM25/rerank/crawl)
+│   ├── config.py            # sites_dir / JSON config
+│   ├── paths.py             # PACKAGE_ROOT, REPO_ROOT, VENDOR_DIR
+│   ├── http.py              # SSL context, Basic Auth header
+│   ├── urls.py              # normalize_url, site_hash, …
+│   ├── text.py              # tokenize, STOP_WORDS, format_size
+│   ├── stemmer.py           # Porter stemmer
+│   └── data/                # bundled colors.json, synonyms.json
 │
-├── crawler.py            # Web crawler engine
-├── crawl_state.py        # Crawl state persistence
-├── rate_limiter.py       # Request rate limiting
-├── robots.py             # robots.txt parsing
-├── parser.py             # HTML text extraction
-├── pdf_extractor.py      # PDF text extraction
+├── extract/                 # HTML + document extractors (→ core)
+│   ├── html.py              # streaming HTML parser
+│   ├── dom.py               # DOM parser / boilerplate strip
+│   ├── pdf.py / word.py / excel.py / pptx.py
+│   └── registry.py          # ExtractorRegistry — crawl never names PDFExtractor
 │
-├── indexer.py            # BM25 index builder
-├── stemmer.py            # Porter stemmer
+├── crawl/                   # fetch / filter / persist (→ extract, core)
+│   ├── crawler.py           # orchestrator
+│   ├── fetcher.py, url_filter.py, processor.py
+│   ├── state.py, robots.py, rate_limiter.py
 │
-├── searcher.py           # Search engine
-├── searcher_utils.py     # Result formatting/highlighting
-├── spellcheck.py         # "Did you mean..." suggestions
-├── content_suggester.py  # Content-based autocomplete
-├── facets.py             # Category filtering
-├── synonyms.py           # Query expansion
+├── index/                   # BM25 store only (→ extract, core)
+│   └── store.py             # BM25Index, find_index_path
 │
-├── server.py             # Web UI server
-├── utils.py              # Shared utilities
-└── constants.py          # Configuration values
+├── search/                  # engines + optional features (→ index, core)
+│   ├── engine.py            # SearchEngine, EnhancedSearchEngine
+│   ├── snippets.py          # highlight / snippet extract (no ANSI)
+│   ├── multi.py             # MultiSiteSearchEngine
+│   └── features/            # spellcheck, synonyms, ngram, facets,
+│                            # suggester, reranker, clicks, side_indexes
+│
+└── app/                     # CLI + web UI (→ search / crawl / index)
+    ├── terminal.py          # ANSI colors / emoji (CLI only)
+    ├── server.py            # HTTP UI
+    ├── static/              # styles.css, search.js
+    └── cli/
+        ├── __init__.py      # main()
+        ├── parsers.py
+        ├── formatters.py    # format_results (ANSI)
+        └── commands.py      # cmd_* implementations
 ```
+
+Compatibility shims at the old import paths (`doc_search.utils`, `doc_search.searcher`,
+`doc_search.crawler`, …) re-export the new locations so existing scripts keep working.
 
 ## Data Flow
 
@@ -90,12 +110,12 @@ doc_search/
 ```
 
 **Key Components:**
-- **Crawler** (`crawler.py`): Orchestrates the crawl, manages URL queue
-- **CrawlState** (`crawl_state.py`): Tracks visited URLs, enables resume
-- **RateLimiter** (`rate_limiter.py`): Enforces delays between requests
-- **RobotsChecker** (`robots.py`): Respects robots.txt rules
-- **HTMLTextExtractor** (`parser.py`): Extracts text from HTML
-- **PDFExtractor** (`pdf_extractor.py`): Extracts text from PDFs
+- **Crawler** (`crawl/crawler.py`): Orchestrates the crawl, manages URL queue
+- **CrawlState** (`crawl/state.py`): Tracks visited URLs, enables resume
+- **RateLimiter** (`crawl/rate_limiter.py`): Enforces delays between requests
+- **RobotsChecker** (`crawl/robots.py`): Respects robots.txt rules
+- **HTMLTextExtractor** (`extract/html.py`): Extracts text from HTML
+- **PDFExtractor** (`extract/pdf.py`): Extracts text from PDFs
 
 ### Stage 2: Indexing
 
@@ -120,9 +140,9 @@ doc_search/
 ```
 
 **Key Components:**
-- **BM25Index** (`indexer.py`): Builds inverted index with BM25 statistics
-- **tokenize()** (`utils.py`): Splits text into searchable tokens
-- **stem()** (`stemmer.py`): Reduces words to root forms
+- **BM25Index** (`index/store.py`): Builds inverted index with BM25 statistics
+- **tokenize()** (`core/text.py` / `core/urls.py`): Splits text into searchable tokens
+- **stem()** (`core/stemmer.py`): Reduces words to root forms
 
 ### Stage 3: Searching
 
@@ -163,49 +183,62 @@ doc_search/
 ```
 
 **Key Components:**
-- **SearchEngine** (`searcher.py`): Query processing and result ranking
-- **SpellChecker** (`spellcheck.py`): "Did you mean..." suggestions
-- **Autocomplete** (`content_suggester.py`): Content-based type-ahead
-- **Facets** (`facets.py`): URL path categorization
-- **Synonyms** (`synonyms.py`): Query expansion
-- **searcher_utils** (`searcher_utils.py`): Result formatting
+- **SearchEngine** (`search/engine.py`): Query processing and result ranking
+- **SpellChecker** (`search/features/spellcheck.py`): "Did you mean..." suggestions
+- **Autocomplete** (`search/features/suggester.py`): Content-based type-ahead
+- **Facets** (`search/features/facets.py`): URL path categorization
+- **Synonyms** (`search/features/synonyms.py`): Query expansion
+- **searcher_utils** (`search/snippets.py`): Result formatting
 
 ## Module Dependencies
 
+Hard rule: **arrows only point down.**
+
 ```
-                           ┌─────────────────┐
-                           │    constants    │
-                           └────────┬────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-              ▼                     ▼                     ▼
-       ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-       │    utils    │       │   stemmer   │       │  spellcheck │
-       └──────┬──────┘       └──────┬──────┘       └─────────────┘
-              │                     │
-    ┌─────────┼─────────┬───────────┼───────────┐
-    │         │         │           │           │
-    ▼         ▼         ▼           ▼           ▼
-┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│ parser │ │ robots │ │indexer │ │searcher│ │ server │
-└────────┘ └────────┘ └───┬────┘ └───┬────┘ └───┬────┘
-    │                     │          │          │
-    └─────────┬───────────┘          │          │
-              ▼                      │          │
-         ┌─────────┐                 │          │
-         │ crawler │                 │          │
-         └────┬────┘                 │          │
-              │                      │          │
-              └──────────────────────┴──────────┘
-                                     │
-                                     ▼
-                              ┌─────────────┐
-                              │    cli/     │
-                              │  commands   │
-                              │  parsers    │
-                              └─────────────┘
+                         ┌─────────────┐
+                         │    core     │
+                         │ constants   │
+                         │ config urls │
+                         │ text/http   │
+                         └──────┬──────┘
+                                │
+                 ┌──────────────┼──────────────┐
+                 ▼              ▼              │
+          ┌────────────┐  ┌──────────┐         │
+          │  extract   │  │  (used   │         │
+          │ html/pdf/… │  │   by     │         │
+          │ registry   │  │  all)    │         │
+          └─────┬──────┘  └──────────┘         │
+                │                              │
+        ┌───────┴────────┐                     │
+        ▼                ▼                     │
+ ┌────────────┐   ┌────────────┐               │
+ │   crawl    │   │   index    │◄──────────────┘
+ │  crawler   │   │ BM25Index  │
+ └────────────┘   └─────┬──────┘
+                        │
+                        ▼
+                 ┌────────────┐
+                 │   search   │
+                 │ engine +   │
+                 │ features/  │
+                 └─────┬──────┘
+                       │
+                       ▼
+                 ┌────────────┐
+                 │    app     │
+                 │  cli/      │
+                 │  server    │
+                 │  terminal  │
+                 └────────────┘
 ```
+
+There is **no** `commands ↔ multi_search` cycle: multi-site search lives in
+`search.multi` and resolves `sites_dir` via `core.config`. CLI commands import
+it; it does not import CLI.
+
+Sidecar indexes (SymSpell / n-gram) are built by `search.features.side_indexes`,
+not by `BM25Index`, so the index layer never imports search.
 
 ## Storage Layout
 
@@ -1036,24 +1069,24 @@ The following table summarizes which modules are involved at each pipeline stage
 
 | Stage | Primary Module | Supporting Modules |
 |-------|---------------|-------------------|
-| **URL Normalization** | `utils.py` | - |
-| **Robots Check** | `robots.py` | `utils.py` |
-| **Rate Limiting** | `rate_limiter.py` | - |
-| **HTTP Fetch** | `crawler.py` | `utils.py` |
-| **HTML Parse** | `parser.py` | - |
-| **PDF Extract** | `pdf_extractor.py` | - |
-| **State Management** | `crawl_state.py` | - |
-| **Tokenization** | `utils.py` | `stemmer.py` |
-| **Index Build** | `indexer.py` | `utils.py`, `stemmer.py` |
-| **Query Parse** | `searcher.py` | `utils.py` |
-| **BM25 Search** | `indexer.py` | - |
-| **Spellcheck** | `spellcheck.py` | - |
-| **Autocomplete** | `content_suggester.py` | - |
-| **Synonyms** | `synonyms.py` | - |
-| **Facets** | `facets.py` | - |
-| **Snippets** | `searcher_utils.py` | - |
-| **CLI Interface** | `cli/` | All above |
-| **Web Interface** | `server.py` | `searcher.py` |
+| **URL Normalization** | `core/text.py` / `core/urls.py` | - |
+| **Robots Check** | `crawl/robots.py` | `core/text.py` / `core/urls.py` |
+| **Rate Limiting** | `crawl/rate_limiter.py` | - |
+| **HTTP Fetch** | `crawl/crawler.py` | `core/text.py` / `core/urls.py` |
+| **HTML Parse** | `extract/html.py` | - |
+| **PDF Extract** | `extract/pdf.py` | - |
+| **State Management** | `crawl/state.py` | - |
+| **Tokenization** | `core/text.py` / `core/urls.py` | `core/stemmer.py` |
+| **Index Build** | `index/store.py` | `core/text.py` / `core/urls.py`, `core/stemmer.py` |
+| **Query Parse** | `search/engine.py` | `core/text.py` / `core/urls.py` |
+| **BM25 Search** | `index/store.py` | - |
+| **Spellcheck** | `search/features/spellcheck.py` | - |
+| **Autocomplete** | `search/features/suggester.py` | - |
+| **Synonyms** | `search/features/synonyms.py` | - |
+| **Facets** | `search/features/facets.py` | - |
+| **Snippets** | `search/snippets.py` | - |
+| **CLI Interface** | `app/cli/` | All above |
+| **Web Interface** | `app/server.py` | `search/engine.py` |
 
 ## Extending doc-search
 
@@ -1063,11 +1096,12 @@ The following table summarizes which modules are involved at each pipeline stage
 3. Register in `cli/__init__.py`
 
 ### Adding a New Search Feature
-1. Create module in `doc_search/`
-2. Import in `searcher.py`
-3. Integrate with search pipeline
+1. Add a module under `doc_search/search/features/`.
+2. Register it from `EnhancedSearchEngine` in `search/engine.py` (or a
+   feature list passed into the engine). Do **not** import it from `app`.
+3. Never import `app` or `crawl` from a feature module.
 
 ### Custom Tokenization
-Edit `utils.py`:
+Edit `doc_search/core/text.py`:
 - Modify `STOP_WORDS` for different languages
 - Adjust regex in `tokenize()` for different word patterns

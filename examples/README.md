@@ -77,7 +77,7 @@ python examples/full_pipeline.py
 ### Crawler
 
 ```python
-from doc_search.crawler import Crawler
+from doc_search.crawl import Crawler
 from pathlib import Path
 
 crawler = Crawler(
@@ -97,7 +97,7 @@ stats = crawler.crawl(resume=True)  # resume=False to start fresh
 ### BM25Index
 
 ```python
-from doc_search.indexer import BM25Index
+from doc_search.index import BM25Index
 from pathlib import Path
 
 # Build from crawled pages
@@ -124,7 +124,7 @@ results = index.search("query terms", top_k=10)
 ### SearchEngine
 
 ```python
-from doc_search.searcher import SearchEngine, EnhancedSearchEngine
+from doc_search.search import SearchEngine, EnhancedSearchEngine
 
 # Load from index file
 engine = SearchEngine.load(Path("site_dir/index.json.gz"))
@@ -146,7 +146,7 @@ for r in results:
 ### EnhancedSearchEngine
 
 ```python
-from doc_search.searcher import EnhancedSearchEngine
+from doc_search.search import EnhancedSearchEngine
 
 # Load with enhanced features
 engine = EnhancedSearchEngine.load(

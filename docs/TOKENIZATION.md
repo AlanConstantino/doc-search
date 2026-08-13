@@ -97,7 +97,7 @@ When enabled, alphabetic words are reduced to their root form using the **Porter
 
 ## Customization
 
-To modify tokenization behavior, edit `doc_search/utils.py`:
+To modify tokenization behavior, edit `doc_search/core/text.py`:
 
 - **Add/remove stop words:** Edit the `STOP_WORDS` frozenset
 - **Change word pattern:** Modify the scanner in `_raw_tokens()`
@@ -110,8 +110,8 @@ python -m doc_search index <url> --full
 ## Technical Details
 
 ### Code Location
-- Tokenization: `doc_search/utils.py` → `tokenize()`
-- Stop words: `doc_search/utils.py` → `STOP_WORDS`
+- Tokenization: `doc_search/core/text.py` → `tokenize()`
+- Stop words: `doc_search/core/text.py` → `STOP_WORDS`
 - Stemming: `doc_search/stemmer.py` → `stem()`
 
 ### Performance

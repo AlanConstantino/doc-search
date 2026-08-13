@@ -1,0 +1,14 @@
+{
+  "_comment": "CLI color theme. Values are hex colors. Append '+bold', '+underline', '+dim', or '+italic' for styles (e.g. '#FF5733+bold'). Edit ~/.doc_search/colors.json to override.",
+  "url": "#00D7FF+underline",
+  "title": "#FFFFFF+bold",
+  "score": "#FFD700",
+  "number": "#FF87FF+bold",
+  "highlight": "#00CED1+bold",
+  "snippet": "#808080",
+  "info": "#666666",
+  "success": "#00CC00",
+  "error": "#FF3333",
+  "warning": "#FFD700",
+  "prompt": "#00CC00"
+}

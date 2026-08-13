@@ -18,8 +18,8 @@ import tempfile
 from pathlib import Path
 
 # Import from doc_search package
-from doc_search.indexer import BM25Index
-from doc_search.utils import site_hash, format_size
+from doc_search.index import BM25Index
+from doc_search.core import site_hash, format_size
 
 
 def demo_manual_indexing():

@@ -310,9 +310,9 @@ A `--verify-ssl` flag may be added in the future for users who need strict certi
 ## Using as a Library
 
 ```python
-from doc_search.crawler import Crawler
-from doc_search.indexer import BM25Index
-from doc_search.searcher import EnhancedSearchEngine
+from doc_search.crawl import Crawler
+from doc_search.index import BM25Index
+from doc_search.search import EnhancedSearchEngine
 
 # Crawl
 crawler = Crawler(base_url='https://docs.example.com', data_dir='./data')
@@ -331,12 +331,16 @@ See [docs/API.md](docs/API.md) for comprehensive library documentation.
 
 ## Development
 
-```bash
-# Run tests (1335 tests)
-python -m pytest
+The package is layered so dependencies only point down:
 
-# Run specific test file
-python -m pytest tests/test_crawler.py
+`app → search → index → extract → core` (crawl sits beside index, also on extract/core).
+
+```bash
+# Run tests (from the repo root)
+PYTHONPATH=. python -m pytest
+
+# Run a specific test file
+PYTHONPATH=. python -m pytest tests/test_crawler.py
 ```
 
 ## Limitations

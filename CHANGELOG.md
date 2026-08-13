@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-08-13
+
+### Changed
+- **Layered package architecture.** Code now lives in `core` / `extract` / `crawl` / `index` / `search` / `app` with a one-way dependency rule (nothing imports upward). The old flat import paths (`doc_search.utils`, `doc_search.searcher`, `doc_search.crawler`, …) remain as compatibility shims.
+- Split `utils.py` into `core/http.py`, `core/urls.py`, `core/text.py`, and `app/terminal.py` so crawl/index no longer depend on CLI colors.
+- Crawler talks to document extractors through `extract.registry.ExtractorRegistry` instead of importing PDF/Word/Excel/PPTX classes.
+- SymSpell / n-gram sidecar builders moved off `BM25Index` into `search.features.side_indexes`.
+- Multi-site search no longer imports the CLI (`commands ↔ multi_search` cycle is gone).
+- `format_results` (ANSI) lives in `app/cli/formatters.py`; search snippets stay color-free.
+
 ## [Unreleased]
 
 ## [2.6.8] - 2026-08-13

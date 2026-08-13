@@ -1053,6 +1053,8 @@ class MockBM25Index:
         self.k1 = k1
         self.b = b
         self.stem = stem
+        self.content_hashes = {}
+        self.documents = {}
         self.build_calls: List[Dict[str, Any]] = []
         self.save_calls: List[Dict[str, Any]] = []
         self.symspell_calls: List[Dict[str, Any]] = []
@@ -1063,9 +1065,9 @@ class MockBM25Index:
         """Set the number of documents to return from build_from_pages."""
         self._num_docs_to_return = num
     
-    def build_from_pages(self, pages_dir: Path, verbose: bool = True, parser: str = 'dom') -> int:
+    def build_from_pages(self, pages_dir: Path, verbose: bool = True, parser: str = 'dom', **kwargs) -> int:
         """Return mock document count."""
-        self.build_calls.append({'pages_dir': pages_dir, 'verbose': verbose, 'parser': parser})
+        self.build_calls.append({'pages_dir': pages_dir, 'verbose': verbose, 'parser': parser, **kwargs})
         return self._num_docs_to_return
     
     def build_symspell(self, max_distance: int = 2) -> MockSymSpell:

@@ -22,10 +22,10 @@ import sys
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from doc_search.indexer import BM25Index
-from doc_search.searcher import SearchEngine, EnhancedSearchEngine
-from doc_search.utils import tokenize
-from doc_search.stemmer import stem
+from doc_search.index import BM25Index
+from doc_search.search import SearchEngine, EnhancedSearchEngine
+from doc_search.core import tokenize
+from doc_search.core.stemmer import stem
 
 
 def generate_random_text(words: int = 500) -> str:

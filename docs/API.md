@@ -37,7 +37,7 @@ For library usage, add the package to your Python path or install in development
 ### Basic Search (Existing Index)
 
 ```python
-from doc_search.searcher import SearchEngine
+from doc_search.search import SearchEngine
 
 # Load an existing index
 engine = SearchEngine.load('/path/to/index.json.gz')
@@ -55,9 +55,9 @@ for result in results:
 
 ```python
 from pathlib import Path
-from doc_search.crawler import Crawler
-from doc_search.indexer import BM25Index
-from doc_search.searcher import EnhancedSearchEngine
+from doc_search.crawl import Crawler
+from doc_search.index import BM25Index
+from doc_search.search import EnhancedSearchEngine
 
 # 1. Crawl a documentation site
 crawler = Crawler(
@@ -675,7 +675,7 @@ for page in crawler.get_crawled_pages():
 ### Tokenization
 
 ```python
-from doc_search.utils import tokenize
+from doc_search.core import tokenize
 
 def tokenize(
     text: str,
@@ -704,7 +704,7 @@ Tokenizes text for indexing and search:
 ### URL Utilities
 
 ```python
-from doc_search.utils import normalize_url, get_domain, is_same_domain
+from doc_search.core import normalize_url, get_domain, is_same_domain
 
 # Normalize URL for deduplication
 url = normalize_url('https://Example.COM/path/../page#section')
@@ -722,7 +722,7 @@ is_same_domain('https://example.com/a', 'https://example.com/b')
 ### Terminal Colors
 
 ```python
-from doc_search.utils import Colors, colorize
+from doc_search.app.terminal import Colors, colorize
 
 # Direct color codes
 print(Colors.BOLD + "Bold text" + Colors.RESET)
@@ -731,7 +731,7 @@ print(Colors.BOLD + "Bold text" + Colors.RESET)
 print(colorize("Error!", Colors.RED, Colors.BOLD))
 
 # Convenience functions
-from doc_search.utils import style_title, style_url, style_error
+from doc_search.app.terminal import style_title, style_url, style_error
 print(style_title("My Title"))
 print(style_url("https://example.com"))
 print(style_error("Something went wrong"))
@@ -797,7 +797,7 @@ crawler.crawl()  # Uses ETags and content hashes
 
 ```python
 from flask import Flask, request, jsonify
-from doc_search.searcher import EnhancedSearchEngine
+from doc_search.search import EnhancedSearchEngine
 
 app = Flask(__name__)
 engine = EnhancedSearchEngine.load('./index.json.gz')
@@ -838,7 +838,7 @@ index = BM25Index(stem=False)
 ### Custom Synonyms
 
 ```python
-from doc_search.searcher import EnhancedSearchEngine
+from doc_search.search import EnhancedSearchEngine
 
 # Define custom synonym groups
 synonyms = [
@@ -962,7 +962,7 @@ engine = EnhancedSearchEngine(
      ▼                   ▼               ▼                  ▼
   ┌──────────┐     ┌──────────┐    ┌──────────┐    ┌──────────────────┐
   │CrawlState│     │ tokenize │    │   stem   │    │EnhancedSearchEngine│
-  │RateLimiter│    │(utils.py)│    │(stemmer) │    │                  │
+  │RateLimiter│    │(core)    │    │(stemmer) │    │                  │
   │RobotsCheck│    └──────────┘    └──────────┘    │  ├─SpellChecker  │
   └──────────┘                                      │  ├─Autocomplete  │
                                                     │  ├─FacetIndex    │
